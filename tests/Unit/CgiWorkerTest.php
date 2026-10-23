@@ -246,6 +246,9 @@ PHP);
         // Both the string-form and array-form uploads are registered.
         $GLOBALS['__z_uploaded'] = [$upTmp => true, $upArr => true];
         $GLOBALS['__z_meta_sent'] = false;
+        // Development display (App::displayErrors() on): the handler renders
+        // warnings inline, HTML-escaped. With it off they go to the log (M1).
+        $GLOBALS['__z_display_errors'] = true;
 
         // cgi_worker.php opens its own ob_start() (and a register_shutdown_function
         // that drains it) for the streaming path. Track the buffer level so we can

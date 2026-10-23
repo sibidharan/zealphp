@@ -1,4 +1,4 @@
-<?
+<?php
 ${basename(__FILE__, '.php')} = function () {
     ?>
     <h1>Device Add</h1>
@@ -12,5 +12,5 @@ ${basename(__FILE__, '.php')} = function () {
         <input type="submit" value="Add">
     </form>
     
-    <?
+    <?php
 };

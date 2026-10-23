@@ -329,6 +329,41 @@ class SecurityTest extends TestCase
         $this->assertNotSame($id, $other);
     }
 
+    /**
+     * Targets that pass a naive guard but land on evil.com in a browser:
+     * a scheme whose host parse_url can't read (`https:///evil.com`, or
+     * `https:evil.com` from an http page), and tab/control characters the
+     * browser drops to leave `//evil.com`.
+     */
+    public function testRedirectBlocksBrowserNormalisedOffsiteTargets(): void
+    {
+        $targets = ['https:///evil.com', 'http:////evil.com', 'https:evil.com', 'http:evil.com',
+            "/\t/evil.com", "/\n/evil.com", "\x01//evil.com", "/\x7F/evil.com"];
+        foreach ($targets as $url) {
+            try {
+                $this->makeResponse()->redirect($url);
+                $this->fail('redirect() accepted ' . json_encode($url));
+            } catch (InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testRedirectHostlessSchemeAllowedWhenExternalIsOptedIn(): void
+    {
+        $response = $this->makeResponse();
+        $response->redirect('mailto:team@example.test', 302, true);
+        $this->assertSame(302, \ZealPHP\G::instance()->status);
+    }
+
+    public function testRedirectStillAcceptsSameOriginPaths(): void
+    {
+        foreach (['/dashboard', '/a/b?next=/c#frag', 'relative/path', '?q=1'] as $url) {
+            $this->makeResponse()->redirect($url);
+            $this->addToAssertionCount(1);
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────
     //  Helpers
     // ─────────────────────────────────────────────────────────────

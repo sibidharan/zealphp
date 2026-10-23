@@ -98,6 +98,9 @@ class Dispatcher
 
         $env['ZEALPHP_REQUEST_CONTEXT'] = $ctx;
         $env['ZEALPHP_CWD'] = App::$cwd;
+        // cgi_worker.php shows PHP errors in the page only when the host would
+        // (secure-by-default App::displayErrors(); see the worker's handler).
+        $env['ZEALPHP_CGI_DISPLAY_ERRORS'] = App::displayErrors() ? '1' : '0';
         // Gate the Composer autoloader load in cgi_worker.php. Default off
         // (see App::$cgi_subprocess_autoload docblock — fixes the v0.2.41
         // WordPress wp-cron deadlock by restoring the v0.2.0 zero-overhead
@@ -444,7 +447,7 @@ class Dispatcher
             if ($isPhp) {
                 // PHP target: route through cgi_worker.php for uopz header/cookie captures.
                 $cgiWorker = __DIR__ . '/../cgi_worker.php';
-                $cmd = PHP_BINARY . ' -d display_errors=stderr ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
+                $cmd = PHP_BINARY . ' -d display_errors=stderr -d ' . App::subprocessStrictModeIni() . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
             } else {
                 // Non-PHP file with no explicit interpreter (the `cgiScriptAlias`-only
                 // path): exec the file directly, relying on its `#!` shebang line.
@@ -637,6 +640,7 @@ class Dispatcher
             }
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             if ($g->openswoole_response->isWritable()) {
+                \ZealPHP\Session\zeal_session_persist_before_send();
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 $g->openswoole_response->end();
             }
@@ -943,6 +947,7 @@ class Dispatcher
             }
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             if ($g->openswoole_response->isWritable()) {
+                \ZealPHP\Session\zeal_session_persist_before_send();
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 $g->openswoole_response->end();
             }

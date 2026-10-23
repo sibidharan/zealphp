@@ -180,7 +180,7 @@ class ZealAPI extends REST
             return;
         }
 
-        if ($module === '' && method_exists($this, $func)) {
+        if ($module === '' && $this->isApiMethod($func)) {
             $this->$func();
         } else {
             // Resolve to an on-disk handler file for BOTH single-segment
@@ -585,15 +585,43 @@ class ZealAPI extends REST
     }
 
     /**
+     * Can /api/<name> call $this-><name>() directly? Only a public instance
+     * method an app's ZealAPI subclass declares. method_exists() alone also
+     * matched the framework's own internals (/api/__construct, /api/die,
+     * /api/requirePostAuth, private helpers), and those names shadowed any
+     * api/<name>.php handler file.
+     */
+    private function isApiMethod(string $name): bool
+    {
+        if ($name === '' || str_starts_with($name, '__') || !method_exists($this, $name)) {
+            return false;
+        }
+        $m = new \ReflectionMethod($this, $name);
+        $declarer = $m->getDeclaringClass()->getName();
+        return $m->isPublic() && !$m->isStatic()
+            && $declarer !== self::class && !is_a(self::class, $declarer, true);
+    }
+
+    /**
      * @param \Throwable $e
      */
     public function die($e): void
     {
+        // An exception the API throws on purpose (`throw new \Exception("Invalid
+        // input")`, a RuntimeException, the "Unauthorized" / "Not found"
+        // sentinels below) carries text meant for the client. Driver, engine
+        // and framework exceptions carry internals (PDOException: DB user and
+        // host; TypeError: file paths; TemplateUnavailableException: an
+        // absolute path): their message, like the stack trace, only goes out
+        // with App::displayErrors() on. The log always has both.
+        $debug = App::displayErrors();
         $data = [
-            "error" => $e->getMessage(),
-            "stack" => jTraceEx($e),
+            "error" => ($debug || !self::exceptionCarriesInternals($e)) ? $e->getMessage() : "Internal error",
             "type" => "exception"
         ];
+        if ($debug) {
+            $data["stack"] = jTraceEx($e);
+        }
         elog(jTraceEx($e), "error");
         $response_code = 400;
         if ($e->getMessage() == "Expired token" || $e->getMessage() == "Unauthorized") {
@@ -606,6 +634,41 @@ class ZealAPI extends REST
         $data = $this->json($data);
         $this->response($data, $response_code);
     }
+
+    /**
+     * Allowlist, not denylist: a client sees an exception's message only when
+     * the APP threw it on purpose — one of PHP's plain SPL exception classes,
+     * or a class the app itself declares (outside vendor/ and the framework's src/).
+     * Everything else carries internals in its message: engine \Error,
+     * extension classes (PDOException, RedisException, JsonException, …: DB
+     * users, hosts, DSNs) and library exceptions from vendor/ (Guzzle request
+     * URLs, Predis/AWS endpoints).
+     */
+    private static function exceptionCarriesInternals(\Throwable $e): bool
+    {
+        if ($e instanceof \Error) {
+            return true;
+        }
+        if (in_array(get_class($e), self::CLIENT_SAFE_SPL_EXCEPTIONS, true)) {
+            return false;
+        }
+        $file = (new \ReflectionClass($e))->getFileName();
+        if ($file === false) {
+            return true;   // declared by an extension
+        }
+        $file = str_replace('\\', '/', $file);
+        return str_contains($file, '/vendor/')
+            || str_starts_with($file, str_replace('\\', '/', __DIR__) . '/');   // the framework's own src/
+    }
+
+    /** SPL exception classes an API throws for client errors (exact class, not subclasses). */
+    private const CLIENT_SAFE_SPL_EXCEPTIONS = [
+        \Exception::class, \RuntimeException::class, \LogicException::class,
+        \InvalidArgumentException::class, \DomainException::class, \LengthException::class,
+        \OutOfRangeException::class, \OutOfBoundsException::class, \RangeException::class,
+        \OverflowException::class, \UnderflowException::class, \UnexpectedValueException::class,
+        \BadFunctionCallException::class, \BadMethodCallException::class,
+    ];
 
     /**
      * Catch missing-method calls from inside an API handler closure (e.g. a typo

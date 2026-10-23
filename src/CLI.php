@@ -19,6 +19,20 @@ use function ZealPHP\elog;
 class CLI
 {
     /**
+     * Print $message and stop with $code. On PHP 8.4+ with OpenSwoole loaded,
+     * exit() outside a coroutine was seen to set the status and RETURN (CI,
+     * 8.4/8.5), which would let a refused start carry on booting — so if
+     * exit() comes back, throw.
+     */
+    private static function abort(string $message, int $code = 1): never
+    {
+        echo $message, "\n";
+        exit($code);
+        // @phpstan-ignore-next-line deadCode.unreachable — reached on 8.4+ when exit() returns
+        throw new \RuntimeException($message);
+    }
+
+    /**
      * Parse `$argv`, execute any lifecycle sub-command, and return server-config overrides.
      *
      * Sub-commands (`stop`, `status`, `logs`, `restart`) are handled in-process and
@@ -47,6 +61,12 @@ class CLI
         $i = 0;
         while ($i < count($argv)) {
             $arg = $argv[$i];
+            // `--port=8081` form: split into `--port 8081` so every value flag
+            // accepts both spellings.
+            if (str_starts_with($arg, '--') && str_contains($arg, '=')) {
+                [$arg, $value] = explode('=', $arg, 2);
+                array_splice($argv, $i, 1, [$arg, $value]);
+            }
             // Accept the bare subcommand (`logs`) AND a dashed form (`--logs`):
             // users reach for `--logs`/`--status` by habit, and silently falling
             // through to the default `start` (booting the server) is a confusing
@@ -95,7 +115,10 @@ class CLI
                 // flag wins when combined. OFF in production (the default).
                 App::$dev_reload = true;
             } elseif (str_starts_with($arg, '-')) {
-                echo "Warning: unknown flag '{$arg}' (ignored)\n";
+                // Refuse, don't ignore: an ignored `--prot 9000` booted on the
+                // default port instead — next to (or, via the orphan cleanup,
+                // in place of) whatever server already owns it.
+                self::abort("Error: unknown flag '{$arg}'. Run 'php app.php --help' for the list.");
             }
             $i++;
         }
@@ -400,6 +423,18 @@ class CLI
         }
         if (!self::processIsZealphp($ownerPid)) {
             echo "Port {$port} is held by pid {$ownerPid} (not a ZealPHP process) — refusing to touch it.\n";
+            return false;
+        }
+        // Only reclaim our OWN orphan: a ZealPHP server started from another
+        // app directory is somebody's running server whose pid file simply
+        // lives elsewhere (another ZEALPHP_LOG_DIR / --pid-file). Killing it
+        // took a production server down when a test instance booted on the
+        // wrong port.
+        $ownerCwd = @readlink("/proc/{$ownerPid}/cwd");
+        $ourCwd = getcwd();
+        if (!is_string($ownerCwd) || $ourCwd === false || realpath($ownerCwd) !== realpath($ourCwd)) {
+            $where = is_string($ownerCwd) ? $ownerCwd : 'an unknown directory';
+            echo "Port {$port} is held by ZealPHP pid {$ownerPid}, started from {$where} — not this app ({$ourCwd}). Refusing to touch it; stop it from its own directory or pick another port.\n";
             return false;
         }
         echo "Found orphaned ZealPHP daemon on port {$port} (pid {$ownerPid}, no PID file) — cleaning up.\n";

@@ -108,6 +108,27 @@ class BasicAuthMiddlewareTest extends TestCase
         $this->assertSame('OK', (string)$resp->getBody());
     }
 
+    /**
+     * An unknown username costs a bcrypt verification too, so the response
+     * time doesn't reveal which usernames exist in the htpasswd file.
+     */
+    public function testUnknownUserTakesAsLongAsAKnownOne(): void
+    {
+        $file = "alice:" . password_hash('right', PASSWORD_BCRYPT, ['cost' => 10]);
+        $time = function (string $user) use ($file): float {
+            $best = INF;
+            for ($i = 0; $i < 3; $i++) {
+                $t = hrtime(true);
+                $this->invoke(authHeader: $this->basic($user, 'wrong'), file: $file);
+                $best = min($best, (hrtime(true) - $t) / 1e6);
+            }
+            return $best;
+        };
+        $known = $time('alice');
+        $unknown = $time('nobody');
+        $this->assertGreaterThan($known * 0.5, $unknown, sprintf('known %.1f ms vs unknown %.1f ms', $known, $unknown));
+    }
+
     public function testVerifyReceivesExactUserAndPass(): void
     {
         $seen = [];

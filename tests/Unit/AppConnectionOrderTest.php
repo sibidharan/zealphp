@@ -93,6 +93,29 @@ class AppConnectionOrderTest extends TestCase
         $this->assertSame(['queued', 'first'], $done, 'a closed connection must not strand queued requests');
     }
 
+    public function testPipelineBeyondTheCapIsRefused(): void
+    {
+        $ran = 0;
+        $overflowed = 0;
+        Coroutine::run(function () use (&$ran, &$overflowed) {
+            // One slow request owns the connection; 10 more than the cap queue behind it.
+            for ($i = 0; $i <= App::MAX_PIPELINED_REQUESTS + 10; $i++) {
+                go(function () use ($i, &$ran, &$overflowed) {
+                    App::inConnectionOrder(15, function () use ($i, &$ran) {
+                        if ($i === 0) {
+                            Coroutine::usleep(30000);
+                        }
+                        $ran++;
+                    }, function () use (&$overflowed) {
+                        $overflowed++;
+                    });
+                });
+            }
+        });
+        $this->assertSame(App::MAX_PIPELINED_REQUESTS + 1, $ran, 'the running request plus a full queue are served');
+        $this->assertSame(10, $overflowed, 'requests past the cap must be refused, not parked');
+    }
+
     public function testOutsideCoroutineIsAPlainCall(): void
     {
         $ran = false;

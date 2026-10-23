@@ -96,6 +96,18 @@ class ConcurrencyLimitMiddleware implements MiddlewareInterface
     private $keyResolver;
 
     /**
+     * Is this per-key row idle (no request in flight)? A row without a usable
+     * `count` counts as idle.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function isIdle(array $row): bool
+    {
+        $count = $row['count'] ?? null;
+        return !is_numeric($count) || (int) $count <= 0;
+    }
+
+    /**
      * @param int                                    $maxConcurrent Per-key (or global) in-flight cap.
      * @param Counter|null                           $counter       Optional global `Counter` (global mode
      *                                                              when `$tableName` is null; optional
@@ -135,13 +147,14 @@ class ConcurrencyLimitMiddleware implements MiddlewareInterface
             // App::clientIp() is proxy-aware (walks X-Forwarded-For when the
             // direct peer is in App::$trusted_proxies). Fall back to the PSR-7
             // server params when $g->server is not populated (unit tests).
+            // IPv6 clients are keyed by their /64 (see RateLimitMiddleware::clientKey()).
             $ip = App::clientIp();
             if ($ip !== '') {
-                return $ip;
+                return RateLimitMiddleware::clientKey($ip);
             }
             $params = $request->getServerParams();
             $remote = $params['REMOTE_ADDR'] ?? '';
-            return is_scalar($remote) ? (string)$remote : '';
+            return is_scalar($remote) ? RateLimitMiddleware::clientKey((string)$remote) : '';
         };
     }
 
@@ -193,6 +206,25 @@ class ConcurrencyLimitMiddleware implements MiddlewareInterface
 
         // Atomically increment the per-key in-flight count.
         $perKeyCount = Store::incr($tableName, $key, 'count', 1);
+        if ($perKeyCount < 1) {
+            // The increment did not land: the table is full (a new key needs a
+            // row). A key's row stays after its last request (count 0), so the
+            // table filled with every client ever seen and then let every new
+            // client through unlimited. Drop the idle rows and retry once.
+            $evicted = RateLimitMiddleware::evictRows($tableName, self::isIdle(...));
+            if ($evicted > 0) {
+                $perKeyCount = Store::incr($tableName, $key, 'count', 1);
+            }
+            if ($perKeyCount < 1) {
+                if (function_exists('ZealPHP\\elog')) {
+                    \ZealPHP\elog(
+                        "ConcurrencyLimitMiddleware: Store table '{$tableName}' is full; failing open for key={$key}.",
+                        'conn_limit'
+                    );
+                }
+                return $handler->handle($request);
+            }
+        }
 
         // Also enforce optional global cap via Counter.
         $globalCount = 0;

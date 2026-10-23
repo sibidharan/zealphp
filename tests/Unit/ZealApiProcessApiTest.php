@@ -335,6 +335,19 @@ class ZealApiProcessApiTest extends TestCase
         $this->assertSame(['error' => 'method_not_found'], json_decode($r['echo'], true));
     }
 
+    /**
+     * /api/<name> must not reach the framework's own methods: /api/__construct
+     * threw ArgumentCountError (500), /api/die and /api/requirePostAuth ran
+     * internals, and those names shadowed api/<name>.php files.
+     */
+    public function testFrameworkInternalsAreNotApiEndpoints(): void
+    {
+        foreach (['__construct', 'die', 'requirePostAuth', 'isAdmin', 'json', 'failAs', 'processApi'] as $name) {
+            $r = $this->dispatch($this->makeApi(), '', $name);
+            $this->assertSame(['error' => 'method_not_found'], json_decode($r['echo'], true), "/api/$name");
+        }
+    }
+
     public function testRootLevelApiFileResolvesWithEmptyModule(): void
     {
         // Issue #157: /api/login → processApi('', 'login'). 'login' is NOT a

@@ -44,6 +44,15 @@ class RequestContext
      * @var list<string>
      */
     public array $session_loaded_keys = [];
+    /**
+     * md5 of each value's serialization at session-load time (key => digest).
+     * `zeal_session_write_close()` writes only the keys whose value differs
+     * from this snapshot onto the CURRENT store, so a request that never
+     * touched a key cannot revert or resurrect it after a concurrent request
+     * changed or removed it. Empty when the session loaded empty.
+     * @var array<string, string>
+     */
+    public array $session_loaded_digest = [];
     /** @var array<string, mixed> */
     public array $session_params = [];
     public ?int $status = null;
@@ -61,6 +70,9 @@ class RequestContext
     public ?string $raw_status_reason = null;
     public ?bool $_streaming = null;
     public ?bool $_session_started = null;
+    /** md5 of the session data zeal_session_persist_before_send() stored, so
+     *  the manager's close skips an identical second write. */
+    public ?string $_session_persisted_hash = null;
     /** OB level of the framework's capture buffer for the current include —
      *  app buffers ABOVE it keep native ob_end_flush()/ob_flush() semantics
      *  (pop into parent); at/below it the overrides stream to the client.

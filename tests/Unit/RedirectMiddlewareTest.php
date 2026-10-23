@@ -168,6 +168,78 @@ class RedirectMiddlewareTest extends TestCase
         $this->assertSame('OK', (string) $response->getBody());
     }
 
+    public function testRegexRuleCannotBuildProtocolRelativeTarget(): void
+    {
+        $mw = new RedirectMiddleware([['match' => '#^/go/(.*)$#', 'to' => '/$1']]);
+        $response = $this->process($mw, '/go//evil.com');
+        $this->assertNotSame('//evil.com', $response->getHeaderLine('Location'));
+        $this->assertStringStartsNotWith('//', $response->getHeaderLine('Location'));
+    }
+
+    public function testPrefixRuleCannotMoveToAnotherHost(): void
+    {
+        $mw = new RedirectMiddleware([['from' => '/old/', 'to' => 'https://new.example.test']]);
+        $response = $this->process($mw, '/old/@evil.test');
+        $this->assertSame(200, $response->getStatusCode(), 'https://new.example.test@evil.test must not be emitted');
+        $ok = $this->process(new RedirectMiddleware([['from' => '/old', 'to' => 'https://new.example.test']]), '/old/page');
+        $this->assertSame('https://new.example.test/page', $ok->getHeaderLine('Location'));
+    }
+
+    public function testRefusedTargetFallsThroughToTheNextRule(): void
+    {
+        // Rule 1 would emit https://good.example.test@evil.test (host evil.test):
+        // refused, and rule 2 still gets its turn.
+        $mw = new RedirectMiddleware([
+            ['match' => '#^/go/(.*)$#', 'to' => 'https://good.example.test$1'],
+            ['from' => '/go', 'to' => '/safe'],
+        ]);
+        $response = $this->process($mw, '/go/@evil.test');
+        $this->assertSame('/safe/@evil.test', $response->getHeaderLine('Location'));
+    }
+
+    public function testCaptureMayFillASubdomainLabelOnly(): void
+    {
+        $mw = new RedirectMiddleware([['match' => '#^/u/([a-z]+)$#', 'to' => 'https://$1.example.test/']]);
+        $this->assertSame('https://blog.example.test/', $this->process($mw, '/u/blog')->getHeaderLine('Location'));
+        $wide = new RedirectMiddleware([['match' => '#^/u/(.*)$#', 'to' => 'https://$1.example.test/']]);
+        $this->assertSame(200, $this->process($wide, '/u/evil.test')->getStatusCode(), 'evil.test.example.test: a capture may not add labels');
+    }
+
+    public function testProtocolRelativeTargetAllowedWhenTheRulePointsThere(): void
+    {
+        $mw = new RedirectMiddleware([['from' => '/cdn', 'to' => '//cdn.example.test']]);
+        $response = $this->process($mw, '/cdn/app.js');
+        $this->assertSame('//cdn.example.test/app.js', $response->getHeaderLine('Location'));
+    }
+
+    public function testRefusalIsLoggedWithTheTargetAndThePath(): void
+    {
+        $mw = new RedirectMiddleware([['match' => '#^/go/(.*)$#', 'to' => 'https://good.example.test$1']]);
+        $log = $this->captureDebugLog(fn () => $this->process($mw, '/go/@evil.test'));
+        $this->assertStringContainsString(
+            '[security] RedirectMiddleware: refusing computed Location "https:\\/\\/good.example.test@evil.test" (request path "\\/go\\/@evil.test")',
+            $log
+        );
+    }
+
+    private function captureDebugLog(callable $fn): string
+    {
+        $path = \ZealPHP\log_file_for('debug');
+        if ($path === null || str_contains($path, '://')) {
+            $this->markTestSkipped('debug log not file-backed in this environment');
+        }
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        clearstatcache(true, $path);
+        $before = is_file($path) ? (int) filesize($path) : 0;
+        $fn();
+        clearstatcache(true, $path);
+        $contents = is_file($path) ? (string) file_get_contents($path) : '';
+        return substr($contents, $before);
+    }
+
     private function process(RedirectMiddleware $mw, string $path, string $query = ''): ResponseInterface
     {
         $uri = $path . ($query !== '' ? '?' . $query : '');

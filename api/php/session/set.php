@@ -1,4 +1,4 @@
-<?
+<?php
 use ZealPHP\G;
 use function ZealPHP\Session\zeal_session_id;
 $set = function(){

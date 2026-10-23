@@ -1,4 +1,4 @@
-<?
+<?php
 use function ZealPHP\zlog;
 use OpenSwoole\Coroutine as co;
 use ZealPHP\G;

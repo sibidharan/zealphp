@@ -1069,11 +1069,18 @@ class App
     public static int $session_data_size = 16384;
 
     /**
-     * File-backing directory for session storage. Default
-     * `/var/lib/php/sessions` (matches PHP's default). Used by
+     * File-backing directory for session storage ('' = the ZealPHP default,
+     * resolved by sessionSavePath()). Used by the inline file store,
      * FileSessionHandler and TableSessionHandler's file backing layer.
+     *
+     * The default used to be `/var/lib/php/sessions`, PHP's own directory. On
+     * a host that also runs mod_php/FPM apps that is THEIR session store: an
+     * id one of those apps issued was an existing file, so ZealPHP's strict
+     * mode adopted it, with that app's data; ZealPHP's GC deleted their
+     * sessions by its own TTL. ZealPHP now keeps sessions in its own 0700
+     * directory unless told otherwise.
      */
-    public static string $session_save_path = '/var/lib/php/sessions';
+    public static string $session_save_path = '';
 
     /**
      * Session storage backend. One of:
@@ -1568,6 +1575,7 @@ class App
             // ->cookie() — actually reach the wire instead of being dropped (#418).
             // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
             $g->zealphp_response->flush();
+            \ZealPHP\Session\zeal_session_persist_before_send();
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             $g->openswoole_response->end();
             return (new Response('', $streamStatus));
@@ -1623,6 +1631,7 @@ class App
         }
         // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
         if ($g->openswoole_response->isWritable()) {
+            \ZealPHP\Session\zeal_session_persist_before_send();
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             $g->openswoole_response->end();
         }
@@ -1788,6 +1797,7 @@ class App
         // Applied here in the master before fork; explicit fluent setters still win
         // (resolveCgiEnv only fills knobs that weren't set in code).
         self::resolveCgiEnv();
+        self::resolveTrustedProxiesEnv();
 
         if ($cwd === null) {
             $php_self = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file'] ?? '';
@@ -2012,7 +2022,7 @@ class App
      * (auto) default follows the scheduler and never warns. Testable seam.
      */
     /** First ext-zealphp release with the PHP2Shell-audit isolation fixes. */
-    public const MIN_EXT_VERSION_COROUTINE_LEGACY = '0.3.61';
+    public const MIN_EXT_VERSION_COROUTINE_LEGACY = '0.4.0';
 
     /**
      * coroutine-legacy (superglobals + coroutines) isolates request state in
@@ -2469,20 +2479,27 @@ class App
     }
 
     /**
-     * Parse a raw `Cookie:` header through PHP's cookie treat-data semantics
-     * (issue #305) — the same `php_default_treat_data` routine PHP applies to
-     * the query string, but with the cookie value-decoding rule:
+     * Parse a raw `Cookie:` header the way PHP builds `$_COOKIE` (issue #305):
      *
-     *  - Pairs split on `;`; each pair split on its FIRST `=`. The name is
-     *    left-trimmed; the value is everything after the first `=`.
-     *  - Cookie NAMES get legacy mangling — leading whitespace stripped, `.`
-     *    and space → `_`, and `name[]` / `name[k]` build nested arrays.
-     *  - Cookie VALUES are `%XX`-decoded per RFC 6265 ONLY — a literal `+` is
-     *    NOT turned into a space (that `+`→space rule is form-urlencoded-only).
+     *  - Pairs split on `;`; leading whitespace is stripped; each pair splits
+     *    on its FIRST `=`. A pair with an empty name, or without `=` (a bare
+     *    `; secure` segment), is skipped — PHP itself binds the latter as an
+     *    empty cookie; ZealPHP has always skipped it.
+     *  - NAMES are taken literally — never URL-decoded — then mangled like any
+     *    PHP variable name: ` ` and `.` → `_`, `name[]` / `name[k]` build
+     *    nested arrays (an unmatched `[` becomes `_`).
+     *  - A name that mangling turns into a `__Host-` / `__Secure-` prefix it
+     *    did not literally have is dropped (CVE-2022-31629): those prefixes
+     *    promise the browser set the cookie with Secure (and Path=/, no Domain)
+     *    and must not be forgeable through `..Host-x`.
+     *  - The FIRST cookie of a name wins (a sibling-domain or path cookie sent
+     *    after the real one must not shadow it); array elements accumulate.
+     *  - VALUES are `%XX`-decoded per RFC 6265 — `rawurldecode()`, so a
+     *    literal `+` is NOT a space.
      *
-     * Implementation re-uses PHP's `parse_str()` for the bracket-nesting +
-     * name-mangling, protecting each value's `+` / `&` / `=` so the assembled
-     * query survives the urldecode parse_str applies.
+     * This used to run the pairs through `parse_str()`, which URL-decoded the
+     * names (`%5F%5FHost-x` became `__Host-x`, re-opening the prefix bypass),
+     * let the LAST duplicate win, and split a name at `&`.
      *
      * Pure function — no side effects; safe to unit-test directly.
      *
@@ -2490,43 +2507,94 @@ class App
      */
     public static function parseCookieHeader(string $raw): array
     {
-        $raw = trim($raw);
-        if ($raw === '') {
-            return [];
-        }
-        $assembled = [];
+        $out = [];
         foreach (explode(';', $raw) as $pair) {
-            if ($pair === '' || !str_contains($pair, '=')) {
-                // A bare `; flag` cookie segment with no `=` has no value to
-                // bind; PHP skips it.
+            $pair = ltrim($pair, " \t\n\r\v\f");
+            if ($pair === '') {
                 continue;
             }
-            [$name, $value] = explode('=', $pair, 2);
-            $name = ltrim($name);
+            $eq = strpos($pair, '=');
+            if ($eq === false) {
+                continue;
+            }
+            $name = substr($pair, 0, $eq);
+            $value = rawurldecode(substr($pair, $eq + 1));
             if ($name === '') {
                 continue;
             }
-            // Protect the value: parse_str urldecodes (turning `+`→space and
-            // honouring `&`/`=` as separators). Pre-encode those three so the
-            // value round-trips verbatim except for the cookie's own %XX, which
-            // parse_str's urldecode resolves — matching RFC 6265 value decoding.
-            $safeValue = str_replace(['+', '&', '='], ['%2B', '%26', '%3D'], $value);
-            $assembled[] = $name . '=' . $safeValue;
-        }
-        if ($assembled === []) {
-            return [];
-        }
-        /** @var array<array-key, mixed> $parsed */
-        $parsed = [];
-        parse_str(implode('&', $assembled), $parsed);
-        // Cookie names are always strings; normalise the key type so the
-        // declared array<string, mixed> contract holds (parse_str's signature
-        // is array-key-typed because numeric-string keys collapse to int).
-        $out = [];
-        foreach ($parsed as $name => $value) {
-            $out[(string)$name] = $value;
+
+            // Mangle the base name up to the first matched `[`.
+            $len = strlen($name);
+            $base = '';
+            $i = 0;
+            $nested = false;
+            for (; $i < $len; $i++) {
+                $c = $name[$i];
+                if ($c === '[' && strpos($name, ']', $i + 1) !== false) {
+                    $nested = true;
+                    break;
+                }
+                $base .= ($c === ' ' || $c === '.' || $c === '[') ? '_' : $c;
+            }
+            if ($base === '') {
+                continue;
+            }
+            foreach (['__Host-', '__Secure-'] as $prefix) {
+                if (str_starts_with($base, $prefix) && !str_starts_with($name, $prefix)) {
+                    continue 2;
+                }
+            }
+
+            /** @var list<string|null> $indices `null` = append (`[]`) */
+            $indices = [];
+            while ($nested && $i < $len && $name[$i] === '[') {
+                $close = strpos($name, ']', $i + 1);
+                if ($close === false) {
+                    break;
+                }
+                $indices[] = $close === $i + 1 ? null : substr($name, $i + 1, $close - $i - 1);
+                $i = $close + 1;
+            }
+            if (count($indices) > 64) {
+                continue; // max_input_nesting_level
+            }
+
+            if ($indices === []) {
+                if (!array_key_exists($base, $out)) {
+                    $out[$base] = $value;
+                }
+            } else {
+                $out[$base] = self::cookieAssign($out[$base] ?? null, $indices, $value);
+            }
         }
         return $out;
+    }
+
+    /**
+     * Set `$value` at the `$indices` path below `$node` (replacing a scalar
+     * on the way with an array, as PHP does); `null` index = append.
+     *
+     * @param list<string|null> $indices non-empty
+     * @return array<array-key, mixed>
+     */
+    private static function cookieAssign(mixed $node, array $indices, string $value): array
+    {
+        $arr = is_array($node) ? $node : [];
+        $idx = array_shift($indices);
+        if ($indices === []) {
+            if ($idx === null) {
+                $arr[] = $value;
+            } else {
+                $arr[$idx] = $value;
+            }
+            return $arr;
+        }
+        if ($idx === null) {
+            $arr[] = self::cookieAssign(null, $indices, $value);
+        } else {
+            $arr[$idx] = self::cookieAssign($arr[$idx] ?? null, $indices, $value);
+        }
+        return $arr;
     }
 
     /**
@@ -2806,8 +2874,25 @@ class App
             $srv['SERVER_ADDR'] = $serverAddr;
         }
         if ($request->header) {
+            // Underscore names second, so `Content_Length: …` can never overwrite
+            // the real `Content-Length` (both map to HTTP_CONTENT_LENGTH) —
+            // proxies sanitise X-Forwarded-For, not X_Forwarded_For.
+            $underscored = [];
             foreach ($request->header as $key => $value) {
+                $key = (string) $key;
+                // httpoxy (CVE-2016-5385): a client `Proxy:` header must not
+                // become HTTP_PROXY, which HTTP clients read as their proxy.
+                if (strcasecmp($key, 'proxy') === 0) {
+                    continue;
+                }
+                if (str_contains($key, '_')) {
+                    $underscored[$key] = $value;
+                    continue;
+                }
                 $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] = $value;
+            }
+            foreach ($underscored as $key => $value) {
+                $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] ??= $value;
             }
         }
         // #459 — SERVER_NAME must be the host only (no port); SERVER_PORT already
@@ -2838,8 +2923,15 @@ class App
             $srv['UNIQUE_ID'] = bin2hex(random_bytes(12));
         }
 
+        // X-HTTP-Method-Override lets a POST-only client (an HTML form, a proxy
+        // that only passes GET/POST) issue PUT/PATCH/DELETE. Nothing else: an
+        // arbitrary value (GET, OPTIONS, TRACE, a made-up verb) let a POST be
+        // routed as a method no edge rule or middleware expected.
         if ($srv['REQUEST_METHOD'] === 'POST' && isset($srv['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
-            $srv['REQUEST_METHOD'] = (string)$srv['HTTP_X_HTTP_METHOD_OVERRIDE'];
+            $override = strtoupper(trim((string)$srv['HTTP_X_HTTP_METHOD_OVERRIDE']));
+            if (in_array($override, ['PUT', 'PATCH', 'DELETE'], true)) {
+                $srv['REQUEST_METHOD'] = $override;
+            }
         }
         // Apache HostnameLookups: populate REMOTE_HOST via reverse DNS when
         // explicitly enabled. WARNING — blocking call (OpenSwoole's coroutine
@@ -4025,7 +4117,29 @@ class App
     public static function sessionSavePath(?string $path = null): string
     {
         if ($path !== null) self::$session_save_path = $path;
+        if (self::$session_save_path === '') {
+            self::$session_save_path = self::defaultSessionSavePath();
+        }
         return self::$session_save_path;
+    }
+
+    /**
+     * ZealPHP's own session directory: `ZEALPHP_SESSION_DIR` when set, else
+     * `<log dir>/sessions`, created 0700 for the server's user.
+     */
+    public static function defaultSessionSavePath(): string
+    {
+        $env = getenv('ZEALPHP_SESSION_DIR');
+        if (is_string($env) && trim($env) !== '') {
+            $dir = rtrim(trim($env), '/');
+        } else {
+            $logDir = \ZealPHP\resolve_log_dir();
+            $dir = ($logDir !== null ? rtrim($logDir, '/') : rtrim(sys_get_temp_dir(), '/') . '/zealphp') . '/sessions';
+        }
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0700, true);
+        }
+        return $dir;
     }
 
     /**
@@ -4659,6 +4773,25 @@ class App
     }
 
     /**
+     * `ZEALPHP_TRUSTED_PROXIES` (comma-separated CIDRs/IPs, e.g. `127.0.0.1`)
+     * fills trustedProxies() when the app didn't set it. Behind a same-host
+     * Apache/nginx with none configured, X-Forwarded-Proto is ignored, so the
+     * session cookie lost its Secure flag on an HTTPS site, and every client
+     * shared one rate-limit/IP-access key (127.0.0.1).
+     */
+    public static function resolveTrustedProxiesEnv(): void
+    {
+        if (self::$trusted_proxies !== []) {
+            return;
+        }
+        $env = getenv('ZEALPHP_TRUSTED_PROXIES');
+        if (!is_string($env) || trim($env) === '') {
+            return;
+        }
+        self::$trusted_proxies = array_values(array_filter(array_map('trim', explode(',', $env)), static fn (string $c): bool => $c !== ''));
+    }
+
+    /**
      * Trusted proxy CIDRs consulted by `App::clientIp()`.
      *
      * @param  array<int, string>|null $cidrs
@@ -4668,6 +4801,57 @@ class App
     {
         if ($cidrs !== null) self::$trusted_proxies = array_values($cidrs);
         return self::$trusted_proxies;
+    }
+
+    /** @var list<string> */
+    private static array $ws_allowed_origins = [];
+
+    /**
+     * Origins (e.g. `https://app.example.com`, or `*`) whose WebSocket upgrades
+     * may carry the visitor's cookie session. A same-host Origin is always
+     * allowed, and so is an upgrade with no Origin (a non-browser client). Any
+     * other browser Origin still connects, but the session is NOT loaded for it:
+     * without this, a page on a sibling subdomain (or any site, with
+     * SameSite=None cookies) could open the socket as the visitor
+     * (cross-site WebSocket hijacking).
+     *
+     * @param  list<string>|null $origins
+     * @return list<string>
+     */
+    public static function wsAllowedOrigins(?array $origins = null): array
+    {
+        if ($origins !== null) {
+            self::$ws_allowed_origins = array_map(
+                static fn (string $o): string => strtolower(rtrim($o, '/')),
+                $origins
+            );
+        }
+        return self::$ws_allowed_origins;
+    }
+
+    /**
+     * May this WebSocket upgrade use the cookie session? See wsAllowedOrigins().
+     */
+    public static function wsOriginMayUseSession(?string $origin, ?string $host): bool
+    {
+        if ($origin === null || $origin === '') {
+            return true;
+        }
+        $origin = strtolower(rtrim($origin, '/'));
+        if (in_array('*', self::$ws_allowed_origins, true) || in_array($origin, self::$ws_allowed_origins, true)) {
+            return true;
+        }
+        $parts = parse_url($origin);
+        if (!is_array($parts) || !isset($parts['host']) || $host === null || $host === '') {
+            return false;
+        }
+        $originHost = $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
+        if (strcasecmp($originHost, $host) === 0) {
+            return true;
+        }
+        // Host carries no port when it is the scheme default.
+        $default = ($parts['scheme'] ?? '') === 'https' ? 443 : 80;
+        return isset($parts['port']) && $parts['port'] === $default && strcasecmp($parts['host'], $host) === 0;
     }
 
     /** Apache `LogFormat`. Resets the compiled-spec cache on set. */
@@ -4887,14 +5071,32 @@ class App
         $g = \ZealPHP\RequestContext::instance();
         $out = '';
         foreach ($tokens as $tok) {
-            $out .= self::renderAccessLogToken($tok, $g, $status, $length, $durationSec);
+            $value = self::renderAccessLogToken($tok, $g, $status, $length, $durationSec);
+            $out .= $tok['kind'] === 'lit' ? $value : self::escapeAccessLogValue($value);
         }
-        // Log-injection defence (Apache mod_log_config parity): escape CR/LF/NUL
-        // so an attacker-controlled token (REQUEST_URI, Referer, User-Agent, …)
-        // cannot inject a forged physical log line. Compiled format literals are
-        // single-line (spaces/quotes/brackets), so this only neutralises smuggled
-        // control characters; tab/space field separators are preserved.
-        return strtr($out, ["\r" => '\\r', "\n" => '\\n', "\0" => '\\0']);
+        return $out;
+    }
+
+    /**
+     * Log-injection defence, Apache mod_log_config parity (ap_escape_logitem):
+     * in every value that can come from the request (REQUEST_URI, Referer,
+     * User-Agent, headers …) escape `"` and `\` and write other control bytes as
+     * \xhh. Before, only CR/LF/NUL were escaped: a `"` broke field parsing for
+     * log tooling, and ESC sequences reached whoever ran `tail` on the log.
+     * Format literals (quotes, brackets, spaces) are left alone.
+     */
+    private static function escapeAccessLogValue(string $value): string
+    {
+        return (string) preg_replace_callback('/[\x00-\x1F\x7F"\\\\]/', static function (array $m): string {
+            return match ($m[0]) {
+                '"' => '\\"',
+                '\\' => '\\\\',
+                "\n" => '\\n',
+                "\r" => '\\r',
+                "\t" => '\\t',
+                default => sprintf('\\x%02x', ord($m[0])),
+            };
+        }, $value);
     }
 
     /**
@@ -7589,6 +7791,10 @@ class App
     {
         $req = RequestContext::instance()->zealphp_request;
 
+        // The body depends on these request headers (full page vs fragment), so a
+        // shared cache must key on them — else it can serve a fragment as the page.
+        RequestContext::instance()->zealphp_response?->header('Vary', 'HX-Request, HX-Target, HX-Trigger-Name', false);
+
         // No request in scope (CLI render, warmup, etc.) → full page.
         if (!$req instanceof \ZealPHP\HTTP\Request || !$req->isHtmx()) {
             return self::render($fullPageTemplate ?? $template, $args);
@@ -8282,6 +8488,17 @@ class App
     }
 
     /**
+     * `-d` value carrying App::$session_strict_mode into PHP subprocesses (CGI
+     * proc, pool, fork). They run PHP's native session module, which reads
+     * php.ini — Ubuntu/Debian ship session.use_strict_mode=0 — so a client-
+     * chosen PHPSESSID was accepted there even with strict mode on.
+     */
+    public static function subprocessStrictModeIni(): string
+    {
+        return 'session.use_strict_mode=' . (self::$session_strict_mode ? '1' : '0');
+    }
+
+    /**
      * Parse a raw CGI/1.1 interpreter response (RFC 3875) into status, headers
      * and body — pure, side-effect-free string handling.
      *
@@ -8434,9 +8651,15 @@ class App
         if (array_key_exists($normPath, self::$when_middleware_memo)) {
             return self::$when_middleware_memo[$normPath];
         }
+        // Also match the DECODED path: routes compare the raw path, but a
+        // fallback front controller (WordPress, Slim) decodes REQUEST_URI
+        // itself, so /wp-%61dmin reached its /wp-admin code while a
+        // when('/wp-admin', auth) scope never fired. Widening only.
+        $decodedPath = self::normalizeRequestPath(self::decodeUntilStable($normPath));
         $flat = [];
         foreach (self::$when_middleware_compiled as $entry) {
-            if (self::whenScopeMatches($entry['type'], $entry['key'], $normPath)) {
+            if (self::whenScopeMatches($entry['type'], $entry['key'], $normPath)
+                || ($decodedPath !== $normPath && self::whenScopeMatches($entry['type'], $entry['key'], $decodedPath))) {
                 foreach ($entry['chain'] as $mw) {
                     $flat[] = $mw;
                 }
@@ -9368,6 +9591,28 @@ class App
             }
         }
 
+        // Engine warnings/notices go to the response body when display_errors
+        // is on — the CLI default, and what a php.ini-less Docker image runs
+        // with — so "Undefined array key … in /srv/app/x.php:12" reached
+        // clients whatever App::displayErrors() said. Follow displayErrors()
+        // for the engine too, and make sure the errors still reach the log.
+        $engineDisplay = \strtolower(\trim((string) \ini_get('display_errors')));
+        if (!self::displayErrors() && !\in_array($engineDisplay, ['', '0', 'off', 'no', 'false', 'stderr'], true)) {
+            \ini_set('display_errors', '0');
+            \ini_set('log_errors', '1');
+        }
+
+        // Sessions in PHP's own directory are shared with every mod_php/FPM app
+        // on the host (adopted ids, cross-app GC). Say so at boot.
+        $phpSessionDir = (string) \ini_get('session.save_path');
+        $phpSessionDir = $phpSessionDir !== '' ? $phpSessionDir : '/var/lib/php/sessions';
+        $zealSessionDir = \realpath(self::sessionSavePath());
+        if ($zealSessionDir !== false && $zealSessionDir === \realpath($phpSessionDir)) {
+            \error_log('[warn] App::sessionSavePath() is PHP\'s own session.save_path (' . $zealSessionDir . '). '
+                . 'Other PHP apps on this host share it: ZealPHP strict mode accepts their session ids (with their data) '
+                . 'and its GC removes their sessions. Use a ZealPHP-only directory (the default, or ZEALPHP_SESSION_DIR).');
+        }
+
         // Deterministic session GC on a worker-0 timer — ZealPHP replaced PHP's
         // probabilistic per-request GC, so without this sess_* files / handler
         // entries accumulate forever and leaked PHPSESSIDs never expire.
@@ -10205,6 +10450,7 @@ class App
                 }
                 $response->status(500, 'Internal Server Error');
                 $response->header('Content-Type', 'text/html; charset=utf-8');
+                \ZealPHP\Session\zeal_session_persist_before_send();
                 $response->end($body);
             } catch (\Throwable $t) {
                 // The connection may already be torn down mid-shutdown; a
@@ -10231,6 +10477,14 @@ class App
     private static int $connection_turn_seq = 0;
 
     /**
+     * Most requests one connection may have parked behind its running request.
+     * Each parked request is a coroutine holding its parsed body; without a cap
+     * a client that keeps one slow request open (a stream it never reads) and
+     * pipelines thousands more fills the worker up to max_coroutine.
+     */
+    public const MAX_PIPELINED_REQUESTS = 32;
+
+    /**
      * Run $handler for a request on connection $fd only after every earlier
      * request on the SAME connection has finished. OpenSwoole dispatches each
      * pipelined request into its own coroutine at once, so their responses were
@@ -10238,14 +10492,24 @@ class App
      * client (or a pipelining proxy) then pairs each response with the wrong
      * request. Different connections never wait on each other; outside a
      * coroutine (sequential modes) this is a plain call.
+     *
+     * A request arriving with MAX_PIPELINED_REQUESTS already queued on its
+     * connection is not run: $onOverflow is called instead (the server closes
+     * the connection, which releases the queue).
      */
-    public static function inConnectionOrder(int $fd, callable $handler): void
+    public static function inConnectionOrder(int $fd, callable $handler, ?callable $onOverflow = null): void
     {
         if (\OpenSwoole\Coroutine::getCid() < 0) {
             $handler();
             return;
         }
         if (isset(self::$connection_turns[$fd])) {
+            if (\count(self::$connection_turns[$fd][1]) >= self::MAX_PIPELINED_REQUESTS) {
+                if ($onOverflow !== null) {
+                    $onOverflow();
+                }
+                return;
+            }
             $turn = new \OpenSwoole\Coroutine\Channel(1);
             self::$connection_turns[$fd][1][] = $turn;
             $owner = self::$connection_turns[$fd][0];
@@ -10563,6 +10827,10 @@ class App
                         $head .= 'Connection: ' . ($keepAlive ? 'keep-alive' : 'close') . "\r\n\r\n";
                         $fd = $response->parent->fd;
                         if (is_int($fd) && $fd > 0 && self::$server !== null) {
+                            // The raw head is the response's last byte: store
+                            // the session first, as endParent() does (a 204
+                            // logout must be visible to the client's next request).
+                            \ZealPHP\Session\zeal_session_persist_before_send();
                             $response->parent->detach();
                             self::$server->send($fd, $head);
                             if (!$keepAlive) {
@@ -10573,6 +10841,7 @@ class App
                             // instance, e.g. a unit-test double): fall back to
                             // the native end() — engine-default CT/CL reattach
                             // there, but the client is never left hanging.
+                            \ZealPHP\Session\zeal_session_persist_before_send();
                             $response->parent->end();
                         }
                     } else {
@@ -10583,8 +10852,10 @@ class App
                             while (!$body->eof()) {
                                 $response->parent->write($body->read($chunkSize));
                             }
+                            \ZealPHP\Session\zeal_session_persist_before_send();
                             $response->parent->end();
                         } else {
+                            \ZealPHP\Session\zeal_session_persist_before_send();
                             $response->parent->end($body->getContents());
                         }
                     }
@@ -10600,6 +10871,7 @@ class App
                     $code = (is_int($exitStatus) && $exitStatus >= 100 && $exitStatus <= 599) ? $exitStatus : ($g->status ?? 200);
                     if ($response->parent->isWritable()) {
                         App::emitStatus($response->parent, $code);
+                        \ZealPHP\Session\zeal_session_persist_before_send();
                         $response->parent->end($body);
                     }
                     access_log($code, strlen($body));
@@ -10620,6 +10892,7 @@ class App
                             }
                         }
                         $g->status = $errResp->getStatusCode();
+                        \ZealPHP\Session\zeal_session_persist_before_send();
                         $response->parent->end((string)$errResp->getBody());
                     } catch (\Throwable $e2) {
                         App::emitStatus($response->parent, 500);
@@ -10627,15 +10900,23 @@ class App
                         $body = App::displayErrors()
                             ? "<pre>".jTraceEx($e)."</pre>"
                             : "<pre>500 Internal Server Error</pre>";
+                        \ZealPHP\Session\zeal_session_persist_before_send();
                         $response->parent->end($body);
                     }
                 }
             }
         });
         // Pipelined requests on one connection must be answered in order.
-        $server->on("request", static function (\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response) use ($requestHandler): void {
-            $fd = $request->fd;
-            self::inConnectionOrder(\is_int($fd) ? $fd : 0, static fn () => $requestHandler($request, $response));
+        $server->on("request", static function (\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response) use ($requestHandler, $server): void {
+            $fd = \is_int($request->fd) ? $request->fd : 0;
+            self::inConnectionOrder(
+                $fd,
+                static fn () => $requestHandler($request, $response),
+                static function () use ($server, $fd): void {
+                    \ZealPHP\elog("[security] fd $fd pipelined more than " . self::MAX_PIPELINED_REQUESTS . ' requests behind a running one; closing the connection', 'warn');
+                    $server->close($fd);
+                }
+            );
         });
     }
 
@@ -10801,6 +11082,21 @@ class App
             // #305 — parse the upgrade request's raw Cookie header (OpenSwoole's
             // own parser is off via http_parse_cookie=false) for the PHPSESSID.
             $wsCookies = self::requestCookieMap($request);
+            $wsHeaders = is_array($request->header) ? $request->header : [];
+            $wsOrigin = isset($wsHeaders['origin']) && is_string($wsHeaders['origin']) ? $wsHeaders['origin'] : null;
+            $wsHost = isset($wsHeaders['host']) && is_string($wsHeaders['host']) ? $wsHeaders['host'] : null;
+            if (isset($wsCookies[$sessionName]) && !self::wsOriginMayUseSession($wsOrigin, $wsHost)) {
+                \ZealPHP\elog('[security] WebSocket upgrade from foreign Origin ' . $wsOrigin . ' on ' . $path . ': session not loaded (see App::wsAllowedOrigins())', 'warn');
+                unset($wsCookies[$sessionName]);
+            }
+            $app = App::instance();
+            assert($app !== null);
+            $route = $app->wsRoutes()[$path] ?? null;
+            // No route, no session: an upgrade to an unregistered path must not
+            // touch the store.
+            if ($route === null) {
+                unset($wsCookies[$sessionName]);
+            }
             if (isset($wsCookies[$sessionName])) {
                 $rawSid = $wsCookies[$sessionName];
                 if (is_string($rawSid)) {
@@ -10808,12 +11104,35 @@ class App
                     \ZealPHP\Session\zeal_session_id($rawSid);
                     \ZealPHP\Session\zeal_session_start();
                     $g->_session_started = true;
+                    // Strict mode, as on HTTP: an id the store never issued is
+                    // not honoured. A handshake can't hand out a fresh id, so the
+                    // socket just runs without a session — and nothing is written,
+                    // or the upgrade itself would mint a store entry for an
+                    // attacker-chosen id (session fixation).
+                    $wsStoreExists = $g->session_params['session_existed'] ?? null;
+                    $wsLoaded = App::$superglobals
+                        ? (is_array($GLOBALS['_SESSION'] ?? null) ? $GLOBALS['_SESSION'] : [])
+                        : $g->session;
+                    if (\ZealPHP\Session\zeal_session_strict_should_regenerate(
+                        App::$session_strict_mode,
+                        true,
+                        $wsLoaded,
+                        is_bool($wsStoreExists) ? $wsStoreExists : null
+                    )) {
+                        $g->_session_started = false;
+                        $g->session = [];
+                        if (App::$superglobals) {
+                            $GLOBALS['_SESSION'] = [];
+                        }
+                        $g->session_params = [];
+                        // And forget the id: a session_start() in the route's
+                        // open handler would otherwise read it back from the
+                        // cookie and write sess_<forged id> after all.
+                        unset($g->cookie[$sessionName]);
+                        \ZealPHP\elog('[security] WebSocket upgrade on ' . $path . ' presented a session id the store never issued: session not loaded', 'warn');
+                    }
                 }
             }
-
-            $app = App::instance();
-            assert($app !== null);
-            $route = $app->wsRoutes()[$path] ?? null;
             if ($route !== null && $route['open'] !== null) {
                 ($route['open'])($server, $request, $g);
             }
@@ -10852,8 +11171,12 @@ class App
             $app = App::instance();
             assert($app !== null);
             $route = $path ? ($app->wsRoutes()[$path] ?? null) : null;
-            if ($route !== null && $route['close'] !== null) {
-                ($route['close'])($server, $fd, $g);
+            try {
+                if ($route !== null && $route['close'] !== null) {
+                    ($route['close'])($server, $fd, $g);
+                }
+            } finally {
+                \ZealPHP\WSRouter::forgetPrincipal($fd);
             }
         });
 

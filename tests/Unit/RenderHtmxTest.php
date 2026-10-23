@@ -104,6 +104,21 @@ PHP);
         $this->assertStringContainsString('[SEARCH-PARTIAL]', $output);
     }
 
+    public function testResponseVariesOnTheHtmxHeaders(): void
+    {
+        $g = RequestContext::instance();
+        $prev = $g->zealphp_response;
+        $g->zealphp_response = new \ZealPHP\HTTP\Response(new \OpenSwoole\Http\Response());
+        try {
+            $this->request([]);
+            $this->render('page');
+            $this->assertContains(['Vary', 'HX-Request, HX-Target, HX-Trigger-Name'], $g->zealphp_response->headersList,
+                'a cache must not serve the fragment as the full page');
+        } finally {
+            $g->zealphp_response = $prev;
+        }
+    }
+
     public function testNoRequestInScopeFallsBackToFullPage(): void
     {
         // zealphp_request is null (CLI render / warmup) → full-page path.

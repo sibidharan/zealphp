@@ -1,4 +1,4 @@
-<?
+<?php
 
 use OpenSwoole\Core\Psr\Response;
 

@@ -117,6 +117,7 @@ class ResponseMiddleware implements MiddlewareInterface
                     // $response->header()/->cookie()) reach the wire (#418).
                     // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                     $g->zealphp_response->flush();
+                    \ZealPHP\Session\zeal_session_persist_before_send();
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     $g->openswoole_response->end();
                     return (new Response('', $streamStatus));
@@ -137,6 +138,7 @@ class ResponseMiddleware implements MiddlewareInterface
                 }
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 if ($g->openswoole_response->isWritable()) {
+                    \ZealPHP\Session\zeal_session_persist_before_send();
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     $g->openswoole_response->end();
                 }

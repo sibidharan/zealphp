@@ -43,6 +43,14 @@ function php_session_encode_from_array(array $data): string
 {
     $encoded = '';
     foreach ($data as $key => $value) {
+        // Native session_encode() refuses a key containing `|`: the decoder
+        // would split the key there and read the rest of it as a value, so a
+        // user-chosen key could plant other keys. Skip it (with a warning, as
+        // PHP does) instead of writing an ambiguous entry.
+        if (str_contains((string) $key, '|')) {
+            trigger_error("Session key '" . $key . "' contains the '|' separator and was not saved", E_USER_WARNING);
+            continue;
+        }
         $encoded .= $key . '|' . serialize($value);
     }
     return $encoded;
@@ -60,7 +68,19 @@ function php_session_encode_from_array(array $data): string
  */
 function php_session_decode_to_array(string $data): array
 {
-    $decoded = @unserialize($data, ['allowed_classes' => ['stdClass']]);
+    // php_serialize format is one serialized array; only try it when the data
+    // can be one (saves a failing unserialize() per call on the php format).
+    $decoded = str_starts_with($data, 'a:')
+        ? @unserialize($data, ['allowed_classes' => ['stdClass']])
+        : false;
+    // ...and only when the WHOLE string is that one array. unserialize() stops
+    // after the first value, so php-format data whose first KEY is
+    // `a:1:{s:4:"role";s:5:"admin";}` (a key an app built from input, e.g.
+    // `$_SESSION["viewed_$slug"]`) used to decode as ['role' => 'admin'], with
+    // every real key gone.
+    if (is_array($decoded) && serialize($decoded) !== $data) {
+        $decoded = false;
+    }
     if (is_array($decoded)) {
         /** @var array<string, mixed> $narrowed */
         $narrowed = [];
@@ -81,17 +101,22 @@ function php_session_decode_to_array(string $data): array
         $offset = $pipe + 1;
         $value = @unserialize(substr($data, $offset), ['allowed_classes' => ['stdClass']]);
         if ($value === false && substr($data, $offset, 4) !== 'b:0;') {
-            $next = strpos($data, ';', $offset);
-            if ($next !== false) {
-                $offset = $next + 1;
-            } else {
-                break;
-            }
-        } else {
-            $serialized = serialize($value);
-            $offset += strlen($serialized);
-            $result[$key] = $value;
+            // A value that does not unserialize means the data is corrupt
+            // (truncated, edited). Native session_decode() gives up on the
+            // whole session here; so do we. Skipping to the next `;` and
+            // carrying on resumed parsing INSIDE the broken value, so a stored
+            // string such as `x;role|b:1;` became a real `role` key.
+            return [];
         }
+        // The value's length is taken from its re-serialization; if the stored
+        // bytes are not exactly that (a hand-edited or foreign encoding) the
+        // next key would be read from the wrong offset — treat it as corrupt.
+        $serialized = serialize($value);
+        if (substr_compare($data, $serialized, $offset, strlen($serialized)) !== 0) {
+            return [];
+        }
+        $offset += strlen($serialized);
+        $result[$key] = $value;
     }
     return $result;
 }
@@ -131,7 +156,7 @@ function zeal_session_opened_handler(): ?\SessionHandlerInterface
         return null;
     }
     if (!isset($g->session_params['handler_opened'])) {
-        $save_path = $g->session_params['save_path'] ?? \ZealPHP\App::$session_save_path;
+        $save_path = $g->session_params['save_path'] ?? \ZealPHP\App::sessionSavePath();
         $name = $g->session_params['name'] ?? 'PHPSESSID';
         $handler->open(is_string($save_path) ? $save_path : '', is_string($name) ? $name : 'PHPSESSID');
         $params = $g->session_params;
@@ -140,6 +165,56 @@ function zeal_session_opened_handler(): ?\SessionHandlerInterface
         $g->session_params = $params;
     }
     return $handler;
+}
+
+/**
+ * @internal Call the open handler's `close()` once, as native
+ * session_write_close()/session_destroy() do, and mark it closed so a later
+ * session_start() in the same request opens it again. Without it a handler
+ * never got the chance to free per-request state (the Table handler's
+ * per-coroutine read snapshot grew for the worker's lifetime).
+ */
+function zeal_session_close_handler(): void
+{
+    $g = RequestContext::instance();
+    if (!isset($g->session_params['handler_opened'])) {
+        return;
+    }
+    $handler = $g->session_params['handler'] ?? null;
+    $params = $g->session_params;
+    unset($params['handler_opened']);
+    $g->session_params = $params;
+    if ($handler instanceof \SessionHandlerInterface) {
+        $handler->close();
+    }
+}
+
+/**
+ * Emit the session cookie for $id with the configured cookie params.
+ *
+ * @internal
+ */
+function zeal_session_emit_cookie(string $name, string $id): void
+{
+    $g = RequestContext::instance();
+    if ($g->openswoole_response === null) {
+        return;
+    }
+    $cookieParams = zeal_session_get_cookie_params();
+    $g->openswoole_response->cookie(
+        $name,
+        $id,
+        $cookieParams['lifetime'] ? time() + (int)$cookieParams['lifetime'] : 0,
+        $cookieParams['path'],
+        $cookieParams['domain'],
+        $cookieParams['secure'],
+        $cookieParams['httponly'],
+        // SameSite (8th arg) — was computed ('Lax') but never emitted, so an
+        // explicit None (iframe/OAuth/SSO) or Strict override was silently
+        // dropped on the wire. The None⇒Secure invariant is enforced in
+        // zeal_session_get_cookie_params().
+        $cookieParams['samesite'] ?? 'Lax'
+    );
 }
 
 function zeal_session_start(): bool
@@ -151,7 +226,13 @@ function zeal_session_start(): bool
     // starts the session, then the file's session_start() re-reads from disk.
     // In sync mode (process-wide $g), SessionManager re-starts cleanly each
     // request via _session_started reset — the second call is harmless.
-    if ($g->_session_started && \ZealPHP\App::$coroutine_isolated_superglobals) {
+    // Already started this request: a second session_start() (the app's own,
+    // after the manager's) is a no-op, like PHP's. Re-running it reloaded the
+    // store over $g->session and dropped what the request had written since —
+    // a CSRF token issued on this GET, a just-rotated id. Applies whenever the
+    // session state is per-request: coroutine mode and coroutine-legacy.
+    if ($g->_session_started
+        && (\ZealPHP\App::$coroutine_isolated_superglobals || !\ZealPHP\App::$superglobals)) {
         return true;
     }
 
@@ -162,7 +243,7 @@ function zeal_session_start(): bool
         // behaviour is unchanged). Hardcoding the literal here silently
         // dropped the configured path for the inline file backend AND
         // FileSessionHandler.
-        $g->session_params['save_path'] = \ZealPHP\App::$session_save_path;
+        $g->session_params['save_path'] = \ZealPHP\App::sessionSavePath();
     }
     if (!isset($g->session_params['name'])) {
         $g->session_params['name'] = 'PHPSESSID';
@@ -243,21 +324,7 @@ function zeal_session_start(): bool
         && is_string($session_id)
         && $session_id !== ''
         && $g->openswoole_response->isWritable()) {
-        $cookieParams = zeal_session_get_cookie_params();
-        $g->openswoole_response->cookie(
-            $sessionNameForCookie,
-            $session_id,
-            $cookieParams['lifetime'] ? time() + (int)$cookieParams['lifetime'] : 0,
-            $cookieParams['path'],
-            $cookieParams['domain'],
-            $cookieParams['secure'],
-            $cookieParams['httponly'],
-            // SameSite (8th arg) — was computed ('Lax') but never emitted, so an
-            // explicit None (iframe/OAuth/SSO) or Strict override was silently
-            // dropped on the wire. The None⇒Secure invariant is enforced in
-            // zeal_session_get_cookie_params().
-            $cookieParams['samesite'] ?? 'Lax'
-        );
+        zeal_session_emit_cookie($sessionNameForCookie, $session_id);
     }
 
     /** @var array<string, mixed> $session_data */
@@ -313,6 +380,35 @@ function zeal_session_start(): bool
     // $_SESSION would never round-trip through $g->session. Mirror to both:
     // $_SESSION is what user/Symfony code reads/writes, $g->session is what
     // coroutine-mode code reads/writes via the typed property.
+    // session.use_strict_mode where no session manager runs. When the CGI
+    // subprocess owns sessions (App::cgiOwnsSessions()) the managers step
+    // aside, so an in-process route's own session_start() is the only gate:
+    // without this it took the client's PHPSESSID as-is, and wrote it, for an
+    // id the store never issued (session fixation). Rotate like PHP does.
+    if (!$session_existed
+        && $hadIncomingSessionCookie
+        && \ZealPHP\App::$session_strict_mode
+        && \ZealPHP\App::cgiOwnsSessions()
+        && $session_id === ($g->cookie[$sessionNameForCookie] ?? null)
+        // Not an id this request minted itself (a second session_start()).
+        && $session_id !== ($g->session_params['strict_minted'] ?? null)) {
+        $fresh = session_create_id();
+        if (is_string($fresh) && $fresh !== '') {
+            $session_id = $fresh;
+            $session_data = [];
+            zeal_session_id($fresh);
+            $params = $g->session_params;
+            $params['session_id'] = $fresh;
+            $params['strict_minted'] = $fresh;
+            $g->session_params = $params;
+            if ((bool) ini_get('session.use_cookies')
+                && $g->openswoole_response !== null
+                && $g->openswoole_response->isWritable()) {
+                zeal_session_emit_cookie($sessionNameForCookie, $fresh);
+            }
+        }
+    }
+
     // #374: framework bookkeeping no longer rides $_SESSION (it lives in
     // $g->memo) — strip the two legacy keys that pre-fix releases persisted
     // into user stores, so they don't survive via the loaded-keys merge.
@@ -323,6 +419,7 @@ function zeal_session_start(): bool
     // in-request unset() (must delete from store) from a concurrent add
     // (must survive the merge).
     $g->session_loaded_keys = array_keys($session_data);
+    $g->session_loaded_digest = zeal_session_digest($session_data);
     // Record store-entry existence for the managers' strict-mode check
     // (ext-zealphp#2 — see the $session_existed comment above).
     $params = $g->session_params;
@@ -584,6 +681,58 @@ function zeal_session_name($name = null)
 }
 
 /**
+ * @internal md5 of each value's serialization — the load-time snapshot
+ * zeal_session_merge_onto_store() diffs against (`$g->session_loaded_digest`).
+ *
+ * @param array<array-key, mixed> $data
+ * @return array<string, string>
+ */
+function zeal_session_digest(array $data): array
+{
+    $digest = [];
+    foreach ($data as $k => $v) {
+        $digest[(string) $k] = md5(serialize($v));
+    }
+    return $digest;
+}
+
+/**
+ * @internal Apply this request's changes to what the store holds NOW.
+ *
+ * Only keys whose value differs from the load-time snapshot are written, and
+ * only keys this request loaded and then unset are removed. Everything else
+ * comes from `$existing`, so a key a concurrent request added, changed or
+ * removed — and this request never touched — keeps the concurrent state. The
+ * old merge (`array_merge($existing, $current)`) wrote back every loaded key,
+ * reverting the other request's change and resurrecting the key it removed.
+ * The merge is still top-level (shallow): two requests changing the same key
+ * are last-write-wins.
+ *
+ * @param array<array-key, mixed> $existing  Store contents read just before the write.
+ * @param array<array-key, mixed> $current   This request's session.
+ * @param array<string, string>   $loaded    `$g->session_loaded_digest`.
+ * @param list<string>            $loadedKeys `$g->session_loaded_keys`.
+ * @return array<string, mixed>
+ */
+function zeal_session_merge_onto_store(array $existing, array $current, array $loaded, array $loadedKeys): array
+{
+    /** @var array<string, mixed> $merged session keys are strings */
+    $merged = $existing;
+    foreach ($current as $k => $v) {
+        $key = (string) $k;
+        if (!isset($loaded[$key]) || $loaded[$key] !== md5(serialize($v))) {
+            $merged[$key] = $v;
+        }
+    }
+    foreach ($loadedKeys as $k) {
+        if (!array_key_exists($k, $current)) {
+            unset($merged[$k]);
+        }
+    }
+    return $merged;
+}
+
+/**
  * Write session data to the backing store and mark the session inactive.
  *
  * Coroutine-safe replacement for PHP's `session_write_close()`. Performs a
@@ -598,6 +747,44 @@ function zeal_session_name($name = null)
  * `PHP_SESSION_NONE` for the remainder of the request.
  */
 function zeal_session_write_close(): bool
+{
+    return zeal_session_store(true);
+}
+
+/**
+ * Persist the active session to its store WITHOUT closing it — called by the
+ * response layer just before the response's last byte is sent.
+ *
+ * The managers used to write the session in their `finally`, i.e. after
+ * `end()`. A client that issues its next request as soon as the response
+ * arrives (a redirect after login/logout, an OAuth state set before the
+ * provider bounce) could then read the store before the write landed, so a
+ * logout was not yet visible and an OAuth/CSRF state could be lost. Saving
+ * here closes that window; the manager's close afterwards skips the write
+ * when nothing changed since, and writes again when the app kept mutating
+ * the session after the response went out. No-op when no session is active.
+ */
+function zeal_session_persist_before_send(): void
+{
+    $g = RequestContext::instance();
+    if (!($g->_session_started ?? false)) {
+        return;
+    }
+    try {
+        zeal_session_store(false);
+    } catch (\Throwable $e) {
+        // Same contract as the managers: a failed write fails this request's
+        // session, never the response. The manager's close retries it.
+        $g->_session_persisted_hash = null;
+        \ZealPHP\elog('Session write failed: ' . $e->getMessage(), 'error');
+    }
+}
+
+/**
+ * @internal Shared body of zeal_session_write_close() ($close = true) and
+ * zeal_session_persist_before_send() ($close = false).
+ */
+function zeal_session_store(bool $close): bool
 {
     $g = RequestContext::instance();
 
@@ -634,8 +821,15 @@ function zeal_session_write_close(): bool
         assert(is_string($save_path));
         $session_file = $save_path . '/sess_' . basename((string)$session_id);
         $data = $useGSession ? $g->session : $GLOBALS['_SESSION'];
-        $wHandler = zeal_session_opened_handler();   // #369: guarantees open() ran
-        if ($wHandler instanceof \SessionHandlerInterface) {
+        // The id is part of the fingerprint: a session_regenerate_id() after the
+        // early save must still be written under the new id.
+        $hash = md5($session_file . "\0" . serialize($data));
+        $unchanged = $g->_session_persisted_hash === $hash;
+        $wHandler = $unchanged ? null : zeal_session_opened_handler();   // #369: guarantees open() ran
+        if ($unchanged) {
+            // Already persisted before the response was sent, and the app has
+            // not touched the session since — nothing to write.
+        } elseif ($wHandler instanceof \SessionHandlerInterface) {
             // Merge with stored data to mitigate concurrent-request races.
             // Apache serialises session access via file locks; ZealPHP
             // handles requests concurrently, so two requests both reading
@@ -660,23 +854,32 @@ function zeal_session_write_close(): bool
             // re-read, re-merge, and retry. Max 3 attempts; on exhaustion
             // fall through to a plain write (last-writer-wins, same as
             // the pre-locking behavior — safe degradation).
+            //
+            // A session this request loaded with data that is no longer in the
+            // store was destroyed (logout) or rotated by another request since
+            // our read: writing would bring it back, so the write is dropped.
+            // A handler only exposes "no data" for a missing entry, so a
+            // session another request emptied completely is treated the same.
             $current = is_array($data) ? $data : [];
+            $mustExist = $g->session_loaded_digest !== [];
             $maxRetries = 3;
             for ($attempt = 0; $attempt < $maxRetries; $attempt++) {
                 $existing = $wHandler->read((string) $session_id);
-                if (is_string($existing) && $existing !== '') {
-                    $existingData = php_session_decode_to_array($existing);
-                    if ($existingData !== []) {
-                        $merged = array_merge($existingData, $current);
-                        foreach ($g->session_loaded_keys as $loadedKey) {
-                            if (!array_key_exists($loadedKey, $current)) {
-                                unset($merged[$loadedKey]);
-                            }
-                        }
-                        $data = $merged;
-                    } else {
-                        $data = $current;
+                if (!is_string($existing) || $existing === '') {
+                    if ($mustExist) {
+                        $data = null;
+                        break;
                     }
+                    $data = $current;
+                } else {
+                    // An entry that does not decode is corrupt: replace it.
+                    $existingData = php_session_decode_to_array($existing);
+                    $data = $existingData === [] ? $current : zeal_session_merge_onto_store(
+                        $existingData,
+                        $current,
+                        $g->session_loaded_digest,
+                        $g->session_loaded_keys
+                    );
                 }
                 /** @var array<string, mixed> $data */
                 $written = $wHandler->write(
@@ -698,31 +901,84 @@ function zeal_session_write_close(): bool
             // Read-merge-write under the lock: re-read the file's current
             // state (another coroutine may have written since our read at
             // session_start), merge with our changes, write back.
+            //
+            // A session this request loaded with data must still have its file:
+            // if another request destroyed it (or rotated the id) since our
+            // read, `c+` would recreate it with our stale copy — a logout undone
+            // by any request that was in flight. Open without creating instead.
+            // A destroy that unlinks the file while we hold it only leaves our
+            // write on the unlinked inode.
             /** @var array<string, mixed> $data */
-            $fp = fopen($session_file, 'c+');
+            $current = $data;
+            $mustExist = $g->session_loaded_digest !== [];
+            $fp = @fopen($session_file, $mustExist ? 'r+' : 'c+');
+            if ($fp !== false && !$mustExist) {
+                @chmod($session_file, 0600);   // native PHP's mode; 'c+' honours the umask (0644)
+            }
             if ($fp !== false) {
                 flock($fp, LOCK_EX);
-                $diskContents = stream_get_contents($fp);
-                if (is_string($diskContents) && $diskContents !== '') {
-                    $diskData = php_session_decode_to_array($diskContents);
-                    $current = $data;
-                    $data = array_merge($diskData, $current);
-                    foreach ($g->session_loaded_keys as $loadedKey) {
-                        if (!array_key_exists($loadedKey, $current)) {
-                            unset($data[$loadedKey]);
+                try {
+                    $diskContents = stream_get_contents($fp);
+                    $diskData = is_string($diskContents) && $diskContents !== ''
+                        ? php_session_decode_to_array($diskContents)
+                        : [];
+                    if ($mustExist && $diskData === []) {
+                        // This request loaded data, and the store now holds none
+                        // (another request emptied it — a logout — or it is
+                        // unreadable). Writing our load-time copy back would undo
+                        // that, as the handler branch already refuses to.
+                        $data = null;
+                    } else {
+                        if ($diskData !== []) {
+                            $data = zeal_session_merge_onto_store(
+                                $diskData,
+                                $current,
+                                $g->session_loaded_digest,
+                                $g->session_loaded_keys
+                            );
                         }
+                        // Encode BEFORE truncating: an encoder failure (or an
+                        // error handler that throws) must not leave the session
+                        // file emptied.
+                        $encoded = php_session_encode_from_array($data);
+                        ftruncate($fp, 0);
+                        rewind($fp);
+                        fwrite($fp, $encoded);
+                        fflush($fp);
                     }
+                } finally {
+                    flock($fp, LOCK_UN);
+                    fclose($fp);
                 }
-                ftruncate($fp, 0);
-                rewind($fp);
-                fwrite($fp, php_session_encode_from_array($data));
-                fflush($fp);
-                flock($fp, LOCK_UN);
-                fclose($fp);
+            } elseif ($mustExist) {
+                $data = null;
             } else {
                 file_put_contents($session_file, php_session_encode_from_array($data));
+                @chmod($session_file, 0600);
             }
         }
+
+        if (!$close) {
+            // Keep the session open. Remember what was stored, and treat every
+            // key that is now in the store as loaded (the store is the new
+            // snapshot), so a key the app unsets after this point is deleted by
+            // the final close instead of being resurrected from the store by
+            // the merge, and only later changes are written by it.
+            if (is_array($data)) {
+                $g->_session_persisted_hash = $hash;
+                $g->session_loaded_keys = array_values(array_unique(array_merge(
+                    $g->session_loaded_keys,
+                    array_map('strval', array_keys($data))
+                )));
+                $g->session_loaded_digest = zeal_session_digest($data);
+            }
+            return true;
+        }
+        $g->_session_persisted_hash = null;
+        // Native session_write_close() ends with the handler's close(): it is
+        // where a handler frees what it holds for this request (#M6 — the
+        // Table handler's per-coroutine read snapshot was never released).
+        zeal_session_close_handler();
 
         // Mark the session closed so a RE-ENTRANT close is a true no-op (#2).
         // The framework runs a double session lifecycle: a handler may call
@@ -737,6 +993,7 @@ function zeal_session_write_close(): bool
         // guarantees no stale deletion loop can fire even if a close still re-enters.
         $g->_session_started = false;
         $g->session_loaded_keys = [];
+        $g->session_loaded_digest = [];
 
         // Clear the canonical store so zeal_session_status() reports
         // PHP_SESSION_NONE for the remainder of the request. #379: every
@@ -776,6 +1033,7 @@ function zeal_session_destroy(): bool
     $dHandler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
     if ($dHandler instanceof \SessionHandlerInterface) {
         $dHandler->destroy((string) $session_id);
+        zeal_session_close_handler();
     } else {
         $session_file = $save_path . '/sess_' . basename((string)$session_id);
         if (file_exists($session_file)) {
@@ -795,6 +1053,9 @@ function zeal_session_destroy(): bool
     unset($g->cookie[$session_name]);
 
     $g->_session_started = false;
+    $g->session_loaded_keys = [];
+    $g->session_loaded_digest = [];
+    $g->_session_persisted_hash = null;
 
     return true;
 }
@@ -881,6 +1142,13 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
             }
         }
     }
+
+    // The entry under the new id was written from this request's data (or is
+    // still to be created, for a file deleted above), not loaded: the close
+    // writes the whole session to it rather than diffing against the old id's
+    // load-time snapshot — and must create it rather than treat it as
+    // destroyed.
+    $g->session_loaded_digest = [];
 
     // Issue #19: emit a Set-Cookie for the NEW ID so the client switches over.
     // Without this the browser keeps sending the old PHPSESSID and never sees
@@ -1215,15 +1483,27 @@ function zeal_session_gc(int $maxlifetime): int
     $maxlifetime = max(1, $maxlifetime);
     $g = RequestContext::instance();
 
+    // This runs from a worker timer, i.e. outside any request: there are no
+    // session_params, so the configured App::sessionSavePath() is the path.
+    // Falling back to the literal default swept the system session dir (other
+    // PHP apps' sessions, with their own lifetimes) and never expired sessions
+    // kept under a custom path.
+    $rawPath = $g->session_params['save_path'] ?? \ZealPHP\App::sessionSavePath();
+    $savePath = is_string($rawPath) ? $rawPath : '';
+
+    // open() first, as the SessionHandlerInterface contract requires:
+    // FileSessionHandler only learns its directory there, and gc() before it
+    // threw an Error that killed worker 0. Not recorded in session_params —
+    // this is not a request's session.
     $handler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
     if ($handler instanceof \SessionHandlerInterface) {
+        $name = $g->session_params['name'] ?? 'PHPSESSID';
+        $handler->open($savePath, is_string($name) ? $name : 'PHPSESSID');
         $res = $handler->gc($maxlifetime);
         return is_int($res) ? $res : 0;
     }
 
-    $rawPath = $g->session_params['save_path'] ?? null;
-    $savePath = is_string($rawPath) && $rawPath !== '' ? $rawPath : '/var/lib/php/sessions';
-    if (!is_dir($savePath)) {
+    if ($savePath === '' || !is_dir($savePath)) {
         return 0;
     }
 

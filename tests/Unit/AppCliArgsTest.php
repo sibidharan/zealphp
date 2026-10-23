@@ -122,14 +122,28 @@ class AppCliArgsTest extends TestCase
         $this->assertSame(54326, $out['_port']);
     }
 
-    public function testUnknownFlagIgnoredButStartStillReturns(): void
+    /**
+     * An unknown flag is an error, not a warning: an ignored `--prot 9000`
+     * booted on the default port (and its orphan cleanup could kill the server
+     * that owned it). Run in a subprocess because the CLI exits.
+     */
+    public function testUnknownFlagRefusesToStart(): void
     {
-        // Unknown -x emits a warning to stdout and is ignored; start proceeds.
-        ob_start();
-        $out = $this->parse(['app.php', 'start', '-p', '54327', '-x']);
-        $warning = ob_get_clean();
-        $this->assertSame(54327, $out['_port']);
-        $this->assertStringContainsString("unknown flag '-x'", (string) $warning);
+        $code = 'require ' . var_export(ZEALPHP_ROOT . '/vendor/autoload.php', true) . ';'
+            . '$_SERVER["argv"] = ["app.php", "start", "-p", "54327", "-x"];'
+            . '\\ZealPHP\\CLI::parseCliArgs(); echo "RETURNED";';
+        exec(escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' 2>&1', $out, $status);
+        $text = implode("\n", $out);
+        $this->assertNotSame(0, $status, $text);
+        $this->assertStringContainsString("unknown flag '-x'", $text);
+        $this->assertStringNotContainsString('RETURNED', $text);
+    }
+
+    public function testEqualsFormOfValueFlags(): void
+    {
+        $out = $this->parse(['app.php', 'start', '--port=54329', '--workers=3']);
+        $this->assertSame(54329, $out['_port']);
+        $this->assertSame(3, $out['worker_num']);
     }
 
     public function testLogFilterFlagsAreParsedButNotInStartOverrides(): void

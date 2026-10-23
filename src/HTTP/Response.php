@@ -274,7 +274,11 @@ class Response
      */
     public function redirect(string $url, int $status = 302, bool $allowExternal = false): void
     {
-        if (strpbrk($url, "\r\n\0") !== false) {
+        // Any C0 control or DEL, anywhere: besides header injection (CR/LF),
+        // browsers silently drop tab/newline inside a URL and strip leading
+        // controls, so `/\t/evil.com` and `"\x01//evil.com"` both become
+        // `//evil.com` after this guard has looked at them.
+        if (preg_match('/[\x00-\x1F\x7F]/', $url) === 1) {
             throw new \InvalidArgumentException('Redirect URL contains control characters');
         }
         // Leading/trailing whitespace bypasses the scheme-prefix check below:
@@ -299,12 +303,24 @@ class Response
         // Open-redirect guard (CWE-601). Refuse cross-origin / protocol-relative
         // targets by default — warning-and-emitting let `$res->redirect($_GET['next'])`
         // ship an open redirect. Opt in with $allowExternal when truly intended.
+        $parts = parse_url($url);
         if (preg_match('#^//#', $url)) {
             if (!$allowExternal) {
                 throw new \InvalidArgumentException('Protocol-relative redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
             }
             \ZealPHP\elog('[security] Protocol-relative redirect detected: ' . $url, 'warn');
-        } elseif (isset(parse_url($url)['host']) && !$this->isSameOrigin($url)) {
+        } elseif (preg_match('#^[a-z][a-z0-9+.-]*:#i', $url) === 1 && !isset($parts['host'])) {
+            // A scheme with no host that parse_url could read: `https:///evil.com`
+            // (parse_url fails, browsers skip the extra slashes) or
+            // `https:evil.com` (a browser treats it as an authority when the
+            // scheme differs from the page's). Neither is a same-origin path.
+            if (!$allowExternal) {
+                throw new \InvalidArgumentException('Redirect URL with a scheme but no readable host blocked: ' . $url . ' (pass $allowExternal=true to permit)');
+            }
+            \ZealPHP\elog('[security] Hostless scheme redirect: ' . $url, 'warn');
+        } elseif ($parts === false) {
+            throw new \InvalidArgumentException('Malformed redirect URL');
+        } elseif (isset($parts['host']) && !$this->isSameOrigin($url)) {
             // Cross-origin per the RFC 6454 (scheme, host, port) triple (#432).
             if (!$allowExternal) {
                 throw new \InvalidArgumentException('Cross-origin redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
@@ -335,7 +351,7 @@ class Response
             foreach ($this->rawCookiesList as $cookie) {
                 $this->parent->rawCookie(...$cookie);
             }
-            $this->parent->end();
+            $this->endParent();
         }
     }
 
@@ -349,19 +365,73 @@ class Response
 
     public function cookie(string $key, string $value = '', int $expire = 0, string $path = '/', string $domain = '', bool $secure = false, bool $httponly = false, string $samesite = '', string $priority = ''): bool
     {
+        if (!self::cookieAttributesAreSafe($key, $path, $domain, $samesite, $priority)) {
+            return false;
+        }
         $this->cookiesList[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
         return true;
     }
 
     public function rawCookie(string $key, string $value = '', int $expire = 0, string $path = '/', string $domain = '', bool $secure = false, bool $httponly = false, string $samesite = '', string $priority = ''): bool
     {
+        // The raw form is not url-encoded, so the value is an attribute
+        // boundary too (native setrawcookie() rejects the same set).
+        if (strpbrk($value, self::COOKIE_SEPARATORS) !== false) {
+            trigger_error('Cookie blocked: raw cookie value contains ",; \\t\\r\\n\\013\\014" or NUL', E_USER_WARNING);
+            return false;
+        }
+        if (!self::cookieAttributesAreSafe($key, $path, $domain, $samesite, $priority)) {
+            return false;
+        }
         $this->rawCookiesList[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
         return true;
     }
 
+    /** Characters that end a cookie name or attribute value (PHP's own list, plus NUL). */
+    private const COOKIE_SEPARATORS = ",; \t\r\n\013\014\0";
+
+    /**
+     * Native setcookie() rules for the name and attributes: a `;` in a path
+     * from user input used to add attributes of the caller's choosing
+     * (`path=/; Domain=evil.test`).
+     */
+    private static function cookieAttributesAreSafe(string $name, string $path, string $domain, string $samesite, string $priority): bool
+    {
+        if ($name === '' || strpbrk($name, '=' . self::COOKIE_SEPARATORS) !== false) {
+            trigger_error('Cookie blocked: invalid name', E_USER_WARNING);
+            return false;
+        }
+        if (strpbrk($path, self::COOKIE_SEPARATORS) !== false || strpbrk($domain, self::COOKIE_SEPARATORS) !== false) {
+            trigger_error('Cookie blocked: path/domain contains ",; \\t\\r\\n\\013\\014" or NUL', E_USER_WARNING);
+            return false;
+        }
+        if (preg_match('/[^A-Za-z]/', $samesite . $priority) === 1) {
+            trigger_error('Cookie blocked: samesite/priority must be a plain word', E_USER_WARNING);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * The last bytes of a response go out through here (or sendfileParent()):
+     * the session is stored first, so a client that follows up at once — a
+     * redirect after login/logout — reads the session this response changed.
+     */
+    private function endParent(?string $data = null): bool
+    {
+        \ZealPHP\Session\zeal_session_persist_before_send();
+        return $this->parent->end($data);
+    }
+
+    private function sendfileParent(string $path, int $offset, int $length): bool
+    {
+        \ZealPHP\Session\zeal_session_persist_before_send();
+        return $this->parent->sendfile($path, $offset, $length);
+    }
+
     public function end(?string $data = null): bool
     {
-        return $this->parent->end($data);
+        return $this->endParent($data);
     }
 
     /**
@@ -385,7 +455,7 @@ class Response
         if ($method === 'HEAD') {
             $this->flush();
             if ($this->parent->isWritable()) {
-                $this->parent->end();
+                $this->endParent();
             }
             return;
         }
@@ -402,7 +472,7 @@ class Response
             // Swallow exceptions from disconnected client writes inside streaming callbacks
         }
         if ($this->parent->isWritable()) {
-            $this->parent->end();
+            $this->endParent();
         }
     }
 
@@ -655,6 +725,12 @@ class Response
         );
     }
 
+    /** Sniffed types sendFile() downgrades to text/plain (see resolveFileMetadata()). */
+    private const SCRIPTABLE_SNIFFED_TYPES = [
+        'text/html', 'image/svg+xml', 'application/xhtml+xml', 'text/xml', 'application/xml',
+        'text/javascript', 'application/javascript',
+    ];
+
     /**
      * Resolve a file's response metadata for `sendFile()` (#317): walk the
      * suffix chain via {@see MimeResolver} (Apache `mod_mime` semantics), then
@@ -673,6 +749,12 @@ class Response
             $type = $resolved['encoding'] !== null
                 ? 'application/octet-stream'
                 : (mime_content_type($path) ?: 'application/octet-stream');
+            // Never let content sniffing pick a type the browser runs script
+            // in: an uploaded `avatar` (no suffix) holding HTML or SVG would be
+            // served as a page on the app's origin (stored XSS).
+            if (in_array($type, self::SCRIPTABLE_SNIFFED_TYPES, true)) {   // mime_content_type(): bare lowercase type
+                $type = 'text/plain';
+            }
         }
         return ['type' => $type, 'encoding' => $resolved['encoding'], 'languages' => $resolved['languages']];
     }
@@ -687,7 +769,7 @@ class Response
             $this->status(404);
             $this->g->_streaming = true;
             $this->flush();
-            $this->parent->end('File not found');
+            $this->endParent('File not found');
             return;
         }
 
@@ -714,6 +796,9 @@ class Response
             $this->header('Content-Language', implode(', ', $meta['languages']));
         }
         $this->header('Accept-Ranges', 'bytes');
+        // The type above is the one we mean; don't let a browser re-sniff an
+        // upload into HTML.
+        $this->header('X-Content-Type-Options', 'nosniff');
 
         if ($filename !== '') {
             // RFC 6266 / RFC 5987: HTTP field values are US-ASCII (RFC 9110 §5.5),
@@ -762,7 +847,7 @@ class Response
         if ($cond === 304 || $cond === 412) {
             $this->status($cond);
             $this->flush();
-            $this->parent->end('');
+            $this->endParent('');
             return;
         }
 
@@ -779,7 +864,7 @@ class Response
             $this->status(200);
             $this->header('Content-Length', (string) $total);
             $this->flush();
-            $this->parent->end('');
+            $this->endParent('');
             return;
         }
 
@@ -813,7 +898,7 @@ class Response
             $this->status(416);
             $this->header('Content-Range', "bytes */{$total}");
             $this->flush();
-            $this->parent->end('');
+            $this->endParent('');
             return;
         }
 
@@ -827,18 +912,29 @@ class Response
                 $this->header('Content-Range', "bytes {$start}-{$end}/{$total}");
                 $this->header('Content-Length', (string) $length);
                 $this->flush();
-                $this->parent->sendfile($path, $start, $length);
+                $this->sendfileParent($path, $start, $length);
                 return;
             }
 
-            $this->sendMultipart($path, $ranges, $total, $mime);
-            return;
+            // multipart/byteranges is assembled in memory (see sendMultipart()),
+            // so one `Range: bytes=0-0,2-` on a large file would buffer the whole
+            // file per request and trip memory_limit, killing the worker and
+            // every request on it. Past the cap, ignore the Range (RFC 9110
+            // §14.2 lets a server do that) and stream a 200 with sendfile().
+            $bytes = 0;
+            foreach ($ranges as [$start, $end]) {
+                $bytes += $end - $start + 1;
+            }
+            if ($bytes <= self::MULTIPART_BUFFER_LIMIT) {
+                $this->sendMultipart($path, $ranges, $total, $mime);
+                return;
+            }
         }
 
         // status === 'ignore' — full body (200).
         $this->header('Content-Length', (string) $total);
         $this->flush();
-        $this->parent->sendfile($path, 0, $total);
+        $this->sendfileParent($path, 0, $total);
     }
 
     /**
@@ -917,6 +1013,9 @@ class Response
         return true;
     }
 
+    /** Largest multi-range payload (sum of slices) sendFile() buffers for a 206. */
+    public const MULTIPART_BUFFER_LIMIT = 8 * 1024 * 1024;
+
     /**
      * Emit a 206 multipart/byteranges response for two or more ranges,
      * streaming each slice straight from the file. Body framing mirrors
@@ -954,7 +1053,7 @@ class Response
 
         $fh = fopen($path, 'rb');
         if ($fh === false) {
-            $this->parent->end('');
+            $this->endParent('');
             return;
         }
 
@@ -963,10 +1062,10 @@ class Response
         // OpenSwoole sees a write() it switches the response to chunked
         // transfer-encoding and silently drops the Content-Length we queued above
         // — diverging from Apache, which sends multipart/byteranges length-
-        // delimited. coalesceRanges() in parseRange() caps Σ(slice) ≤ $total, so
-        // the buffered payload is bounded by the file size (the same byte budget
-        // a 200 would write). Result: the precomputed Content-Length survives on
-        // the wire, so clients can show a progress total for the multi-range fetch.
+        // delimited. sendFile() only gets here with Σ(slice) ≤
+        // MULTIPART_BUFFER_LIMIT, which bounds the buffered payload. Result: the
+        // precomputed Content-Length survives on the wire, so clients can show a
+        // progress total for the multi-range fetch.
         $payload = '';
         foreach ($ranges as $i => [$start, $end]) {
             $payload .= ($i > 0 ? "\r\n" : '') . $partHeaders[$i];
@@ -983,7 +1082,7 @@ class Response
         }
         fclose($fh);
         $payload .= $closing;
-        $this->parent->end($payload);
+        $this->endParent($payload);
     }
 
     /**

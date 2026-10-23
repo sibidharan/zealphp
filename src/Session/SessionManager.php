@@ -212,6 +212,7 @@ class SessionManager
         $g->_streaming               = null;
         $g->ignore_user_abort_state  = 0;
         $g->_session_started         = false;
+        $g->_session_persisted_hash  = null;
         // RequestContext::once() is documented as REQUEST-scoped memoization;
         // on the singleton its scratch space otherwise survives forever, so
         // request N+1's once('current_user', ...) returned request N's user.

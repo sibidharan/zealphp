@@ -382,10 +382,38 @@ class PhpInfoTest extends TestCase
 
     public function testVariablesNumericKeyCastToString(): void
     {
-        $html = PhpInfo::render(INFO_VARIABLES, ['_COOKIE' => [0 => 'zero', 7 => 'seven']]);
-        $this->assertStringContainsString(self::varRow('_COOKIE', '0', 'zero'), $html);
-        $this->assertStringContainsString(self::varRow('_COOKIE', '7', 'seven'), $html);
+        $html = PhpInfo::render(INFO_VARIABLES, ['_GET' => [0 => 'zero', 7 => 'seven']]);
+        $this->assertStringContainsString(self::varRow('_GET', '0', 'zero'), $html);
+        $this->assertStringContainsString(self::varRow('_GET', '7', 'seven'), $html);
+        $html = PhpInfo::render(INFO_VARIABLES, ['_COOKIE' => [0 => 'zero']]);
         $this->assertStringContainsString('<h2>PHP Variables — $_COOKIE</h2>', $html);
+    }
+
+    public function testSecretsInTheEnvironmentAndRequestAreMasked(): void
+    {
+        // collectEnv() reads $_ENV when populated, else getenv(): set both.
+        $savedEnv = $_ENV;
+        putenv('ZPHP_PROBE_API_KEY=sk-live-should-not-show');
+        putenv('ZPHP_PROBE_PLAIN=visible-value');
+        if ($_ENV !== []) {
+            $_ENV['ZPHP_PROBE_API_KEY'] = 'sk-live-should-not-show';
+            $_ENV['ZPHP_PROBE_PLAIN'] = 'visible-value';
+        }
+        try {
+            $html = PhpInfo::render(INFO_ENVIRONMENT | INFO_VARIABLES, [
+                '_SERVER' => ['HTTP_AUTHORIZATION' => 'Bearer abc.def', 'DB_PASSWORD' => 'hunter2', 'PWD' => '/srv/app'],
+                '_COOKIE' => ['PHPSESSID' => 'sess-should-not-show'],
+            ]);
+            foreach (['sk-live-should-not-show', 'Bearer abc.def', 'hunter2', 'sess-should-not-show'] as $secret) {
+                $this->assertStringNotContainsString($secret, $html);
+            }
+            $this->assertStringContainsString('visible-value', $html);
+            $this->assertStringContainsString('/srv/app', $html, 'PWD is a directory, not a password');
+        } finally {
+            putenv('ZPHP_PROBE_API_KEY');
+            putenv('ZPHP_PROBE_PLAIN');
+            $_ENV = $savedEnv;
+        }
     }
 
     public function testVariablesIncludesServerBag(): void
@@ -617,7 +645,10 @@ class PhpInfoTest extends TestCase
             $this->assertStringContainsString(self::varRow('_SERVER', 'ZPHP_PROBE_SERVER', 'srv-val'), $html);
             $this->assertStringContainsString(self::varRow('_GET', 'zphp_probe_get', 'get-val'), $html);
             $this->assertStringContainsString(self::varRow('_POST', 'zphp_probe_post', 'post-val'), $html);
-            $this->assertStringContainsString(self::varRow('_COOKIE', 'zphp_probe_cookie', 'cookie-val'), $html);
+            // Cookie values are masked (an HttpOnly session cookie must not be
+            // readable from the page); the name still shows.
+            $this->assertStringContainsString(self::varRow('_COOKIE', 'zphp_probe_cookie', '******** (hidden by ZealPHP)'), $html);
+            $this->assertStringNotContainsString('cookie-val', $html);
         } finally {
             $g->server = $savedServer;
             $g->get    = $savedGet;

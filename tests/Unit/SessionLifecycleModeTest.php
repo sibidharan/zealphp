@@ -215,12 +215,45 @@ final class SessionLifecycleModeTest extends TestCase
     {
         $g = RequestContext::instance();
         $g->cookie = ['PHPSESSID' => 'test-sid-abc'];
+        // An issued id: strict mode only rotates ids the store never saw.
+        $dir = sys_get_temp_dir() . '/zp_sess_params_' . getmypid();
+        @mkdir($dir);
+        touch($dir . '/sess_test-sid-abc');
+        $g->session_params = ['save_path' => $dir];
+        try {
+            zeal_session_start();
 
-        zeal_session_start();
+            $this->assertArrayHasKey('session_id', $g->session_params,
+                'zeal_session_start must store session_id in session_params');
+            $this->assertSame('test-sid-abc', $g->session_params['session_id']);
+        } finally {
+            @unlink($dir . '/sess_test-sid-abc');
+            @rmdir($dir);
+        }
+    }
 
-        $this->assertArrayHasKey('session_id', $g->session_params,
-            'zeal_session_start must store session_id in session_params');
-        $this->assertSame('test-sid-abc', $g->session_params['session_id']);
+    public function testUnmanagedStartRotatesAnUnissuedClientId(): void
+    {
+        if (!App::cgiOwnsSessions()) {
+            $this->markTestSkipped('only applies when the CGI subprocess owns sessions');
+        }
+        $g = RequestContext::instance();
+        $g->cookie = ['PHPSESSID' => 'neverissued0123456789abcd'];
+        $dir = sys_get_temp_dir() . '/zp_sess_strict_' . getmypid();
+        @mkdir($dir);
+        $g->session_params = ['save_path' => $dir];
+        try {
+            zeal_session_start();
+            $this->assertNotSame('neverissued0123456789abcd', $g->session_params['session_id']);
+            $this->assertSame($g->session_params['session_id'], zeal_session_id(), 'session_id() reports the rotated id');
+            zeal_session_start();
+            $this->assertSame($g->session_params['strict_minted'], $g->session_params['session_id'], 'a second start keeps the minted id');
+        } finally {
+            foreach (glob($dir . '/*') ?: [] as $f) {
+                @unlink($f);
+            }
+            @rmdir($dir);
+        }
     }
 
     public function testStartStoresGeneratedSessionIdWhenNoCookie(): void

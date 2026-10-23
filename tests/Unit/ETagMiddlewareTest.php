@@ -104,21 +104,26 @@ class ETagMiddlewareTest extends TestCase
         $this->assertSame(304, $g->status);
     }
 
-    public function testWildcardIfNoneMatchNonGetReturns412(): void
+    /**
+     * Unsafe methods: the handler has already performed the write, so a 412
+     * here would claim nothing happened. The handler's own response stands.
+     */
+    public function testWildcardIfNoneMatchNonGetDoesNotFakeA412AfterTheWrite(): void
     {
-        $g = RequestContext::instance();
         $response = $this->process('PUT', ['if-none-match' => '*']);
-
-        $this->assertSame(412, $response->getStatusCode());
-        $this->assertSame('', (string) $response->getBody());
-        $this->assertSame(412, $g->status);
+        $this->assertSame(200, $response->getStatusCode());
     }
 
-    public function testIfMatchNoMatchReturns412(): void
+    public function testIfMatchNoMatchOnPutDoesNotFakeA412AfterTheWrite(): void
+    {
+        $response = $this->process('PUT', ['if-match' => '"nope"']);
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    public function testIfMatchNoMatchOnGetStillReturns412(): void
     {
         $g = RequestContext::instance();
-        $response = $this->process('PUT', ['if-match' => '"nope"']);
-
+        $response = $this->process('GET', ['if-match' => '"nope"']);
         $this->assertSame(412, $response->getStatusCode());
         $this->assertSame(412, $g->status);
     }

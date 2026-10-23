@@ -1,10 +1,10 @@
-<?
+<?php
 use ZealPHP\App;
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
-<? App::render('_head', ['title' => $title]);
+<?php App::render('_head', ['title' => $title]);
 ?>
 <body>
 

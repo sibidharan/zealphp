@@ -118,19 +118,26 @@ class IpAccessMiddleware implements MiddlewareInterface
      * Collapse an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) to its IPv4 form.
      * On a dual-stack listener the kernel presents IPv4 peers in this mapped
      * form, so without this an IPv4 allow/deny rule would silently never match
-     * the peer — a deny-list bypass. Non-mapped addresses are returned as-is.
+     * the peer — a deny-list bypass. Any other valid address is returned in
+     * canonical form, so a rule written `2001:DB8::0001` matches the peer
+     * `2001:db8::1` (it used to never match: a silent deny-list bypass).
+     * Anything inet_pton() can't read is returned as-is.
      */
     private function normalizeIp(string $ip): string
     {
         $bin = @inet_pton($ip);
-        if ($bin !== false && strlen($bin) === 16
+        if ($bin === false) {
+            return $ip;
+        }
+        if (strlen($bin) === 16
             && str_starts_with($bin, "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff")) {
             $v4 = @inet_ntop(substr($bin, 12));
             if ($v4 !== false) {
                 return $v4;
             }
         }
-        return $ip;
+        $canonical = @inet_ntop($bin);
+        return $canonical !== false ? $canonical : $ip;
     }
 
     /**

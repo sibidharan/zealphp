@@ -113,6 +113,40 @@ class CliLifecycleHelpersTest extends TestCase
         $this->assertFalse(CLI::claimOrphanIfAny(59997));
     }
 
+    /**
+     * A ZealPHP server started from ANOTHER app directory is not our orphan:
+     * claimOrphanIfAny() must leave it running. (It used to kill it — which
+     * took production down when a test instance booted on its port.)
+     */
+    public function testClaimOrphanLeavesAnotherAppsServerAlone(): void
+    {
+        if (!is_dir('/proc/self')) {
+            $this->markTestSkipped('needs /proc');
+        }
+        $dir = sys_get_temp_dir() . '/zp_other_app_' . getmypid();
+        @mkdir($dir);
+        $port = 59981;
+        file_put_contents("$dir/app.php", '<?php $s = stream_socket_server("tcp://127.0.0.1:' . $port . '"); sleep(30);');
+        $pid = (int) trim((string) shell_exec('cd ' . escapeshellarg($dir) . ' && '
+            . escapeshellarg(PHP_BINARY) . ' app.php > /dev/null 2>&1 & echo $!'));
+        try {
+            for ($i = 0; $i < 50 && $this->invoke('findPortOwnerPid', $port) === null; $i++) {
+                usleep(100000);
+            }
+            $this->assertNotNull($this->invoke('findPortOwnerPid', $port), 'fixture listener did not come up');
+            ob_start();
+            $claimed = CLI::claimOrphanIfAny($port);
+            $msg = (string) ob_get_clean();
+            $this->assertFalse($claimed);
+            $this->assertStringContainsString('not this app', $msg);
+            $this->assertTrue(posix_kill($pid, 0), "another app's server was killed");
+        } finally {
+            @posix_kill($pid, SIGKILL);
+            @unlink("$dir/app.php");
+            @rmdir($dir);
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────
     // cliStop() — no-server + stale-PID branches (private)
     // ─────────────────────────────────────────────────────────────

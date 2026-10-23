@@ -109,6 +109,23 @@ final class SecurityHardeningAuditTest extends TestCase
         $this->assertStringContainsString('\\r\\n', $line); // escaped, not raw
     }
 
+    public function testAccessLogEscapesQuotesBackslashesAndControlBytesInValuesOnly(): void
+    {
+        App::accessLogFormat('"%r" "%{User-Agent}i"');
+        $g = RequestContext::instance();
+        $g->server = [
+            'REQUEST_METHOD'  => 'GET',
+            'REQUEST_URI'     => '/x" 200 "forged',
+            'SERVER_PROTOCOL' => 'HTTP/1.1',
+            'HTTP_USER_AGENT' => "ua\x1b[31mred\\path\t",
+        ];
+        $line = App::formatAccessLogLine(200, 10, null);
+        $this->assertStringStartsWith('"GET /x\\" 200 \\"forged HTTP/1.1"', $line, 'a quote in a value cannot close the field');
+        $this->assertStringNotContainsString("\x1b", $line);
+        $this->assertStringContainsString('ua\\x1b[31mred\\\\path\\t"', $line);
+        App::accessLogFormat('%h %l %u %t "%r" %>s %b "%{Referer}i" "%{User-Agent}i"');
+    }
+
     // ── #257 — CGI pool subprocess env allowlist / httpoxy ───────
 
     public function testSubprocessEnvDropsHttpProxyByDefault(): void

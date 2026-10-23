@@ -79,13 +79,41 @@ final class ScopedMiddleware implements MiddlewareInterface
             : $request->getUri()->getPath();
         $rawPath = explode('?', $target, 2)[0];
         $path = \ZealPHP\App::normalizeRequestPath($rawPath);
-        $inScope = $this->regex
-            ? preg_match($this->pattern, $path) === 1
-            : str_starts_with($path, $this->pattern);
+        // A `/script.php/extra` URL is dispatched (ResponseMiddleware's PATH_INFO
+        // rewrite) as `/script.php` — or `/script` with ignore_php_ext — so an
+        // anchored scope like `#^/admin/?$#` has to see those too, or
+        // `/admin.php/x` runs admin.php outside it. Extra candidates can only
+        // widen the scope, never narrow it.
+        $candidates = [$path];
+        $script = \ZealPHP\App::$path_info ? strstr($path, '.php/', true) : false;
+        if ($script !== false) {
+            $candidates[] = $script . '.php';
+            $candidates[] = $script;
+        }
+        // The decoded form too (see App::resolveWhenMiddleware()): a front
+        // controller that decodes the URI itself sees /%61dmin as /admin.
+        foreach ($candidates as $candidate) {
+            $decoded = \ZealPHP\App::normalizeRequestPath(\ZealPHP\App::decodeUntilStable($candidate));
+            if ($decoded !== $candidate) {
+                $candidates[] = $decoded;
+            }
+        }
+        $inScope = $this->anyInScope($candidates);
 
         if ($inScope) {
             return $this->inner->process($request, $handler);
         }
         return $handler->handle($request);
+    }
+
+    /** @param list<string> $paths */
+    private function anyInScope(array $paths): bool
+    {
+        foreach ($paths as $path) {
+            if ($this->regex ? preg_match($this->pattern, $path) === 1 : str_starts_with($path, $this->pattern)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

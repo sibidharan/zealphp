@@ -63,12 +63,21 @@ use ZealPHP\Store;
  *
  * ## Store-full failure policy (B10 fix)
  *
- * When the OpenSwoole `Table` is full, `Store::set()` returns `false`. The
- * middleware detects this, logs a warning via `elog()`, and **fails open**
- * (passes the request through). This is an explicit policy choice: rejecting
- * an unknown IP because the table is full would be overly aggressive. Operators
- * should size their table generously and monitor the log for `Store table full`
- * warnings.
+ * When the OpenSwoole `Table` is full, `Store::set()` returns `false`. Rows
+ * are never removed by the Table itself, so the table used to fill with every
+ * client ever seen and from then on let every NEW client through unlimited (a
+ * botnet, or one IPv6 host cycling addresses, switched the limiter off). The
+ * middleware now evicts the rows whose window has ended (at most once a
+ * second per worker) and retries. Only when every row is still live does it
+ * log a warning via `elog()` and **fail open** (pass the request through) —
+ * rejecting an unknown client because the table is full would be overly
+ * aggressive. Size the table for the clients active within one window.
+ *
+ * ## IPv6
+ *
+ * A single IPv6 host is routinely given a whole /64, so a per-address key is
+ * free to evade. IPv6 clients are keyed by their /64 (IPv4-mapped addresses by
+ * the IPv4 address), see {@see clientKey()}.
  *
  * ## Dry-run mode
  *
@@ -107,6 +116,70 @@ use ZealPHP\Store;
 class RateLimitMiddleware implements MiddlewareInterface
 {
     private static bool $warnedMissingTable = false;
+
+    /** @var array<string, int> Per table: last expired-row eviction (unix time). */
+    private static array $lastEviction = [];
+
+    /**
+     * Limiter key for a client address: an IPv6 address by its /64 (one host
+     * typically holds the whole /64), an IPv4-mapped IPv6 address by its IPv4
+     * address, anything else unchanged.
+     */
+    public static function clientKey(string $ip): string
+    {
+        $bin = @inet_pton($ip);
+        if (!is_string($bin) || strlen($bin) !== 16) {
+            return $ip;
+        }
+        if (str_starts_with($bin, str_repeat("\0", 10) . "\xff\xff")) {
+            $v4 = inet_ntop(substr($bin, 12));
+            return is_string($v4) ? $v4 : $ip;
+        }
+        $net = inet_ntop(substr($bin, 0, 8) . str_repeat("\0", 8));
+        return is_string($net) ? $net . '/64' : $ip;
+    }
+
+    /**
+     * Has this rate-limit row's window ended at `$now`? A row without a usable
+     * `reset` counts as ended (it can't be limiting anyone).
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function windowEnded(array $row, int $now): bool
+    {
+        $reset = $row['reset'] ?? null;
+        return !is_numeric($reset) || (int) $reset <= $now;
+    }
+
+    /**
+     * Delete rows of `$table` that `$isDead` says are finished, at most once a
+     * second per worker per table. Collect-then-delete: deleting while
+     * iterating an OpenSwoole\Table skips rows.
+     *
+     * @param callable(array<string, scalar>): bool $isDead
+     * @return int Rows deleted.
+     */
+    public static function evictRows(string $table, callable $isDead): int
+    {
+        $now = time();
+        if (isset(self::$lastEviction[$table]) && self::$lastEviction[$table] === $now) {
+            return 0;
+        }
+        self::$lastEviction[$table] = $now;
+        $dead = [];
+        foreach (Store::iterate($table) as $key => $row) {
+            if ($isDead($row)) {
+                $dead[] = (string) $key;
+            }
+        }
+        $n = 0;
+        foreach ($dead as $key) {
+            if (Store::del($table, $key)) {
+                $n++;
+            }
+        }
+        return $n;
+    }
 
     public function __construct(
         private int    $limit        = 60,
@@ -170,8 +243,9 @@ class RateLimitMiddleware implements MiddlewareInterface
 
         $now = time();
         $effectiveLimit = $this->limit + $this->burst;
+        $key = self::clientKey($ip);
 
-        $existing = Store::get($this->tableName, $ip);
+        $existing = Store::get($this->tableName, $key);
         if (is_array($existing)) {
             $reset = is_numeric($existing['reset'] ?? null) ? (int)$existing['reset'] : 0;
             $count = is_numeric($existing['count'] ?? null) ? (int)$existing['count'] : 0;
@@ -184,7 +258,7 @@ class RateLimitMiddleware implements MiddlewareInterface
                 // returns the post-increment value; comparing on THAT means
                 // exactly the (limit+1)th concurrent arrival is the first to
                 // exceed — no over-admission.
-                $newCount = Store::incr($this->tableName, $ip, 'count', 1);
+                $newCount = Store::incr($this->tableName, $key, 'count', 1);
                 if ($newCount > $effectiveLimit) {
                     if ($this->dryRun) {
                         // Dry-run: the excess is already recorded by the incr
@@ -199,11 +273,19 @@ class RateLimitMiddleware implements MiddlewareInterface
         }
 
         // New window (or first request for this IP).
-        $ok = Store::set($this->tableName, $ip, [
-            'ip'    => $ip,
+        $row = [
+            'ip'    => $key,
             'count' => 1,
             'reset' => $now + $this->window,
-        ]);
+        ];
+        $ok = Store::set($this->tableName, $key, $row);
+        if ($ok === false) {
+            // Full: make room by dropping the clients whose window has ended.
+            $evicted = self::evictRows($this->tableName, static fn (array $r): bool => self::windowEnded($r, $now));
+            if ($evicted > 0) {
+                $ok = Store::set($this->tableName, $key, $row);
+            }
+        }
 
         // B10 fix: log when the Store table is full (Store::set returns false).
         if ($ok === false && function_exists('ZealPHP\\elog')) {

@@ -1,4 +1,4 @@
-<?
+<?php
 $input = function() {
     $file = file_get_contents('php://input');
     $this->response($this->json([

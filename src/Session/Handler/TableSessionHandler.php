@@ -113,7 +113,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
         self::$ttl = max(1, $ttl ?? \ZealPHP\App::$session_ttl);
         self::$maxRows = max(16, $maxRows ?? \ZealPHP\App::$session_max_rows);
         self::$dataSize = max(1024, $dataSize ?? \ZealPHP\App::$session_data_size);
-        self::$savePath = $savePath ?? \ZealPHP\App::$session_save_path;
+        self::$savePath = $savePath ?? \ZealPHP\App::sessionSavePath();
 
         if (self::$table === null) {
             $table = new Table(self::$maxRows);
@@ -155,9 +155,10 @@ final class TableSessionHandler implements \SessionHandlerInterface
 
     public function close(): bool
     {
-        // Reclaim this coroutine's read-snapshot bucket at session_write_close
-        // (called per request by CoSessionManager) so it can't grow unbounded on
-        // a long-lived worker (#182).
+        // Reclaim this coroutine's read-snapshot bucket. zeal_session_write_close()
+        // and zeal_session_destroy() call this once per request; the snapshot is
+        // also dropped when the coroutine ends (see remember()), so a request
+        // that never closes its session cannot grow the map either (#182).
         unset($this->context[Coroutine::getCid()]);
         return true;
     }
@@ -166,9 +167,10 @@ final class TableSessionHandler implements \SessionHandlerInterface
     {
         $sessionId = (string) $sessionId;
         $table = $this->table();
+        $key = self::rowKey($sessionId);
 
         // Hot path: Table
-        $row = $table->get($sessionId);
+        $row = $table->get($key);
         if (is_array($row)) {
             $expRaw = $row[self::COL_EXPIRES] ?? 0;
             $expires = is_numeric($expRaw) ? (int) $expRaw : 0;
@@ -177,26 +179,22 @@ final class TableSessionHandler implements \SessionHandlerInterface
                 $data = is_string($dRaw) ? $dRaw : '';
                 $vRaw = $row[self::COL_VERSION] ?? 0;
                 $version = is_numeric($vRaw) ? (int) $vRaw : 0;
-                $this->context[Coroutine::getCid()][$sessionId] = [
-                    'base' => $this->decode($data),
-                    'version' => $version,
-                ];
+                $this->remember($sessionId, $this->decode($data), $version);
                 return $data;
             }
-            $table->del($sessionId);
+            $table->del($key);
         }
 
-        // Cold path: file → promote to Table
+        // Cold path: file → promote to Table. Only a session that has data and
+        // fits the row is promoted: an unknown (forged) id used to get a row
+        // too, so anyone could fill the Table with junk ids until real
+        // sessions spilled to disk.
         $data = $this->readFile($sessionId);
-        $table->set($sessionId, [
-            self::COL_DATA => $data,
-            self::COL_VERSION => 1,
-            self::COL_EXPIRES => time() + self::$ttl,
-        ]);
-        $this->context[Coroutine::getCid()][$sessionId] = [
-            'base' => $this->decode($data),
-            'version' => 1,
-        ];
+        $version = 0;
+        if ($data !== '' && $this->setRow($key, $data, 1)) {
+            $version = 1;
+        }
+        $this->remember($sessionId, $this->decode($data), $version);
         return $data;
     }
 
@@ -205,6 +203,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
         $sessionId = (string) $sessionId;
         $data = (string) $data;
         $table = $this->table();
+        $key = self::rowKey($sessionId);
         $writeLock = $this->lockFor($sessionId);
 
         /** @var array{base: array<mixed,mixed>, version: int} $ctx */
@@ -219,17 +218,28 @@ final class TableSessionHandler implements \SessionHandlerInterface
             // the SAME slot (rare), not every session globally. Exponential
             // backoff (0.1ms → cap 2ms) keeps a contended slot from busy-spinning
             // at a fixed 0.5ms quantum.
-            $spin = 100; // microseconds
-            while (!$writeLock->cmpset(0, 1)) {
-                Coroutine::usleep($spin);
-                $spin = min($spin * 2, 2000);
-            }
+            $this->acquire($writeLock);
             try {
-                $current = $table->get($sessionId);
-                $cvRaw = is_array($current) ? ($current[self::COL_VERSION] ?? 0) : 0;
-                $currentVersion = is_numeric($cvRaw) ? (int) $cvRaw : 0;
-                $cdRaw = is_array($current) ? ($current[self::COL_DATA] ?? '') : '';
-                $currentData = is_string($cdRaw) ? $cdRaw : '';
+                $current = $table->get($key);
+                if (is_array($current)) {
+                    $cvRaw = $current[self::COL_VERSION] ?? 0;
+                    $currentVersion = is_numeric($cvRaw) ? (int) $cvRaw : 0;
+                    $cdRaw = $current[self::COL_DATA] ?? '';
+                    $currentData = is_string($cdRaw) ? $cdRaw : '';
+                } else {
+                    // No row: the session lives only on disk (too big for a
+                    // row, or the Table is full), is new, or was destroyed.
+                    $currentVersion = 0;
+                    $currentData = $this->readFile($sessionId);
+                    if ($base !== [] && $currentData === '') {
+                        // We read this session with data and it is gone now:
+                        // destroyed (logout) or rotated since our read. Writing
+                        // would bring it back — refuse (destroy() takes this
+                        // same lock, so this check cannot race it).
+                        unset($this->context[Coroutine::getCid()][$sessionId]);
+                        return false;
+                    }
+                }
 
                 if ($currentVersion !== $expectedVersion) {
                     // CONFLICT: another coroutine wrote in between. Recursive
@@ -246,19 +256,22 @@ final class TableSessionHandler implements \SessionHandlerInterface
                 }
 
                 $newVersion = $expectedVersion + 1;
-                $table->set($sessionId, [
-                    self::COL_DATA => $data,
-                    self::COL_VERSION => $newVersion,
-                    self::COL_EXPIRES => time() + self::$ttl,
-                ]);
-                $this->context[Coroutine::getCid()][$sessionId] = ['base' => $local, 'version' => $newVersion];
+                if (!$this->setRow($key, $data, $newVersion)) {
+                    // Too big for the row (or the Table is full): the file is
+                    // the store for this session now. Drop any row we hold —
+                    // a failed set() can leave the OLD row (or a truncated
+                    // copy of the new data) in place, which read() would serve
+                    // from then on instead of the file.
+                    $table->del($key);
+                    $newVersion = 0;
+                }
+                $this->remember($sessionId, $local, $newVersion);
 
                 // Write-through to file backing. Keys present in our read
                 // snapshot but absent from the final state are DELETIONS —
                 // writeFile's disk merge must not resurrect them (#233).
                 $deleted = array_values(array_map('strval', array_diff(array_keys($base), array_keys($local))));
-                $this->writeFile($sessionId, $data, $deleted);
-                return true;
+                return $this->writeFile($sessionId, $data, $deleted) || $newVersion > 0;
             } finally {
                 $writeLock->set(0);
             }
@@ -269,10 +282,19 @@ final class TableSessionHandler implements \SessionHandlerInterface
 
     public function destroy($sessionId): bool
     {
-        $this->table()->del((string) $sessionId);
-        $file = self::$savePath . '/sess_' . basename((string) $sessionId);
-        if (is_file($file)) @unlink($file);
-        unset($this->context[Coroutine::getCid()][(string) $sessionId]);
+        $sessionId = (string) $sessionId;
+        $writeLock = $this->lockFor($sessionId);
+        // Under the write lock, so an in-flight write either lands before the
+        // destroy (and is deleted with it) or sees the session gone.
+        $this->acquire($writeLock);
+        try {
+            $this->table()->del(self::rowKey($sessionId));
+            $file = self::$savePath . '/sess_' . basename($sessionId);
+            if (is_file($file)) @unlink($file);
+        } finally {
+            $writeLock->set(0);
+        }
+        unset($this->context[Coroutine::getCid()][$sessionId]);
         return true;
     }
 
@@ -280,18 +302,97 @@ final class TableSessionHandler implements \SessionHandlerInterface
     {
         $now = time();
         $count = 0;
+        // Collect, then delete: deleting while iterating an OpenSwoole\Table
+        // skips rows.
+        $expired = [];
         foreach ($this->table() as $id => $row) {
             if (!is_array($row)) continue;
             $expRaw = $row[self::COL_EXPIRES] ?? 0;
             $expires = is_numeric($expRaw) ? (int) $expRaw : 0;
             if ($expires > 0 && $expires < $now) {
-                $this->table()->del((string) $id);
-                $file = self::$savePath . '/sess_' . basename((string) $id);
-                if (is_file($file)) @unlink($file);
+                $expired[] = (string) $id;
+            }
+        }
+        foreach ($expired as $id) {
+            $this->table()->del($id);
+            $count++;
+        }
+        // The file backing is swept by age rather than by row: a session that
+        // only lives on disk (too big for a row, Table full) has no row, and a
+        // long id's row key is a hash of the id, not its file name. Every
+        // write refreshes the file's mtime, so this matches the row TTL.
+        $cutoff = $now - max(1, self::$ttl);
+        foreach (glob(self::$savePath . '/sess_*') ?: [] as $file) {
+            $mtime = @filemtime($file);
+            if ($mtime !== false && $mtime < $cutoff && @unlink($file)) {
                 $count++;
             }
         }
         return $count;
+    }
+
+    /**
+     * Table key for a session id. OpenSwoole\Table stores at most 63 bytes of
+     * a key: a longer one (every id session_regenerate_id() mints is 64 hex
+     * chars) is truncated in the stored row — iteration then yields a key
+     * that del()/get() cannot find, and distinct ids share a stored key. Ids
+     * up to 63 bytes are used as-is; longer ones by a fixed-length digest
+     * (`~h~` prefix, 46 bytes) that a short id cannot collide with by chance.
+     */
+    public static function rowKey(string $sessionId): string
+    {
+        return \ZealPHP\Store\TableBackend::key($sessionId);
+    }
+
+    /**
+     * Store a row; `false` when the data does not fit the column or the
+     * Table is full. OpenSwoole throws for both (and may still write a
+     * truncated value), so the size is checked first.
+     */
+    private function setRow(string $key, string $data, int $version): bool
+    {
+        if (strlen($data) > self::$dataSize) {
+            return false;
+        }
+        try {
+            return $this->table()->set($key, [
+                self::COL_DATA => $data,
+                self::COL_VERSION => $version,
+                self::COL_EXPIRES => time() + self::$ttl,
+            ]);
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Record this coroutine's read snapshot for `$sessionId`. The bucket is
+     * dropped when the coroutine ends even if close() is never called.
+     *
+     * @param array<mixed,mixed> $base
+     */
+    private function remember(string $sessionId, array $base, int $version): void
+    {
+        $cid = Coroutine::getCid();
+        if ($cid > 0 && !isset($this->context[$cid])) {
+            Coroutine::defer(function () use ($cid): void {
+                unset($this->context[$cid]);
+            });
+        }
+        $this->context[$cid][$sessionId] = ['base' => $base, 'version' => $version];
+    }
+
+    private function acquire(Atomic $lock): void
+    {
+        $spin = 100; // microseconds
+        while (!$lock->cmpset(0, 1)) {
+            if (Coroutine::getCid() > 0) {
+                Coroutine::usleep($spin);
+            } else {
+                usleep($spin);
+            }
+            $spin = min($spin * 2, 2000);
+        }
     }
 
     /**
@@ -377,34 +478,14 @@ final class TableSessionHandler implements \SessionHandlerInterface
     }
 
     /**
+     * Same decoder as the session layer (an undecodable session is empty,
+     * never partially parsed — see php_session_decode_to_array()).
+     *
      * @return array<mixed,mixed>
      */
     private function decode(string $data): array
     {
-        if ($data === '') return [];
-        // PHP's serialize handler. session_decode requires an active
-        // session, so we parse the wire format manually for the merge.
-        $result = [];
-        $offset = 0;
-        $len = strlen($data);
-        while ($offset < $len) {
-            $eq = strpos($data, '|', $offset);
-            if ($eq === false) break;
-            $key = substr($data, $offset, $eq - $offset);
-            $offset = $eq + 1;
-            try {
-                $value = @unserialize(substr($data, $offset), ['allowed_classes' => ['stdClass']]);
-            } catch (\Throwable) {
-                break;
-            }
-            // Skip past the unserialized value. The serialize format has
-            // self-describing lengths so we can compute it.
-            $consumed = $this->serializedLength($data, $offset);
-            if ($consumed === 0) break;
-            $offset += $consumed;
-            $result[$key] = $value;
-        }
-        return $result;
+        return $data === '' ? [] : \ZealPHP\Session\php_session_decode_to_array($data);
     }
 
     /**
@@ -412,35 +493,8 @@ final class TableSessionHandler implements \SessionHandlerInterface
      */
     private function encode(array $data): string
     {
-        $out = '';
-        foreach ($data as $key => $val) {
-            $out .= $key . '|' . serialize($val);
-        }
-        return $out;
-    }
-
-    /** Compute the length of a serialize()d value starting at $offset. */
-    private function serializedLength(string $data, int $offset): int
-    {
-        // Simple approach: serialize+deserialize loop. Fast enough for
-        // session data (we're not doing this in hot paths).
-        $remaining = substr($data, $offset);
-        try {
-            $val = @unserialize($remaining, ['allowed_classes' => ['stdClass']]);
-        } catch (\Throwable) {
-            return 0;
-        }
-        // `unserialize` returns false BOTH for a corrupt value AND for a
-        // legitimately stored boolean false (`b:0;`). Distinguish by the PREFIX,
-        // not the whole tail: a stored false is rarely the last entry, so
-        // `$remaining` is e.g. `b:0;next|i:1;...`. Comparing the full tail to
-        // `'b:0;'` mis-flagged that as corrupt and made decode() drop every key
-        // after the first stored false (silent session-data loss). Mirror
-        // RedisSessionHandler::parseSession / php_session_decode_to_array.
-        if ($val === false && substr($remaining, 0, 4) !== 'b:0;') {
-            return 0;
-        }
-        return strlen(serialize($val));
+        /** @var array<string, mixed> $data */
+        return \ZealPHP\Session\php_session_encode_from_array($data);
     }
 
     private function readFile(string $sessionId): string

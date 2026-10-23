@@ -90,6 +90,21 @@ class WhenMiddlewareTest extends TestCase
         $this->assertSame([], App::resolveWhenMiddleware('/other'));
     }
 
+    /**
+     * A fallback front controller decodes REQUEST_URI itself, so the scope
+     * must also match the decoded path (/wp-%61dmin is /wp-admin to it).
+     */
+    public function testPercentEncodedPathStillMatchesTheScope(): void
+    {
+        $mw = $this->mw();
+        App::when('/wp-admin', [$mw]);
+        $this->compile();
+
+        $this->assertSame([$mw], App::resolveWhenMiddleware('/wp-%61dmin/index.php'));
+        $this->assertSame([$mw], App::resolveWhenMiddleware('/wp-%2561dmin'));
+        $this->assertSame([], App::resolveWhenMiddleware('/wp-%62dmin'));
+    }
+
     public function testCatchAllMatchesEverything(): void
     {
         $mw = $this->mw();

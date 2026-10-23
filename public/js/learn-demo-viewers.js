@@ -257,7 +257,15 @@
     const tmp = document.createElement('div');
     tmp.innerHTML = html.trim();
     const incoming = tmp.firstElementChild;
-    if (!incoming) return;
+    // Only ever swap in the counter button itself: never let markup from the
+    // socket become arbitrary DOM (defence in depth; the server renders it).
+    if (!incoming || incoming.tagName !== 'BUTTON' || incoming.id !== 'session-counter-btn'
+        || incoming.querySelector('script,iframe,object,embed')) return;
+    for (const el of [incoming, ...incoming.querySelectorAll('*')]) {
+      for (const a of [...el.attributes]) {
+        if (/^on/i.test(a.name)) el.removeAttribute(a.name);
+      }
+    }
     const existing = document.getElementById('session-counter-btn');
     if (existing) {
       existing.outerHTML = incoming.outerHTML;

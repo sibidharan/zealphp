@@ -1,4 +1,4 @@
-<?
+<?php
 use OpenSwoole\Process;
 use OpenSwoole\Coroutine as co;
 $process = function(){

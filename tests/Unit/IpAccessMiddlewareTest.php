@@ -81,6 +81,15 @@ class IpAccessMiddlewareTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
     }
 
+    /** A non-canonical IPv6 rule (case, leading zeros) still matches the peer. */
+    public function testNonCanonicalIpv6RuleMatches(): void
+    {
+        $response = $this->process(['allow' => ['*'], 'deny' => ['2001:DB8:0:0::0001']], '2001:db8::1');
+        $this->assertSame(403, $response->getStatusCode());
+        $response = $this->process(['allow' => ['2001:0DB8::00AB'], 'deny' => []], '2001:db8::ab');
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
     public function testAllowListOnlyBlocksOutOfList(): void
     {
         $response = $this->process(['allow' => ['198.51.100.42'], 'deny' => []], '198.51.100.43');

@@ -367,8 +367,9 @@ class PhpInfoSectionsTest extends TestCase
         ksort($env);
         // Pick the first scalar entry and assert its exact rendered row.
         $picked = null;
+        $secret = new \ReflectionMethod(PhpInfo::class, 'isSecretName');
         foreach ($env as $k => $v) {
-            if (is_scalar($v)) {
+            if (is_scalar($v) && !$secret->invoke(null, (string) $k)) {
                 $picked = [(string) $k, (string) $v];
                 break;
             }
