@@ -2559,7 +2559,6 @@ class App
                 $out[$base] = self::cookieAssign($out[$base] ?? null, $indices, $value);
             }
         }
-        /** @var array<string, mixed> $out */
         return $out;
     }
 
