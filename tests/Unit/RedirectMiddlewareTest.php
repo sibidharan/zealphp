@@ -185,6 +185,25 @@ class RedirectMiddlewareTest extends TestCase
         $this->assertSame('https://new.example.test/page', $ok->getHeaderLine('Location'));
     }
 
+    public function testRefusedTargetFallsThroughToTheNextRule(): void
+    {
+        // Rule 1 would emit https://good.example.test@evil.test (host evil.test):
+        // refused, and rule 2 still gets its turn.
+        $mw = new RedirectMiddleware([
+            ['match' => '#^/go/(.*)$#', 'to' => 'https://good.example.test$1'],
+            ['from' => '/go', 'to' => '/safe'],
+        ]);
+        $response = $this->process($mw, '/go/@evil.test');
+        $this->assertSame('/safe/@evil.test', $response->getHeaderLine('Location'));
+    }
+
+    public function testProtocolRelativeTargetAllowedWhenTheRulePointsThere(): void
+    {
+        $mw = new RedirectMiddleware([['from' => '/cdn', 'to' => '//cdn.example.test']]);
+        $response = $this->process($mw, '/cdn/app.js');
+        $this->assertSame('//cdn.example.test/app.js', $response->getHeaderLine('Location'));
+    }
+
     private function process(RedirectMiddleware $mw, string $path, string $query = ''): ResponseInterface
     {
         $uri = $path . ($query !== '' ? '?' . $query : '');

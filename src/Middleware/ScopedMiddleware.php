@@ -85,22 +85,27 @@ final class ScopedMiddleware implements MiddlewareInterface
         // `/admin.php/x` runs admin.php outside it. Extra candidates can only
         // widen the scope, never narrow it.
         $candidates = [$path];
-        if (\ZealPHP\App::$path_info && str_contains($path, '.php/')) {
-            $script = explode('.php/', $path, 2)[0];
+        $script = \ZealPHP\App::$path_info ? strstr($path, '.php/', true) : false;
+        if ($script !== false) {
             $candidates[] = $script . '.php';
             $candidates[] = $script;
         }
-        $inScope = false;
-        foreach ($candidates as $candidate) {
-            if ($this->regex ? preg_match($this->pattern, $candidate) === 1 : str_starts_with($candidate, $this->pattern)) {
-                $inScope = true;
-                break;
-            }
-        }
+        $inScope = $this->anyInScope($candidates);
 
         if ($inScope) {
             return $this->inner->process($request, $handler);
         }
         return $handler->handle($request);
+    }
+
+    /** @param list<string> $paths */
+    private function anyInScope(array $paths): bool
+    {
+        foreach ($paths as $path) {
+            if ($this->regex ? preg_match($this->pattern, $path) === 1 : str_starts_with($path, $this->pattern)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

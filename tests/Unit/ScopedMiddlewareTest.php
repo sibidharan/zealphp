@@ -140,5 +140,15 @@ class ScopedMiddlewareTest extends TestCase
         $this->assertSame(403, $this->process($mw, '/admin')->getStatusCode());
         $this->assertSame(403, $this->process($mw, '/admin.php/x')->getStatusCode(), '/admin.php/x runs admin.php');
         $this->assertSame(200, $this->process($mw, '/public.php/admin')->getStatusCode(), 'only the script part widens the scope');
+        // A scope written against the .php name itself covers /script.php/extra.
+        $php = ScopedMiddleware::match($this->blockingInner(), '#^/admin\\.php$#');
+        $this->assertSame(403, $this->process($php, '/admin.php/x')->getStatusCode());
+        $prev = \ZealPHP\App::$path_info;
+        \ZealPHP\App::$path_info = false;
+        try {
+            $this->assertSame(200, $this->process($mw, '/admin.php/x')->getStatusCode(), 'no PATH_INFO: /admin.php/x is a plain path');
+        } finally {
+            \ZealPHP\App::$path_info = $prev;
+        }
     }
 }

@@ -351,8 +351,7 @@ class Response
             foreach ($this->rawCookiesList as $cookie) {
                 $this->parent->rawCookie(...$cookie);
             }
-            \ZealPHP\Session\zeal_session_persist_before_send();
-            $this->parent->end();
+            $this->endParent();
         }
     }
 
@@ -376,10 +375,26 @@ class Response
         return true;
     }
 
-    public function end(?string $data = null): bool
+    /**
+     * The last bytes of a response go out through here (or sendfileParent()):
+     * the session is stored first, so a client that follows up at once — a
+     * redirect after login/logout — reads the session this response changed.
+     */
+    private function endParent(?string $data = null): bool
     {
         \ZealPHP\Session\zeal_session_persist_before_send();
         return $this->parent->end($data);
+    }
+
+    private function sendfileParent(string $path, int $offset, int $length): bool
+    {
+        \ZealPHP\Session\zeal_session_persist_before_send();
+        return $this->parent->sendfile($path, $offset, $length);
+    }
+
+    public function end(?string $data = null): bool
+    {
+        return $this->endParent($data);
     }
 
     /**
@@ -403,8 +418,7 @@ class Response
         if ($method === 'HEAD') {
             $this->flush();
             if ($this->parent->isWritable()) {
-                \ZealPHP\Session\zeal_session_persist_before_send();
-                $this->parent->end();
+                $this->endParent();
             }
             return;
         }
@@ -421,8 +435,7 @@ class Response
             // Swallow exceptions from disconnected client writes inside streaming callbacks
         }
         if ($this->parent->isWritable()) {
-            \ZealPHP\Session\zeal_session_persist_before_send();
-            $this->parent->end();
+            $this->endParent();
         }
     }
 
@@ -702,7 +715,7 @@ class Response
             // Never let content sniffing pick a type the browser runs script
             // in: an uploaded `avatar` (no suffix) holding HTML or SVG would be
             // served as a page on the app's origin (stored XSS).
-            if (in_array(strtolower(explode(';', $type)[0]), self::SCRIPTABLE_SNIFFED_TYPES, true)) {
+            if (in_array($type, self::SCRIPTABLE_SNIFFED_TYPES, true)) {   // mime_content_type(): bare lowercase type
                 $type = 'text/plain';
             }
         }
@@ -719,8 +732,7 @@ class Response
             $this->status(404);
             $this->g->_streaming = true;
             $this->flush();
-            \ZealPHP\Session\zeal_session_persist_before_send();
-            $this->parent->end('File not found');
+            $this->endParent('File not found');
             return;
         }
 
@@ -798,8 +810,7 @@ class Response
         if ($cond === 304 || $cond === 412) {
             $this->status($cond);
             $this->flush();
-            \ZealPHP\Session\zeal_session_persist_before_send();
-            $this->parent->end('');
+            $this->endParent('');
             return;
         }
 
@@ -816,8 +827,7 @@ class Response
             $this->status(200);
             $this->header('Content-Length', (string) $total);
             $this->flush();
-            \ZealPHP\Session\zeal_session_persist_before_send();
-            $this->parent->end('');
+            $this->endParent('');
             return;
         }
 
@@ -851,8 +861,7 @@ class Response
             $this->status(416);
             $this->header('Content-Range', "bytes */{$total}");
             $this->flush();
-            \ZealPHP\Session\zeal_session_persist_before_send();
-            $this->parent->end('');
+            $this->endParent('');
             return;
         }
 
@@ -866,8 +875,7 @@ class Response
                 $this->header('Content-Range', "bytes {$start}-{$end}/{$total}");
                 $this->header('Content-Length', (string) $length);
                 $this->flush();
-                \ZealPHP\Session\zeal_session_persist_before_send();
-                $this->parent->sendfile($path, $start, $length);
+                $this->sendfileParent($path, $start, $length);
                 return;
             }
 
@@ -889,8 +897,7 @@ class Response
         // status === 'ignore' — full body (200).
         $this->header('Content-Length', (string) $total);
         $this->flush();
-        \ZealPHP\Session\zeal_session_persist_before_send();
-        $this->parent->sendfile($path, 0, $total);
+        $this->sendfileParent($path, 0, $total);
     }
 
     /**
@@ -1009,8 +1016,7 @@ class Response
 
         $fh = fopen($path, 'rb');
         if ($fh === false) {
-            \ZealPHP\Session\zeal_session_persist_before_send();
-            $this->parent->end('');
+            $this->endParent('');
             return;
         }
 
@@ -1039,8 +1045,7 @@ class Response
         }
         fclose($fh);
         $payload .= $closing;
-        \ZealPHP\Session\zeal_session_persist_before_send();
-        $this->parent->end($payload);
+        $this->endParent($payload);
     }
 
     /**
