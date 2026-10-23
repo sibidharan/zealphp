@@ -2866,8 +2866,25 @@ class App
             $srv['SERVER_ADDR'] = $serverAddr;
         }
         if ($request->header) {
+            // Underscore names second, so `Content_Length: …` can never overwrite
+            // the real `Content-Length` (both map to HTTP_CONTENT_LENGTH) —
+            // proxies sanitise X-Forwarded-For, not X_Forwarded_For.
+            $underscored = [];
             foreach ($request->header as $key => $value) {
+                $key = (string) $key;
+                // httpoxy (CVE-2016-5385): a client `Proxy:` header must not
+                // become HTTP_PROXY, which HTTP clients read as their proxy.
+                if (strcasecmp($key, 'proxy') === 0) {
+                    continue;
+                }
+                if (str_contains($key, '_')) {
+                    $underscored[$key] = $value;
+                    continue;
+                }
                 $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] = $value;
+            }
+            foreach ($underscored as $key => $value) {
+                $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] ??= $value;
             }
         }
         // #459 — SERVER_NAME must be the host only (no port); SERVER_PORT already
@@ -9490,6 +9507,17 @@ class App
             }
         }
 
+        // Engine warnings/notices go to the response body when display_errors
+        // is on — the CLI default, and what a php.ini-less Docker image runs
+        // with — so "Undefined array key … in /srv/app/x.php:12" reached
+        // clients whatever App::displayErrors() said. Follow displayErrors()
+        // for the engine too, and make sure the errors still reach the log.
+        $engineDisplay = \strtolower(\trim((string) \ini_get('display_errors')));
+        if (!self::displayErrors() && !\in_array($engineDisplay, ['', '0', 'off', 'no', 'false', 'stderr'], true)) {
+            \ini_set('display_errors', '0');
+            \ini_set('log_errors', '1');
+        }
+
         // Deterministic session GC on a worker-0 timer — ZealPHP replaced PHP's
         // probabilistic per-request GC, so without this sess_* files / handler
         // entries accumulate forever and leaked PHPSESSIDs never expire.
@@ -10962,6 +10990,14 @@ class App
                 \ZealPHP\elog('[security] WebSocket upgrade from foreign Origin ' . $wsOrigin . ' on ' . $path . ': session not loaded (see App::wsAllowedOrigins())', 'warn');
                 unset($wsCookies[$sessionName]);
             }
+            $app = App::instance();
+            assert($app !== null);
+            $route = $app->wsRoutes()[$path] ?? null;
+            // No route, no session: an upgrade to an unregistered path must not
+            // touch the store.
+            if ($route === null) {
+                unset($wsCookies[$sessionName]);
+            }
             if (isset($wsCookies[$sessionName])) {
                 $rawSid = $wsCookies[$sessionName];
                 if (is_string($rawSid)) {
@@ -10969,12 +11005,31 @@ class App
                     \ZealPHP\Session\zeal_session_id($rawSid);
                     \ZealPHP\Session\zeal_session_start();
                     $g->_session_started = true;
+                    // Strict mode, as on HTTP: an id the store never issued is
+                    // not honoured. A handshake can't hand out a fresh id, so the
+                    // socket just runs without a session — and nothing is written,
+                    // or the upgrade itself would mint a store entry for an
+                    // attacker-chosen id (session fixation).
+                    $wsStoreExists = $g->session_params['session_existed'] ?? null;
+                    $wsLoaded = App::$superglobals
+                        ? (is_array($GLOBALS['_SESSION'] ?? null) ? $GLOBALS['_SESSION'] : [])
+                        : $g->session;
+                    if (\ZealPHP\Session\zeal_session_strict_should_regenerate(
+                        App::$session_strict_mode,
+                        true,
+                        $wsLoaded,
+                        is_bool($wsStoreExists) ? $wsStoreExists : null
+                    )) {
+                        $g->_session_started = false;
+                        $g->session = [];
+                        if (App::$superglobals) {
+                            $GLOBALS['_SESSION'] = [];
+                        }
+                        $g->session_params = [];
+                        \ZealPHP\elog('[security] WebSocket upgrade on ' . $path . ' presented a session id the store never issued: session not loaded', 'warn');
+                    }
                 }
             }
-
-            $app = App::instance();
-            assert($app !== null);
-            $route = $app->wsRoutes()[$path] ?? null;
             if ($route !== null && $route['open'] !== null) {
                 ($route['open'])($server, $request, $g);
             }

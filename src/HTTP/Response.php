@@ -365,13 +365,50 @@ class Response
 
     public function cookie(string $key, string $value = '', int $expire = 0, string $path = '/', string $domain = '', bool $secure = false, bool $httponly = false, string $samesite = '', string $priority = ''): bool
     {
+        if (!self::cookieAttributesAreSafe($key, $path, $domain, $samesite, $priority)) {
+            return false;
+        }
         $this->cookiesList[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
         return true;
     }
 
     public function rawCookie(string $key, string $value = '', int $expire = 0, string $path = '/', string $domain = '', bool $secure = false, bool $httponly = false, string $samesite = '', string $priority = ''): bool
     {
+        // The raw form is not url-encoded, so the value is an attribute
+        // boundary too (native setrawcookie() rejects the same set).
+        if (strpbrk($value, self::COOKIE_SEPARATORS) !== false) {
+            trigger_error('Cookie blocked: raw cookie value contains ",; \\t\\r\\n\\013\\014" or NUL', E_USER_WARNING);
+            return false;
+        }
+        if (!self::cookieAttributesAreSafe($key, $path, $domain, $samesite, $priority)) {
+            return false;
+        }
         $this->rawCookiesList[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
+        return true;
+    }
+
+    /** Characters that end a cookie name or attribute value (PHP's own list, plus NUL). */
+    private const COOKIE_SEPARATORS = ",; \t\r\n\013\014\0";
+
+    /**
+     * Native setcookie() rules for the name and attributes: a `;` in a path
+     * from user input used to add attributes of the caller's choosing
+     * (`path=/; Domain=evil.test`).
+     */
+    private static function cookieAttributesAreSafe(string $name, string $path, string $domain, string $samesite, string $priority): bool
+    {
+        if ($name === '' || strpbrk($name, '=' . self::COOKIE_SEPARATORS) !== false) {
+            trigger_error('Cookie blocked: invalid name', E_USER_WARNING);
+            return false;
+        }
+        if (strpbrk($path, self::COOKIE_SEPARATORS) !== false || strpbrk($domain, self::COOKIE_SEPARATORS) !== false) {
+            trigger_error('Cookie blocked: path/domain contains ",; \\t\\r\\n\\013\\014" or NUL', E_USER_WARNING);
+            return false;
+        }
+        if (preg_match('/[^A-Za-z]/', $samesite . $priority) === 1) {
+            trigger_error('Cookie blocked: samesite/priority must be a plain word', E_USER_WARNING);
+            return false;
+        }
         return true;
     }
 
