@@ -28,8 +28,9 @@ final class LimiterTableFullTest extends TestCase
         App::$cwd = ZEALPHP_ROOT;
         App::superglobals(true);
         putenv('ZEALPHP_RATE_LIMIT_LOOPBACK');
-        $ref = new \ReflectionProperty(RateLimitMiddleware::class, 'lastEviction');
-        $ref->setValue(null, []);
+        if (property_exists(RateLimitMiddleware::class, 'lastEviction')) {
+            (new \ReflectionProperty(RateLimitMiddleware::class, 'lastEviction'))->setValue(null, []);
+        }
     }
 
     private function passHandler(): RequestHandlerInterface

@@ -163,7 +163,7 @@ final class TableBackend implements StoreBackend
         // A new key in a FULL table returns false (no row to create): report 0
         // rather than violate the int|float return type.
         /** @var int|float|false $r */
-        $r = $t->incr(self::key($key), $col, $by);
+        $r = @$t->incr(self::key($key), $col, $by);
         return $r === false ? 0 : $r;
     }
 
@@ -177,7 +177,7 @@ final class TableBackend implements StoreBackend
         if ($t === null) { return 0; }
         // Same ide-helper stub mismatch as incr() — see phpstan.neon (#420).
         /** @var int|float|false $r */
-        $r = $t->decr(self::key($key), $col, $by);
+        $r = @$t->decr(self::key($key), $col, $by);
         return $r === false ? 0 : $r;
     }
 
