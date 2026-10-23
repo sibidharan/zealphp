@@ -180,7 +180,7 @@ class ZealAPI extends REST
             return;
         }
 
-        if ($module === '' && method_exists($this, $func)) {
+        if ($module === '' && $this->isApiMethod($func)) {
             $this->$func();
         } else {
             // Resolve to an on-disk handler file for BOTH single-segment
@@ -582,6 +582,24 @@ class ZealAPI extends REST
             return false;
         }
         return true;
+    }
+
+    /**
+     * Can /api/<name> call $this-><name>() directly? Only a public instance
+     * method an app's ZealAPI subclass declares. method_exists() alone also
+     * matched the framework's own internals (/api/__construct, /api/die,
+     * /api/requirePostAuth, private helpers), and those names shadowed any
+     * api/<name>.php handler file.
+     */
+    private function isApiMethod(string $name): bool
+    {
+        if ($name === '' || str_starts_with($name, '__') || !method_exists($this, $name)) {
+            return false;
+        }
+        $m = new \ReflectionMethod($this, $name);
+        $declarer = $m->getDeclaringClass()->getName();
+        return $m->isPublic() && !$m->isStatic()
+            && $declarer !== self::class && !is_a(self::class, $declarer, true);
     }
 
     /**

@@ -2840,8 +2840,15 @@ class App
             $srv['UNIQUE_ID'] = bin2hex(random_bytes(12));
         }
 
+        // X-HTTP-Method-Override lets a POST-only client (an HTML form, a proxy
+        // that only passes GET/POST) issue PUT/PATCH/DELETE. Nothing else: an
+        // arbitrary value (GET, OPTIONS, TRACE, a made-up verb) let a POST be
+        // routed as a method no edge rule or middleware expected.
         if ($srv['REQUEST_METHOD'] === 'POST' && isset($srv['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
-            $srv['REQUEST_METHOD'] = (string)$srv['HTTP_X_HTTP_METHOD_OVERRIDE'];
+            $override = strtoupper(trim((string)$srv['HTTP_X_HTTP_METHOD_OVERRIDE']));
+            if (in_array($override, ['PUT', 'PATCH', 'DELETE'], true)) {
+                $srv['REQUEST_METHOD'] = $override;
+            }
         }
         // Apache HostnameLookups: populate REMOTE_HOST via reverse DNS when
         // explicitly enabled. WARNING — blocking call (OpenSwoole's coroutine

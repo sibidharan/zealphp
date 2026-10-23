@@ -319,9 +319,26 @@ final class PhpInfo
         ksort($env);
         $rows = [];
         foreach ($env as $k => $v) {
-            $rows[(string) $k] = self::stringify($v);
+            $rows[(string) $k] = self::isSecretName((string) $k) ? self::MASK : self::stringify($v);
         }
         return self::section('Environment', $rows);
+    }
+
+    private const MASK = '******** (hidden by ZealPHP)';
+
+    /**
+     * Names whose values phpinfo() must not print: API keys, tokens, passwords,
+     * DSNs in the environment, and the request's credentials (cookies — HttpOnly
+     * ones included, which a phpinfo page would hand to any script on the
+     * origin — and the Authorization header). Native phpinfo() prints them all;
+     * a diagnostics page that is one route away from the internet should not.
+     */
+    private static function isSecretName(string $name): bool
+    {
+        if (in_array(strtoupper($name), ['HTTP_COOKIE', 'HTTP_AUTHORIZATION', 'PHP_AUTH_PW', 'PHP_AUTH_DIGEST', 'AUTH_PASSWORD'], true)) {
+            return true;
+        }
+        return preg_match('/(^|_)(API_?KEY|KEY|SECRET|TOKEN|PASS|PASSWD|PASSWORD|CREDENTIALS?|PRIVATE|DSN|SALT)(_|$)/i', $name) === 1;
     }
 
     /** @return array<int|string, mixed> */
@@ -383,7 +400,8 @@ final class PhpInfo
             }
             $rows = [];
             foreach ($bag as $k => $v) {
-                $rows['$' . $key . "['" . (string) $k . "']"] = self::stringify($v);
+                $hide = $key === '_COOKIE' || self::isSecretName((string) $k);
+                $rows['$' . $key . "['" . (string) $k . "']"] = $hide ? self::MASK : self::stringify($v);
             }
             $out .= self::section('PHP Variables — $' . $key, $rows);
         }
