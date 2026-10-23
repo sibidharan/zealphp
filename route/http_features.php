@@ -55,6 +55,12 @@ $app->route('/http/options-test', ['methods' => ['GET', 'POST', 'PUT']], functio
     return ['ok' => true];
 });
 
+// X-HTTP-Method-Override — echoes the method the request was routed as.
+//    curl -X POST -H 'X-HTTP-Method-Override: DELETE' http://localhost:8080/http/method-echo
+$app->route('/http/method-echo', ['methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']], function() {
+    return ['method' => G::instance()->server['REQUEST_METHOD'] ?? null];
+});
+
 // ---------------------------------------------------------------------------
 // 5. ETag / 304 — add ETagMiddleware in app.php to enable
 //    First request gets ETag header.

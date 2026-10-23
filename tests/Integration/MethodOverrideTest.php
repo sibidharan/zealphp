@@ -15,12 +15,12 @@ final class MethodOverrideTest extends TestCase
     /** @param array<string, string> $headers */
     private function methodSeen(array $headers): ?string
     {
-        $r = $this->post('/superglobals_basic.php', $headers, '');
+        $r = $this->post('/http/method-echo', $headers, '');
         if ($r['status'] === 0) {
             $this->markTestSkipped('test server not running');
         }
         $json = is_array($r['json']) ? $r['json'] : [];
-        return isset($json['METHOD']) && is_string($json['METHOD']) ? $json['METHOD'] : null;
+        return isset($json['method']) && is_string($json['method']) ? $json['method'] : null;
     }
 
     public function testPutPatchDeleteOverridesAreHonoured(): void

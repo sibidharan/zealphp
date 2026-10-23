@@ -391,8 +391,14 @@ class PhpInfoTest extends TestCase
 
     public function testSecretsInTheEnvironmentAndRequestAreMasked(): void
     {
+        // collectEnv() reads $_ENV when populated, else getenv(): set both.
+        $savedEnv = $_ENV;
         putenv('ZPHP_PROBE_API_KEY=sk-live-should-not-show');
         putenv('ZPHP_PROBE_PLAIN=visible-value');
+        if ($_ENV !== []) {
+            $_ENV['ZPHP_PROBE_API_KEY'] = 'sk-live-should-not-show';
+            $_ENV['ZPHP_PROBE_PLAIN'] = 'visible-value';
+        }
         try {
             $html = PhpInfo::render(INFO_ENVIRONMENT | INFO_VARIABLES, [
                 '_SERVER' => ['HTTP_AUTHORIZATION' => 'Bearer abc.def', 'DB_PASSWORD' => 'hunter2', 'PWD' => '/srv/app'],
@@ -406,6 +412,7 @@ class PhpInfoTest extends TestCase
         } finally {
             putenv('ZPHP_PROBE_API_KEY');
             putenv('ZPHP_PROBE_PLAIN');
+            $_ENV = $savedEnv;
         }
     }
 
