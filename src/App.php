@@ -8584,9 +8584,15 @@ class App
         if (array_key_exists($normPath, self::$when_middleware_memo)) {
             return self::$when_middleware_memo[$normPath];
         }
+        // Also match the DECODED path: routes compare the raw path, but a
+        // fallback front controller (WordPress, Slim) decodes REQUEST_URI
+        // itself, so /wp-%61dmin reached its /wp-admin code while a
+        // when('/wp-admin', auth) scope never fired. Widening only.
+        $decodedPath = self::normalizeRequestPath(self::decodeUntilStable($normPath));
         $flat = [];
         foreach (self::$when_middleware_compiled as $entry) {
-            if (self::whenScopeMatches($entry['type'], $entry['key'], $normPath)) {
+            if (self::whenScopeMatches($entry['type'], $entry['key'], $normPath)
+                || ($decodedPath !== $normPath && self::whenScopeMatches($entry['type'], $entry['key'], $decodedPath))) {
                 foreach ($entry['chain'] as $mw) {
                     $flat[] = $mw;
                 }

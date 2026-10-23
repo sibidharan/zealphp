@@ -90,6 +90,14 @@ final class ScopedMiddleware implements MiddlewareInterface
             $candidates[] = $script . '.php';
             $candidates[] = $script;
         }
+        // The decoded form too (see App::resolveWhenMiddleware()): a front
+        // controller that decodes the URI itself sees /%61dmin as /admin.
+        foreach ($candidates as $candidate) {
+            $decoded = \ZealPHP\App::normalizeRequestPath(\ZealPHP\App::decodeUntilStable($candidate));
+            if ($decoded !== $candidate) {
+                $candidates[] = $decoded;
+            }
+        }
         $inScope = $this->anyInScope($candidates);
 
         if ($inScope) {

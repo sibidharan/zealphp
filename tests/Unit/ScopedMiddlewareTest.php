@@ -151,4 +151,14 @@ class ScopedMiddlewareTest extends TestCase
             \ZealPHP\App::$path_info = $prev;
         }
     }
+
+    public function testPercentEncodedPathDoesNotEscapeTheScope(): void
+    {
+        $mw = ScopedMiddleware::location($this->blockingInner(), '/admin');
+        $this->assertSame(403, $this->process($mw, '/%61dmin/x')->getStatusCode(), 'a front controller decodes /%61dmin to /admin');
+        $this->assertSame(403, $this->process($mw, '/%2561dmin/x')->getStatusCode(), 'double encoding');
+        $this->assertSame(200, $this->process($mw, '/%62log/x')->getStatusCode());
+        $re = ScopedMiddleware::match($this->blockingInner(), '#^/wp-admin#');
+        $this->assertSame(403, $this->process($re, '/wp-%61dmin/')->getStatusCode());
+    }
 }
