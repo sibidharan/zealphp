@@ -127,10 +127,16 @@ class BasicAuthMiddleware implements MiddlewareInterface
         return $this->verifyHtpasswd($user, $pass);
     }
 
+    /** bcrypt (cost 10) of a random string; only its verification time matters. */
+    private const TIMING_DUMMY_HASH = '$2y$10$BPG2tOCkX9BU.lVtvgGdoOSDIgcumlkIZUqfydXK7tSEQIJ40sQLK';
+
     private function verifyHtpasswd(string $user, string $pass): bool
     {
         $map = $this->loadHtpasswd();
         if ($map === null || !isset($map[$user])) {
+            // Same bcrypt cost as a real check, so response time doesn't tell
+            // an attacker which usernames exist.
+            password_verify($pass, self::TIMING_DUMMY_HASH);
             return false;
         }
         $hash = $map[$user];
