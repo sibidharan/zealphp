@@ -126,6 +126,13 @@ class CoSessionManager
      * not stored, and while they sit in the process-wide array a concurrent
      * request can read them. Point at the request-scoped API.
      */
+    /** Drop the process-wide $_SESSION array (coroutine mode only). */
+    private static function clearSessionGlobal(): void
+    {
+        $GLOBALS['_SESSION'] = [];
+        unset($GLOBALS['_SESSION']);
+    }
+
     private static function warnSessionSuperglobalOnce(): void
     {
         static $warned = false;
@@ -191,7 +198,7 @@ class CoSessionManager
         // request's session (that is $g->session). Data left in it by an
         // earlier request would be read by this one — another user's session.
         if (!\ZealPHP\App::$superglobals) {
-            unset($GLOBALS['_SESSION']);
+            self::clearSessionGlobal();
         }
 
         // Session lifecycle is opt-out (via App::sessionLifecycle(false)) for
@@ -330,9 +337,12 @@ class CoSessionManager
             }
             $g->session = [];
             unset($g->session);
-            if (!\ZealPHP\App::$superglobals && !empty($GLOBALS['_SESSION'])) {
-                self::warnSessionSuperglobalOnce();
-                unset($GLOBALS['_SESSION']);
+            if (!\ZealPHP\App::$superglobals) {
+                $sessionGlobal = \array_key_exists('_SESSION', $GLOBALS) ? $GLOBALS['_SESSION'] : null;
+                if (\is_array($sessionGlobal) && $sessionGlobal !== []) {
+                    self::warnSessionSuperglobalOnce();
+                }
+                self::clearSessionGlobal();
             }
             if (\ZealPHP\App::$define_isolation
                 && \function_exists('zealphp_constants_clear')
