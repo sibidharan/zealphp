@@ -68,7 +68,7 @@ final class SessionPersistBeforeSendTest extends TestCase
     /**
      * @return array{body: string, cookie: ?string}|null
      */
-    private function get(int $port, string $path, ?string $cookie = null): ?array
+    private function fetch(int $port, string $path, ?string $cookie = null): ?array
     {
         $ctx = stream_context_create(['http' => [
             'timeout' => 5,
@@ -91,7 +91,7 @@ final class SessionPersistBeforeSendTest extends TestCase
     /** @return array<string, mixed> */
     private function session(int $port, string $cookie): array
     {
-        $r = $this->get($port, '/get', $cookie);
+        $r = $this->fetch($port, '/get', $cookie);
         $this->assertNotNull($r);
         $d = json_decode($r['body'], true);
         return is_array($d) ? $d : [];
@@ -107,7 +107,7 @@ final class SessionPersistBeforeSendTest extends TestCase
     public function testSessionIsStoredBeforeTheResponseArrives(string $mode): void
     {
         $port = self::SERVERS[$mode];
-        $first = $this->get($port, '/set?v=one');
+        $first = $this->fetch($port, '/set?v=one');
         if ($first === null) {
             $this->markTestSkipped("$mode fixture did not boot (OpenSwoole unavailable).");
         }
@@ -117,7 +117,7 @@ final class SessionPersistBeforeSendTest extends TestCase
         $this->assertSame('one', $this->session($port, $cookie)['v'] ?? null);
 
         // The follow-up is sent while /set is still lingering after end().
-        $this->assertSame('set', $this->get($port, '/set?v=two', $cookie)['body'] ?? null);
+        $this->assertSame('set', $this->fetch($port, '/set?v=two', $cookie)['body'] ?? null);
         $this->assertSame('two', $this->session($port, $cookie)['v'] ?? null,
             "$mode: the next request read the session before the previous response's write landed");
     }
@@ -126,13 +126,13 @@ final class SessionPersistBeforeSendTest extends TestCase
     public function testChangesAfterTheResponseAreStillStored(string $mode): void
     {
         $port = self::SERVERS[$mode];
-        $first = $this->get($port, '/set?v=one');
+        $first = $this->fetch($port, '/set?v=one');
         if ($first === null) {
             $this->markTestSkipped("$mode fixture did not boot (OpenSwoole unavailable).");
         }
         $cookie = (string) $first['cookie'];
         usleep(800000);
-        $this->assertSame('after', $this->get($port, '/after', $cookie)['body'] ?? null);
+        $this->assertSame('after', $this->fetch($port, '/after', $cookie)['body'] ?? null);
         usleep(300000);
         $s = $this->session($port, $cookie);
         $this->assertSame('yes', $s['late'] ?? null, "$mode: a change made after end() was not stored");
