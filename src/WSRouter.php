@@ -809,6 +809,17 @@ final class WSRouter
     }
 
     /**
+     * Drop the principal bound to a closed connection. Called by the framework's
+     * WebSocket close handler (after the route's own close callback), so an app
+     * that never calls release() cannot leave a reused fd holding the previous
+     * user's identity.
+     */
+    public static function forgetPrincipal(int $fd): void
+    {
+        unset(self::$principalByFd[$fd]);
+    }
+
+    /**
      * Internal: consult the room authorizer (fail-closed when set). Returns true
      * when there is no authorizer (BC) or it permits the op. {@see Room} calls
      * this for reads (members/size/isMember) and {@see requireRoomAuth()} for

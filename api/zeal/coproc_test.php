@@ -1,4 +1,4 @@
-<?
+<?php
 use OpenSwoole\Coroutine as co;
 use function ZealPHP\coproc;
 

@@ -4672,6 +4672,57 @@ class App
         return self::$trusted_proxies;
     }
 
+    /** @var list<string> */
+    private static array $ws_allowed_origins = [];
+
+    /**
+     * Origins (e.g. `https://app.example.com`, or `*`) whose WebSocket upgrades
+     * may carry the visitor's cookie session. A same-host Origin is always
+     * allowed, and so is an upgrade with no Origin (a non-browser client). Any
+     * other browser Origin still connects, but the session is NOT loaded for it:
+     * without this, a page on a sibling subdomain (or any site, with
+     * SameSite=None cookies) could open the socket as the visitor
+     * (cross-site WebSocket hijacking).
+     *
+     * @param  list<string>|null $origins
+     * @return list<string>
+     */
+    public static function wsAllowedOrigins(?array $origins = null): array
+    {
+        if ($origins !== null) {
+            self::$ws_allowed_origins = array_values(array_map(
+                static fn (string $o): string => strtolower(rtrim($o, '/')),
+                $origins
+            ));
+        }
+        return self::$ws_allowed_origins;
+    }
+
+    /**
+     * May this WebSocket upgrade use the cookie session? See wsAllowedOrigins().
+     */
+    public static function wsOriginMayUseSession(?string $origin, ?string $host): bool
+    {
+        if ($origin === null || $origin === '') {
+            return true;
+        }
+        $origin = strtolower(rtrim($origin, '/'));
+        if (in_array('*', self::$ws_allowed_origins, true) || in_array($origin, self::$ws_allowed_origins, true)) {
+            return true;
+        }
+        $parts = parse_url($origin);
+        if (!is_array($parts) || !isset($parts['host']) || $host === null || $host === '') {
+            return false;
+        }
+        $originHost = $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
+        if (strcasecmp($originHost, $host) === 0) {
+            return true;
+        }
+        // Host carries no port when it is the scheme default.
+        $default = ($parts['scheme'] ?? '') === 'https' ? 443 : 80;
+        return isset($parts['port']) && $parts['port'] === $default && strcasecmp($parts['host'], $host) === 0;
+    }
+
     /** Apache `LogFormat`. Resets the compiled-spec cache on set. */
     public static function accessLogFormat(?string $format = null): string
     {
@@ -7590,6 +7641,10 @@ class App
     public static function renderHtmx(string $template, array $args = [], ?string $fragmentName = null, ?string $fullPageTemplate = null): mixed
     {
         $req = RequestContext::instance()->zealphp_request;
+
+        // The body depends on these request headers (full page vs fragment), so a
+        // shared cache must key on them — else it can serve a fragment as the page.
+        RequestContext::instance()->zealphp_response?->header('Vary', 'HX-Request, HX-Target, HX-Trigger-Name', false);
 
         // No request in scope (CLI render, warmup, etc.) → full page.
         if (!$req instanceof \ZealPHP\HTTP\Request || !$req->isHtmx()) {
@@ -10835,6 +10890,13 @@ class App
             // #305 — parse the upgrade request's raw Cookie header (OpenSwoole's
             // own parser is off via http_parse_cookie=false) for the PHPSESSID.
             $wsCookies = self::requestCookieMap($request);
+            $wsHeaders = is_array($request->header) ? $request->header : [];
+            $wsOrigin = isset($wsHeaders['origin']) && is_string($wsHeaders['origin']) ? $wsHeaders['origin'] : null;
+            $wsHost = isset($wsHeaders['host']) && is_string($wsHeaders['host']) ? $wsHeaders['host'] : null;
+            if (isset($wsCookies[$sessionName]) && !self::wsOriginMayUseSession($wsOrigin, $wsHost)) {
+                \ZealPHP\elog('[security] WebSocket upgrade from foreign Origin ' . $wsOrigin . ' on ' . $path . ': session not loaded (see App::wsAllowedOrigins())', 'warn');
+                unset($wsCookies[$sessionName]);
+            }
             if (isset($wsCookies[$sessionName])) {
                 $rawSid = $wsCookies[$sessionName];
                 if (is_string($rawSid)) {
@@ -10886,8 +10948,12 @@ class App
             $app = App::instance();
             assert($app !== null);
             $route = $path ? ($app->wsRoutes()[$path] ?? null) : null;
-            if ($route !== null && $route['close'] !== null) {
-                ($route['close'])($server, $fd, $g);
+            try {
+                if ($route !== null && $route['close'] !== null) {
+                    ($route['close'])($server, $fd, $g);
+                }
+            } finally {
+                \ZealPHP\WSRouter::forgetPrincipal($fd);
             }
         });
 

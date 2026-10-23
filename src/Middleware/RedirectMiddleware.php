@@ -62,10 +62,18 @@ class RedirectMiddleware implements MiddlewareInterface
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        $path = $request->getUri()->getPath();
+        // Match on the path the router sees (`//` collapsed, dot segments
+        // resolved), like Apache's RedirectMatch on the merged-slash URI: on the
+        // raw path `/go//evil.com` with `#^/go/(.*)$#` => `/$1` became
+        // `Location: //evil.com`.
+        $path = \ZealPHP\App::normalizeRequestPath($request->getUri()->getPath());
         foreach ($this->rules as $rule) {
             $target = $this->resolve($rule, $path);
             if ($target === null) {
+                continue;
+            }
+            if (!self::targetStaysWhereTheRulePoints($rule['to'], $target)) {
+                \ZealPHP\elog('[security] RedirectMiddleware: refusing computed Location ' . json_encode($target) . ' (request path ' . json_encode($path) . ')', 'warn');
                 continue;
             }
             // The OpenSwoole-core PSR ServerRequest builds its Uri from the
@@ -87,6 +95,31 @@ class RedirectMiddleware implements MiddlewareInterface
             return new Response('', $rule['status'], '', ['Location' => $target]);
         }
         return $handler->handle($request);
+    }
+
+    /**
+     * A target built from request input must not leave the place the rule's
+     * `to` points: no control characters, no protocol-relative `//host` (or
+     * `/\host`) unless `to` itself is protocol-relative, and when `to` names a
+     * fixed host, the result keeps that host (`https://new.example` +
+     * `@evil.com` is a redirect to evil.com).
+     */
+    private static function targetStaysWhereTheRulePoints(string $to, string $target): bool
+    {
+        if (preg_match('/[\x00-\x1F\x7F]/', $target) === 1) {
+            return false;
+        }
+        if (preg_match('#^[/\\\\]{2}#', $target) === 1 && !str_starts_with($to, '//')) {
+            return false;
+        }
+        $toHost = parse_url($to, PHP_URL_HOST);
+        if (is_string($toHost) && !str_contains($toHost, '$')) {
+            $targetHost = parse_url($target, PHP_URL_HOST);
+            if (!is_string($targetHost) || strcasecmp($toHost, $targetHost) !== 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

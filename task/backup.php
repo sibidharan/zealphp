@@ -1,4 +1,4 @@
-<?
+<?php
 
 use function ZealPHP\elog;
 use ZealPHP\App;

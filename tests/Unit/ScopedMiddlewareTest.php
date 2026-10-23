@@ -130,4 +130,15 @@ class ScopedMiddlewareTest extends TestCase
         $response = $this->process($mw, '/./public/page');
         $this->assertSame(200, $response->getStatusCode(), '/public is out of scope → inner skipped');
     }
+
+    // A `/admin.php/x` URL is dispatched as admin.php (PATH_INFO), so an
+    // anchored match() scope for /admin must cover it.
+
+    public function testPathInfoUrlDoesNotEscapeAnchoredMatchScope(): void
+    {
+        $mw = ScopedMiddleware::match($this->blockingInner(), '#^/admin/?$#');
+        $this->assertSame(403, $this->process($mw, '/admin')->getStatusCode());
+        $this->assertSame(403, $this->process($mw, '/admin.php/x')->getStatusCode(), '/admin.php/x runs admin.php');
+        $this->assertSame(200, $this->process($mw, '/public.php/admin')->getStatusCode(), 'only the script part widens the scope');
+    }
 }

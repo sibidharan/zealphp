@@ -1,4 +1,4 @@
-<?
+<?php
 use function ZealPHP\elog;
 $fork = function(){
     elog("Forking");

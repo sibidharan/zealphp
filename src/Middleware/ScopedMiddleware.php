@@ -79,9 +79,24 @@ final class ScopedMiddleware implements MiddlewareInterface
             : $request->getUri()->getPath();
         $rawPath = explode('?', $target, 2)[0];
         $path = \ZealPHP\App::normalizeRequestPath($rawPath);
-        $inScope = $this->regex
-            ? preg_match($this->pattern, $path) === 1
-            : str_starts_with($path, $this->pattern);
+        // A `/script.php/extra` URL is dispatched (ResponseMiddleware's PATH_INFO
+        // rewrite) as `/script.php` — or `/script` with ignore_php_ext — so an
+        // anchored scope like `#^/admin/?$#` has to see those too, or
+        // `/admin.php/x` runs admin.php outside it. Extra candidates can only
+        // widen the scope, never narrow it.
+        $candidates = [$path];
+        if (\ZealPHP\App::$path_info && str_contains($path, '.php/')) {
+            $script = explode('.php/', $path, 2)[0];
+            $candidates[] = $script . '.php';
+            $candidates[] = $script;
+        }
+        $inScope = false;
+        foreach ($candidates as $candidate) {
+            if ($this->regex ? preg_match($this->pattern, $candidate) === 1 : str_starts_with($candidate, $this->pattern)) {
+                $inScope = true;
+                break;
+            }
+        }
 
         if ($inScope) {
             return $this->inner->process($request, $handler);

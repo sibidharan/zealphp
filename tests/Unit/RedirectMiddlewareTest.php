@@ -168,6 +168,23 @@ class RedirectMiddlewareTest extends TestCase
         $this->assertSame('OK', (string) $response->getBody());
     }
 
+    public function testRegexRuleCannotBuildProtocolRelativeTarget(): void
+    {
+        $mw = new RedirectMiddleware([['match' => '#^/go/(.*)$#', 'to' => '/$1']]);
+        $response = $this->process($mw, '/go//evil.com');
+        $this->assertNotSame('//evil.com', $response->getHeaderLine('Location'));
+        $this->assertStringStartsNotWith('//', $response->getHeaderLine('Location'));
+    }
+
+    public function testPrefixRuleCannotMoveToAnotherHost(): void
+    {
+        $mw = new RedirectMiddleware([['from' => '/old/', 'to' => 'https://new.example.test']]);
+        $response = $this->process($mw, '/old/@evil.test');
+        $this->assertSame(200, $response->getStatusCode(), 'https://new.example.test@evil.test must not be emitted');
+        $ok = $this->process($mw, '/old/page');
+        $this->assertSame('https://new.example.test/page', $ok->getHeaderLine('Location'));
+    }
+
     private function process(RedirectMiddleware $mw, string $path, string $query = ''): ResponseInterface
     {
         $uri = $path . ($query !== '' ? '?' . $query : '');

@@ -1015,11 +1015,16 @@ function setcookie($name, $value = "", int|array $expire_or_options = 0, $path =
         trigger_error("Cookie names cannot contain any of the following '=,; \\t\\r\\n\\013\\014'", E_USER_WARNING);
         return false;
     }
+    // PHP 8 parity: a `;`/`,`/space in path or domain would start a new cookie
+    // attribute (`path=/; Domain=evil`), so native setcookie() throws.
+    foreach (['path' => (string) $path, 'domain' => (string) $domain] as $opt => $optValue) {
+        if (strpbrk($optValue, ",; \t\r\n\013\014\0") !== false) {
+            throw new \ValueError('setcookie(): "' . $opt . '" option cannot contain ",", ";", " ", "\\t", "\\r", "\\n", "\\013", or "\\014"');
+        }
+    }
     if (strpbrk((string)$value, "\r\n\0") !== false
-        || strpbrk((string)$path, "\r\n\0") !== false
-        || strpbrk((string)$domain, "\r\n\0") !== false
-        || strpbrk((string)$samesite, "\r\n\0") !== false) {
-        trigger_error('Cookie value/path/domain/samesite contains control characters', E_USER_WARNING);
+        || preg_match('/[^A-Za-z]/', (string) $samesite) === 1) {
+        trigger_error('Cookie value contains control characters, or samesite is not a plain word', E_USER_WARNING);
         return false;
     }
     $g = RequestContext::instance();

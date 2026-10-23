@@ -1,4 +1,4 @@
-<?
+<?php
 use function ZealPHP\response_set_status;
 
 $override = function($response){

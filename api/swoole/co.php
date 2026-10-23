@@ -1,4 +1,4 @@
-<?
+<?php
 use OpenSwoole\Coroutine\Channel;
 use OpenSwoole\Coroutine as co;
 use ZealPHP\G;

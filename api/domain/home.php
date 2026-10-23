@@ -1,4 +1,4 @@
-<?
+<?php
 use ZealPHP\App;
 use ZealPHP\G;
 $home = function(){

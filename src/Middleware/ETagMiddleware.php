@@ -76,6 +76,14 @@ class ETagMiddleware implements MiddlewareInterface
 
         $method = $request->getMethod();
         $isGetOrHead = $method === 'GET' || $method === 'HEAD';
+        // A precondition guards the method from running (RFC 9110 §13.2.1). Here
+        // the handler has already run: turning a PUT/POST/DELETE's result into
+        // 412 tells the client nothing changed when the write did happen, so
+        // a lost-update check (If-Match) would silently fail open. Only the
+        // handler can evaluate it before writing; leave its response alone.
+        if (!$isGetOrHead) {
+            return $response;
+        }
 
         $body = (string) $response->getBody();
         // Without a body there is no representation to hash, so no ETag exists.

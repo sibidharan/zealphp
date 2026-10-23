@@ -49,9 +49,17 @@ class Rfc6265CookieConformanceTest extends TestCase
     public function testRejectsCrlfInjectionAcrossFields(): void
     {
         $this->assertFalse(@\ZealPHP\setcookie('sid', "v\r\nSet-Cookie: evil=1"));
-        $this->assertFalse(@\ZealPHP\setcookie('sid', 'v', 0, "/\r\nX: y"));
-        $this->assertFalse(@\ZealPHP\setcookie('sid', 'v', 0, '/', "ex.com\r\n"));
+        // path/domain: native PHP 8 throws ValueError (not warn + false).
+        foreach ([[0, "/\r\nX: y"], [0, '/', "ex.com\r\n"], [0, '/; Domain=evil.test'], [0, '/', 'ex.com; Secure']] as $args) {
+            try {
+                \ZealPHP\setcookie('sid', 'v', ...$args);
+                $this->fail('setcookie accepted ' . json_encode($args));
+            } catch (\ValueError) {
+                $this->addToAssertionCount(1);
+            }
+        }
         $this->assertFalse(@\ZealPHP\setcookie('sid', 'v', 0, '/', 'ex.com', false, false, "Lax\r\n"));
+        $this->assertFalse(@\ZealPHP\setcookie('sid', 'v', 0, '/', 'ex.com', false, false, 'Lax; Domain=evil.test'));
         $this->assertFalse(@\ZealPHP\setcookie('sid', "v\0null"));
         $this->assertCount(0, $this->resp->cookies, 'no injected cookie should be emitted');
     }

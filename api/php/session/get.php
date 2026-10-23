@@ -1,4 +1,4 @@
-<?
+<?php
 
 use function ZealPHP\get_current_render_time;
 use ZealPHP\G;

@@ -1,4 +1,4 @@
-<?
+<?php
 
 $get = function() {
     var_dump($this->request);

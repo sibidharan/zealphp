@@ -675,6 +675,12 @@ class Response
         );
     }
 
+    /** Sniffed types sendFile() downgrades to text/plain (see resolveFileMetadata()). */
+    private const SCRIPTABLE_SNIFFED_TYPES = [
+        'text/html', 'image/svg+xml', 'application/xhtml+xml', 'text/xml', 'application/xml',
+        'text/javascript', 'application/javascript',
+    ];
+
     /**
      * Resolve a file's response metadata for `sendFile()` (#317): walk the
      * suffix chain via {@see MimeResolver} (Apache `mod_mime` semantics), then
@@ -693,6 +699,12 @@ class Response
             $type = $resolved['encoding'] !== null
                 ? 'application/octet-stream'
                 : (mime_content_type($path) ?: 'application/octet-stream');
+            // Never let content sniffing pick a type the browser runs script
+            // in: an uploaded `avatar` (no suffix) holding HTML or SVG would be
+            // served as a page on the app's origin (stored XSS).
+            if (in_array(strtolower(explode(';', $type)[0]), self::SCRIPTABLE_SNIFFED_TYPES, true)) {
+                $type = 'text/plain';
+            }
         }
         return ['type' => $type, 'encoding' => $resolved['encoding'], 'languages' => $resolved['languages']];
     }
@@ -735,6 +747,9 @@ class Response
             $this->header('Content-Language', implode(', ', $meta['languages']));
         }
         $this->header('Accept-Ranges', 'bytes');
+        // The type above is the one we mean; don't let a browser re-sniff an
+        // upload into HTML.
+        $this->header('X-Content-Type-Options', 'nosniff');
 
         if ($filename !== '') {
             // RFC 6266 / RFC 5987: HTTP field values are US-ASCII (RFC 9110 §5.5),
