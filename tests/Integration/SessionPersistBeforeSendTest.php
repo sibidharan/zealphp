@@ -123,6 +123,21 @@ final class SessionPersistBeforeSendTest extends TestCase
     }
 
     #[DataProvider('modes')]
+    public function testBodylessStatusAlsoStoresTheSessionFirst(string $mode): void
+    {
+        $port = self::SERVERS[$mode];
+        $first = $this->fetch($port, '/set?v=one');
+        if ($first === null) {
+            $this->markTestSkipped("$mode fixture did not boot (OpenSwoole unavailable).");
+        }
+        $cookie = (string) $first['cookie'];
+        usleep(1500000);
+        $this->fetch($port, '/set204?v=gone', $cookie);
+        $this->assertSame('gone', $this->session($port, $cookie)['v'] ?? null,
+            "$mode: a 204 reached the client before its session write");
+    }
+
+    #[DataProvider('modes')]
     public function testChangesAfterTheResponseAreStillStored(string $mode): void
     {
         $port = self::SERVERS[$mode];
@@ -133,7 +148,7 @@ final class SessionPersistBeforeSendTest extends TestCase
         $cookie = (string) $first['cookie'];
         usleep(800000);
         $this->assertSame('after', $this->fetch($port, '/after', $cookie)['body'] ?? null);
-        usleep(300000);
+        usleep(1500000);   // the late write goes through the fixture's 500 ms store
         $s = $this->session($port, $cookie);
         $this->assertSame('yes', $s['late'] ?? null, "$mode: a change made after end() was not stored");
         $this->assertArrayNotHasKey('tmp', $s, "$mode: a key unset after end() came back from the early save");

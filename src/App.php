@@ -10743,6 +10743,10 @@ class App
                         $head .= 'Connection: ' . ($keepAlive ? 'keep-alive' : 'close') . "\r\n\r\n";
                         $fd = $response->parent->fd;
                         if (is_int($fd) && $fd > 0 && self::$server !== null) {
+                            // The raw head is the response's last byte: store
+                            // the session first, as endParent() does (a 204
+                            // logout must be visible to the client's next request).
+                            \ZealPHP\Session\zeal_session_persist_before_send();
                             $response->parent->detach();
                             self::$server->send($fd, $head);
                             if (!$keepAlive) {

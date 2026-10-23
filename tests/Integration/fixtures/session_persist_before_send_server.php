@@ -14,6 +14,26 @@ use ZealPHP\RequestContext;
 
 $port = (int) ($argv[1] ?? 9838);
 $mixed = ($argv[2] ?? 'coroutine') === 'mixed';
+
+// A store whose writes are slow: a session written only AFTER the response is
+// on the wire is visibly late to the client's next request.
+App::sessionHandler(new class (sys_get_temp_dir() . '/zp_persist_slow_' . ($argv[1] ?? '0')) extends \ZealPHP\Session\Handler\FileSessionHandler {
+    public function __construct(string $dir)
+    {
+        @mkdir($dir, 0700, true);
+        $this->open($dir, 'PHPSESSID');
+    }
+
+    public function write($sessionId, $sessionData): bool
+    {
+        if (\OpenSwoole\Coroutine::getCid() > 0) {
+            \OpenSwoole\Coroutine::usleep(500000);
+        } else {
+            usleep(500000);
+        }
+        return parent::write($sessionId, $sessionData);
+    }
+});
 App::mode($mixed ? App::MODE_MIXED : App::MODE_COROUTINE);
 $app = App::init('127.0.0.1', $port);
 
@@ -56,6 +76,15 @@ $app->route('/after', function ($response) use ($read, $write) {
     $s['late'] = 'yes';
     unset($s['tmp']);
     $write($s);
+});
+
+// Body-less status (204): the head goes out on a raw send() path.
+$app->route('/set204', function ($response) use ($read, $write) {
+    session_start();
+    $s = $read();
+    $s['v'] = (string) (RequestContext::instance()->get['v'] ?? '');
+    $write($s);
+    http_response_code(204);
 });
 
 $app->route('/get', function () use ($read) {
