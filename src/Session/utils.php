@@ -68,7 +68,11 @@ function php_session_encode_from_array(array $data): string
  */
 function php_session_decode_to_array(string $data): array
 {
-    $decoded = @unserialize($data, ['allowed_classes' => ['stdClass']]);
+    // php_serialize format is one serialized array; only try it when the data
+    // can be one (saves a failing unserialize() per call on the php format).
+    $decoded = str_starts_with($data, 'a:')
+        ? @unserialize($data, ['allowed_classes' => ['stdClass']])
+        : false;
     if (is_array($decoded)) {
         /** @var array<string, mixed> $narrowed */
         $narrowed = [];
@@ -651,15 +655,16 @@ function zeal_session_digest(array $data): array
  * @param array<array-key, mixed> $current   This request's session.
  * @param array<string, string>   $loaded    `$g->session_loaded_digest`.
  * @param list<string>            $loadedKeys `$g->session_loaded_keys`.
- * @return array<array-key, mixed>
+ * @return array<string, mixed>
  */
 function zeal_session_merge_onto_store(array $existing, array $current, array $loaded, array $loadedKeys): array
 {
+    /** @var array<string, mixed> $merged session keys are strings */
     $merged = $existing;
     foreach ($current as $k => $v) {
         $key = (string) $k;
         if (!isset($loaded[$key]) || $loaded[$key] !== md5(serialize($v))) {
-            $merged[$k] = $v;
+            $merged[$key] = $v;
         }
     }
     foreach ($loadedKeys as $k) {

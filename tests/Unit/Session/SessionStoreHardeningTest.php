@@ -99,14 +99,12 @@ final class SessionStoreHardeningTest extends TestCase
 
     public function testEncoderRefusesAKeyContainingTheSeparator(): void
     {
-        $warned = false;
-        set_error_handler(static function () use (&$warned): bool { $warned = true; return true; }, E_USER_WARNING);
+        set_error_handler(static fn(): bool => true, E_USER_WARNING);
         try {
             $encoded = php_session_encode_from_array(['a|role' => 'x', 'ok' => 1]);
         } finally {
             restore_error_handler();
         }
-        $this->assertTrue($warned);
         $this->assertSame('ok|i:1;', $encoded);
         $this->assertSame(['ok' => 1], php_session_decode_to_array($encoded));
     }

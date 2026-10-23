@@ -96,6 +96,16 @@ namespace ZealPHP\Tests\Unit\Session {
             }
             \Redis::$data = [];
             \Redis::$version = [];
+            // The decoder's @-suppressed unserialize() notices still reach
+            // PHPUnit's handler, which cannot run inside a coroutine.
+            set_error_handler(static fn(): bool => true);
+        }
+
+        protected function tearDown(): void
+        {
+            if (!extension_loaded('redis')) {
+                restore_error_handler();
+            }
         }
 
         private function handler(): RedisSessionHandler
