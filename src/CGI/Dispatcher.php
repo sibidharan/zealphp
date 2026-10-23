@@ -290,9 +290,30 @@ class Dispatcher
      * @param array<string,string> $extraParams  Extra FCGI params merged after buildCgiEnv()
      *   (Apache SetEnvIf / nginx fastcgi_param parity).
      */
+    /** @var array<string, true> FastCGI upstreams already warned about in this worker. */
+    private static array $fcgi_upstreams_warned = [];
+
+    /**
+     * The fcgi backend hands the request (env + raw body) to an external
+     * PHP-FPM, which runs PHP's own request startup: exactly what PHP2Shell
+     * (CVE-2026-109618 / 109619) attacks. setup.sh's patched-PHP guard covers
+     * the interpreter ZealPHP ships, not that one. Say so once per upstream.
+     */
+    private static function warnUnguardedFcgiUpstream(string $address): void
+    {
+        if (isset(self::$fcgi_upstreams_warned[$address])) {
+            return;
+        }
+        self::$fcgi_upstreams_warned[$address] = true;
+        elog('[warn] fcgi backend: forwarding requests to the PHP-FPM at ' . $address
+            . '. ZealPHP cannot check that PHP: it must carry the PHP2Shell fix '
+            . '(CVE-2026-109618/109619; 8.2.35, 8.3.36, 8.4.27, 8.5.12 or a distro backport).', 'warn');
+    }
+
     public static function cgiFcgi(string $path, ?string $address = null, array $extraParams = []): mixed
     {
         $g = RequestContext::instance();
+        self::warnUnguardedFcgiUpstream($address ?? App::$fcgi_address);
 
         // Issue #108 — mint + emit a session cookie on the host side when
         // the subprocess owns sessions and the client didn't send a

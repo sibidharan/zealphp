@@ -2011,6 +2011,32 @@ class App
      * protected. Returns the advisory string, or null when N/A; the `null`
      * (auto) default follows the scheduler and never warns. Testable seam.
      */
+    /** First ext-zealphp release with the PHP2Shell-audit isolation fixes. */
+    public const MIN_EXT_VERSION_COROUTINE_LEGACY = '0.3.61';
+
+    /**
+     * coroutine-legacy (superglobals + coroutines) isolates request state in
+     * ext-zealphp with no PHP-layer fallback, so an outdated ext is a
+     * cross-tenant risk, not a missing feature. Returns the refusal message
+     * when the loaded ext is older than MIN_EXT_VERSION_COROUTINE_LEGACY, null
+     * otherwise (other modes, or no ext at all, which is refused elsewhere).
+     *
+     * @internal — public for tests; not part of the user-facing API.
+     */
+    public static function legacyExtVersionAdvisory(bool $superglobals, bool $coroutines, string|false $extVersion): ?string
+    {
+        if (!$superglobals || !$coroutines || $extVersion === false || $extVersion === '') {
+            return null;
+        }
+        if (\version_compare($extVersion, self::MIN_EXT_VERSION_COROUTINE_LEGACY, '>=')) {
+            return null;
+        }
+        return "[error] coroutine-legacy needs ext-zealphp >= " . self::MIN_EXT_VERSION_COROUTINE_LEGACY
+            . " (loaded: {$extVersion}). Older builds can leak one request's error state, "
+            . 'request constants and by-reference locals into other requests, and crash on '
+            . 'OOM during a coroutine switch. Upgrade: pie install zealphp/ext';
+    }
+
     public static function exitHookAdvisory(?bool $forced, bool $hasScheduler): ?string
     {
         if ($forced === true && !$hasScheduler) {
@@ -8077,6 +8103,15 @@ class App
         // Outside the document root — preserve legacy "trust the caller"
         // semantics while still applying the universal return contract. A
         // route `backend:` override still applies (same request-scoped slot).
+        // No containment/dotfile/symlink check applies on this path, so say so
+        // (once per worker) to anyone still relying on it.
+        static $zpIncludeFileWarned = false;
+        if (!$zpIncludeFileWarned) {
+            $zpIncludeFileWarned = true;
+            elog('[deprecated] App::includeFile() with a path outside the document root runs it '
+                . 'with no containment, dotfile or symlink check. Use App::include() for docroot files; '
+                . 'require trusted code directly.', 'warn');
+        }
         $cgi   = self::applyRouteBackend(self::resolveCgiBackend($path, $path));
         $isPhp = str_ends_with(strtolower($path), '.php');
 
@@ -9481,6 +9516,18 @@ class App
      */
     private function activateIsolationRuntime(bool $enableCoroutine, int $hookFlags): void
     {
+        $extAdvisory = self::legacyExtVersionAdvisory(
+            App::$superglobals,
+            $enableCoroutine,
+            \extension_loaded('zealphp') ? \phpversion('zealphp') : false
+        );
+        if ($extAdvisory !== null) {
+            error_log($extAdvisory);
+            if ((string) \getenv('ZEALPHP_ALLOW_OUTDATED_EXT') !== '1') {
+                \fwrite(\STDERR, $extAdvisory . "\nRefusing to start (ZEALPHP_ALLOW_OUTDATED_EXT=1 overrides).\n");
+                exit(1);
+            }
+        }
         // Activate per-coroutine superglobal isolation when ext-zealphp is
         // loaded AND superglobals mode is on with coroutines. ext-zealphp
         // v0.3.2+ chains its callbacks with OpenSwoole's PHPCoroutine hooks
