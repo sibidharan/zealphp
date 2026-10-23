@@ -143,6 +143,18 @@ class RateLimitMiddleware implements MiddlewareInterface
     }
 
     /**
+     * Has this rate-limit row's window ended at `$now`? A row without a usable
+     * `reset` counts as ended (it can't be limiting anyone).
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function windowEnded(array $row, int $now): bool
+    {
+        $reset = $row['reset'] ?? null;
+        return !is_numeric($reset) || (int) $reset <= $now;
+    }
+
+    /**
      * Delete rows of `$table` that `$isDead` says are finished, at most once a
      * second per worker per table. Collect-then-delete: deleting while
      * iterating an OpenSwoole\Table skips rows.
@@ -272,10 +284,7 @@ class RateLimitMiddleware implements MiddlewareInterface
         $ok = Store::set($this->tableName, $key, $row);
         if ($ok === false) {
             // Full: make room by dropping the clients whose window has ended.
-            $evicted = self::evictRows($this->tableName, static function (array $r) use ($now): bool {
-                $reset = $r['reset'] ?? 0;
-                return !is_numeric($reset) || (int) $reset <= $now;
-            });
+            $evicted = self::evictRows($this->tableName, static fn (array $r): bool => self::windowEnded($r, $now));
             if ($evicted > 0) {
                 $ok = Store::set($this->tableName, $key, $row);
             }

@@ -98,9 +98,6 @@ parameters:
         -
             message: '#^Parameter \#3 \$(incr|decr)By of method OpenSwoole\\Table::(incr|decr)\(\) expects int, float\|int given\.$#'
             path: src/Store/TableBackend.php
-        -
-            message: '#^Method ZealPHP\\Store\\TableBackend::(incr|decr)\(\) never returns float so it can be removed from the return type\.$#'
-            path: src/Store/TableBackend.php
 
         # ─── REST.php constructor backward-compat ───────────────────────
         # REST.php constructor signature kept for backward compatibility;

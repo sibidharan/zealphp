@@ -123,6 +123,57 @@ final class LimiterTableFullTest extends TestCase
         $this->assertSame(503, $outer->inner, 'a full table switched the concurrency limit off');
     }
 
+    public function testWindowEndedBoundaries(): void
+    {
+        $now = 1_000_000;
+        $this->assertTrue(RateLimitMiddleware::windowEnded(['reset' => $now], $now), 'a window ending now has ended');
+        $this->assertTrue(RateLimitMiddleware::windowEnded(['reset' => $now - 1], $now));
+        $this->assertFalse(RateLimitMiddleware::windowEnded(['reset' => $now + 1], $now));
+        $this->assertFalse(RateLimitMiddleware::windowEnded(['reset' => (string) ($now + 1)], $now), 'numeric strings count');
+        $this->assertTrue(RateLimitMiddleware::windowEnded([], $now), 'no reset: not limiting anyone');
+        $this->assertTrue(RateLimitMiddleware::windowEnded(['reset' => 'x'], $now));
+    }
+
+    public function testIsIdleBoundaries(): void
+    {
+        $this->assertTrue(ConcurrencyLimitMiddleware::isIdle(['count' => 0]));
+        $this->assertTrue(ConcurrencyLimitMiddleware::isIdle(['count' => -1]));
+        $this->assertFalse(ConcurrencyLimitMiddleware::isIdle(['count' => 1]));
+        $this->assertFalse(ConcurrencyLimitMiddleware::isIdle(['count' => '2']));
+        $this->assertTrue(ConcurrencyLimitMiddleware::isIdle([]));
+        $this->assertTrue(ConcurrencyLimitMiddleware::isIdle(['count' => 'x']));
+    }
+
+    public function testEvictRowsDeletesOnlyDeadRowsAtMostOncePerSecond(): void
+    {
+        $table = $this->rateTable();
+        $now = time();
+        Store::set($table, 'dead1', ['ip' => 'a', 'count' => 1, 'reset' => $now - 5]);
+        Store::set($table, 'dead2', ['ip' => 'b', 'count' => 1, 'reset' => $now - 5]);
+        Store::set($table, 'live', ['ip' => 'c', 'count' => 1, 'reset' => $now + 60]);
+        $dead = static fn (array $r): bool => RateLimitMiddleware::windowEnded($r, $now);
+
+        $this->assertSame(2, RateLimitMiddleware::evictRows($table, $dead));
+        $this->assertFalse(Store::exists($table, 'dead1'));
+        $this->assertTrue(Store::exists($table, 'live'));
+
+        Store::set($table, 'dead3', ['ip' => 'd', 'count' => 1, 'reset' => $now - 5]);
+        if (time() === $now) {
+            $this->assertSame(0, RateLimitMiddleware::evictRows($table, $dead), 'a second sweep in the same second is skipped');
+            $this->assertTrue(Store::exists($table, 'dead3'));
+        }
+        $other = $this->rateTable();
+        Store::set($other, 'dead', ['ip' => 'e', 'count' => 1, 'reset' => $now - 5]);
+        $this->assertSame(1, RateLimitMiddleware::evictRows($other, $dead), 'the throttle is per table');
+    }
+
+    public function testClientKeyEdgeCases(): void
+    {
+        $this->assertSame('::zz', RateLimitMiddleware::clientKey('::zz'), 'unparseable: unchanged');
+        $this->assertSame('2001:db8::/64', RateLimitMiddleware::clientKey('2001:db8::ffff:1'));
+        $this->assertSame('::/64', RateLimitMiddleware::clientKey('::1'));
+    }
+
     /** @internal for the nested handler above */
     public function hitPublic(ConcurrencyLimitMiddleware $mw, string $ip): int
     {

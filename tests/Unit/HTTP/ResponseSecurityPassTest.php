@@ -177,6 +177,30 @@ final class ResponseSecurityPassTest extends TestCase
         $this->assertContains(['sendfile', $file, 0, $size], $fake->log, 'whole file, zero-copy');
     }
 
+    public function testAllowedHostlessSchemeRedirectIsLogged(): void
+    {
+        $log = $this->captureDebugLog(fn () => (new ZResponse(new FakeOpenSwooleResponse()))->redirect('mailto:team@example.test', 302, true));
+        $this->assertStringContainsString('[security] Hostless scheme redirect: mailto:team@example.test', $log);
+    }
+
+    private function captureDebugLog(callable $fn): string
+    {
+        $path = \ZealPHP\log_file_for('debug');
+        if ($path === null || str_contains($path, '://')) {
+            $this->markTestSkipped('debug log not file-backed in this environment');
+        }
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        clearstatcache(true, $path);
+        $before = is_file($path) ? (int) filesize($path) : 0;
+        $fn();
+        clearstatcache(true, $path);
+        $contents = is_file($path) ? (string) file_get_contents($path) : '';
+        return substr($contents, $before);
+    }
+
     public function testUppercaseHostlessSchemeIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);

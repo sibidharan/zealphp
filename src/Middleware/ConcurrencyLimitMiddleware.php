@@ -96,6 +96,18 @@ class ConcurrencyLimitMiddleware implements MiddlewareInterface
     private $keyResolver;
 
     /**
+     * Is this per-key row idle (no request in flight)? A row without a usable
+     * `count` counts as idle.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function isIdle(array $row): bool
+    {
+        $count = $row['count'] ?? null;
+        return !is_numeric($count) || (int) $count <= 0;
+    }
+
+    /**
      * @param int                                    $maxConcurrent Per-key (or global) in-flight cap.
      * @param Counter|null                           $counter       Optional global `Counter` (global mode
      *                                                              when `$tableName` is null; optional
@@ -199,10 +211,7 @@ class ConcurrencyLimitMiddleware implements MiddlewareInterface
             // row). A key's row stays after its last request (count 0), so the
             // table filled with every client ever seen and then let every new
             // client through unlimited. Drop the idle rows and retry once.
-            $evicted = RateLimitMiddleware::evictRows($tableName, static function (array $r): bool {
-                $c = $r['count'] ?? 0;
-                return !is_numeric($c) || (int) $c <= 0;
-            });
+            $evicted = RateLimitMiddleware::evictRows($tableName, self::isIdle(...));
             if ($evicted > 0) {
                 $perKeyCount = Store::incr($tableName, $key, 'count', 1);
             }

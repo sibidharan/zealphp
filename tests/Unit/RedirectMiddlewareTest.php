@@ -212,6 +212,34 @@ class RedirectMiddlewareTest extends TestCase
         $this->assertSame('//cdn.example.test/app.js', $response->getHeaderLine('Location'));
     }
 
+    public function testRefusalIsLoggedWithTheTargetAndThePath(): void
+    {
+        $mw = new RedirectMiddleware([['match' => '#^/go/(.*)$#', 'to' => 'https://good.example.test$1']]);
+        $log = $this->captureDebugLog(fn () => $this->process($mw, '/go/@evil.test'));
+        $this->assertStringContainsString(
+            '[security] RedirectMiddleware: refusing computed Location "https:\\/\\/good.example.test@evil.test" (request path "\\/go\\/@evil.test")',
+            $log
+        );
+    }
+
+    private function captureDebugLog(callable $fn): string
+    {
+        $path = \ZealPHP\log_file_for('debug');
+        if ($path === null || str_contains($path, '://')) {
+            $this->markTestSkipped('debug log not file-backed in this environment');
+        }
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        clearstatcache(true, $path);
+        $before = is_file($path) ? (int) filesize($path) : 0;
+        $fn();
+        clearstatcache(true, $path);
+        $contents = is_file($path) ? (string) file_get_contents($path) : '';
+        return substr($contents, $before);
+    }
+
     private function process(RedirectMiddleware $mw, string $path, string $query = ''): ResponseInterface
     {
         $uri = $path . ($query !== '' ? '?' . $query : '');
