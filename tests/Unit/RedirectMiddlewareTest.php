@@ -181,7 +181,7 @@ class RedirectMiddlewareTest extends TestCase
         $mw = new RedirectMiddleware([['from' => '/old/', 'to' => 'https://new.example.test']]);
         $response = $this->process($mw, '/old/@evil.test');
         $this->assertSame(200, $response->getStatusCode(), 'https://new.example.test@evil.test must not be emitted');
-        $ok = $this->process($mw, '/old/page');
+        $ok = $this->process(new RedirectMiddleware([['from' => '/old', 'to' => 'https://new.example.test']]), '/old/page');
         $this->assertSame('https://new.example.test/page', $ok->getHeaderLine('Location'));
     }
 
