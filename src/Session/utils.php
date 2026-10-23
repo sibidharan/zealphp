@@ -627,7 +627,7 @@ function zeal_session_persist_before_send(): void
         // Same contract as the managers: a failed write fails this request's
         // session, never the response. The manager's close retries it.
         $g->_session_persisted_hash = null;
-        elog('Session write failed: ' . $e->getMessage(), 'error');
+        \ZealPHP\elog('Session write failed: ' . $e->getMessage(), 'error');
     }
 }
 

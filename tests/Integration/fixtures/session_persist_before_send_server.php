@@ -39,7 +39,7 @@ $linger = static function (): void {
 $app->route('/set', function ($response) use ($read, $write, $linger) {
     session_start();
     $s = $read();
-    $s['v'] = (string) ($_GET['v'] ?? '');
+    $s['v'] = (string) (RequestContext::instance()->get['v'] ?? '');
     $s['tmp'] = 'x';
     $write($s);
     $response->end('set');
