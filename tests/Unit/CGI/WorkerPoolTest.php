@@ -317,11 +317,42 @@ final class WorkerPoolTest extends TestCase
      * before nulling, so request N's writes are flushed and visible to
      * request N+1.
      */
+    /**
+     * A client-chosen PHPSESSID the store never issued is not adopted by the
+     * subprocess: it gets session.use_strict_mode from App::$session_strict_mode
+     * (php.ini on Debian/Ubuntu ships 0).
+     */
+    public function testSubprocessRotatesAnUnissuedSessionId(): void
+    {
+        $sessDir = sys_get_temp_dir() . '/zptest-strict-' . bin2hex(random_bytes(4));
+        mkdir($sessDir, 0700, true);
+        $script = $this->fixture(
+            'strict.php',
+            'session_save_path(' . var_export($sessDir, true) . ');'
+            . ' session_start(); $_SESSION["x"] = 1; echo session_id();'
+        );
+        $pool = new WorkerPool(size: 1, maxRequestsPerWorker: 100);
+        try {
+            $r = $pool->dispatch(['file' => $script, 'cookies' => ['PHPSESSID' => 'attackerchosenid0123456789']]);
+            $this->assertNotSame('attackerchosenid0123456789', trim($r['body']));
+            $this->assertFileDoesNotExist($sessDir . '/sess_attackerchosenid0123456789');
+        } finally {
+            $pool->close();
+            foreach (glob($sessDir . '/*') ?: [] as $f) {
+                @unlink($f);
+            }
+            @rmdir($sessDir);
+        }
+    }
+
     public function testSessionDataPersistsAcrossPoolDispatches(): void
     {
         $sid       = 'zptest' . bin2hex(random_bytes(6));
         $sessDir   = sys_get_temp_dir() . '/zptest-sess-' . bin2hex(random_bytes(4));
         mkdir($sessDir, 0700, true);
+        // An id the server issued (subprocesses run with session.use_strict_mode=1,
+        // which rotates an id the store has never seen).
+        touch($sessDir . '/sess_' . $sid);
         $setter = $this->fixture(
             'set.php',
             'session_save_path(' . var_export($sessDir, true) . ');'
