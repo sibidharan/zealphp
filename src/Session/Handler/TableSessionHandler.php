@@ -113,7 +113,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
         self::$ttl = max(1, $ttl ?? \ZealPHP\App::$session_ttl);
         self::$maxRows = max(16, $maxRows ?? \ZealPHP\App::$session_max_rows);
         self::$dataSize = max(1024, $dataSize ?? \ZealPHP\App::$session_data_size);
-        self::$savePath = $savePath ?? \ZealPHP\App::$session_save_path;
+        self::$savePath = $savePath ?? \ZealPHP\App::sessionSavePath();
 
         if (self::$table === null) {
             $table = new Table(self::$maxRows);

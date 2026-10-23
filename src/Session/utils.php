@@ -73,6 +73,14 @@ function php_session_decode_to_array(string $data): array
     $decoded = str_starts_with($data, 'a:')
         ? @unserialize($data, ['allowed_classes' => ['stdClass']])
         : false;
+    // ...and only when the WHOLE string is that one array. unserialize() stops
+    // after the first value, so php-format data whose first KEY is
+    // `a:1:{s:4:"role";s:5:"admin";}` (a key an app built from input, e.g.
+    // `$_SESSION["viewed_$slug"]`) used to decode as ['role' => 'admin'], with
+    // every real key gone.
+    if (is_array($decoded) && serialize($decoded) !== $data) {
+        $decoded = false;
+    }
     if (is_array($decoded)) {
         /** @var array<string, mixed> $narrowed */
         $narrowed = [];
@@ -148,7 +156,7 @@ function zeal_session_opened_handler(): ?\SessionHandlerInterface
         return null;
     }
     if (!isset($g->session_params['handler_opened'])) {
-        $save_path = $g->session_params['save_path'] ?? \ZealPHP\App::$session_save_path;
+        $save_path = $g->session_params['save_path'] ?? \ZealPHP\App::sessionSavePath();
         $name = $g->session_params['name'] ?? 'PHPSESSID';
         $handler->open(is_string($save_path) ? $save_path : '', is_string($name) ? $name : 'PHPSESSID');
         $params = $g->session_params;
@@ -218,7 +226,13 @@ function zeal_session_start(): bool
     // starts the session, then the file's session_start() re-reads from disk.
     // In sync mode (process-wide $g), SessionManager re-starts cleanly each
     // request via _session_started reset — the second call is harmless.
-    if ($g->_session_started && \ZealPHP\App::$coroutine_isolated_superglobals) {
+    // Already started this request: a second session_start() (the app's own,
+    // after the manager's) is a no-op, like PHP's. Re-running it reloaded the
+    // store over $g->session and dropped what the request had written since —
+    // a CSRF token issued on this GET, a just-rotated id. Applies whenever the
+    // session state is per-request: coroutine mode and coroutine-legacy.
+    if ($g->_session_started
+        && (\ZealPHP\App::$coroutine_isolated_superglobals || !\ZealPHP\App::$superglobals)) {
         return true;
     }
 
@@ -229,7 +243,7 @@ function zeal_session_start(): bool
         // behaviour is unchanged). Hardcoding the literal here silently
         // dropped the configured path for the inline file backend AND
         // FileSessionHandler.
-        $g->session_params['save_path'] = \ZealPHP\App::$session_save_path;
+        $g->session_params['save_path'] = \ZealPHP\App::sessionSavePath();
     }
     if (!isset($g->session_params['name'])) {
         $g->session_params['name'] = 'PHPSESSID';
@@ -898,30 +912,49 @@ function zeal_session_store(bool $close): bool
             $current = $data;
             $mustExist = $g->session_loaded_digest !== [];
             $fp = @fopen($session_file, $mustExist ? 'r+' : 'c+');
+            if ($fp !== false && !$mustExist) {
+                @chmod($session_file, 0600);   // native PHP's mode; 'c+' honours the umask (0644)
+            }
             if ($fp !== false) {
                 flock($fp, LOCK_EX);
-                $diskContents = stream_get_contents($fp);
-                $diskData = is_string($diskContents) && $diskContents !== ''
-                    ? php_session_decode_to_array($diskContents)
-                    : [];
-                if ($diskData !== []) {
-                    $data = zeal_session_merge_onto_store(
-                        $diskData,
-                        $current,
-                        $g->session_loaded_digest,
-                        $g->session_loaded_keys
-                    );
+                try {
+                    $diskContents = stream_get_contents($fp);
+                    $diskData = is_string($diskContents) && $diskContents !== ''
+                        ? php_session_decode_to_array($diskContents)
+                        : [];
+                    if ($mustExist && $diskData === []) {
+                        // This request loaded data, and the store now holds none
+                        // (another request emptied it — a logout — or it is
+                        // unreadable). Writing our load-time copy back would undo
+                        // that, as the handler branch already refuses to.
+                        $data = null;
+                    } else {
+                        if ($diskData !== []) {
+                            $data = zeal_session_merge_onto_store(
+                                $diskData,
+                                $current,
+                                $g->session_loaded_digest,
+                                $g->session_loaded_keys
+                            );
+                        }
+                        // Encode BEFORE truncating: an encoder failure (or an
+                        // error handler that throws) must not leave the session
+                        // file emptied.
+                        $encoded = php_session_encode_from_array($data);
+                        ftruncate($fp, 0);
+                        rewind($fp);
+                        fwrite($fp, $encoded);
+                        fflush($fp);
+                    }
+                } finally {
+                    flock($fp, LOCK_UN);
+                    fclose($fp);
                 }
-                ftruncate($fp, 0);
-                rewind($fp);
-                fwrite($fp, php_session_encode_from_array($data));
-                fflush($fp);
-                flock($fp, LOCK_UN);
-                fclose($fp);
             } elseif ($mustExist) {
                 $data = null;
             } else {
                 file_put_contents($session_file, php_session_encode_from_array($data));
+                @chmod($session_file, 0600);
             }
         }
 
@@ -1455,7 +1488,7 @@ function zeal_session_gc(int $maxlifetime): int
     // Falling back to the literal default swept the system session dir (other
     // PHP apps' sessions, with their own lifetimes) and never expired sessions
     // kept under a custom path.
-    $rawPath = $g->session_params['save_path'] ?? \ZealPHP\App::$session_save_path;
+    $rawPath = $g->session_params['save_path'] ?? \ZealPHP\App::sessionSavePath();
     $savePath = is_string($rawPath) ? $rawPath : '';
 
     // open() first, as the SessionHandlerInterface contract requires:

@@ -1069,11 +1069,18 @@ class App
     public static int $session_data_size = 16384;
 
     /**
-     * File-backing directory for session storage. Default
-     * `/var/lib/php/sessions` (matches PHP's default). Used by
+     * File-backing directory for session storage ('' = the ZealPHP default,
+     * resolved by sessionSavePath()). Used by the inline file store,
      * FileSessionHandler and TableSessionHandler's file backing layer.
+     *
+     * The default used to be `/var/lib/php/sessions`, PHP's own directory. On
+     * a host that also runs mod_php/FPM apps that is THEIR session store: an
+     * id one of those apps issued was an existing file, so ZealPHP's strict
+     * mode adopted it, with that app's data; ZealPHP's GC deleted their
+     * sessions by its own TTL. ZealPHP now keeps sessions in its own 0700
+     * directory unless told otherwise.
      */
-    public static string $session_save_path = '/var/lib/php/sessions';
+    public static string $session_save_path = '';
 
     /**
      * Session storage backend. One of:
@@ -4110,7 +4117,29 @@ class App
     public static function sessionSavePath(?string $path = null): string
     {
         if ($path !== null) self::$session_save_path = $path;
+        if (self::$session_save_path === '') {
+            self::$session_save_path = self::defaultSessionSavePath();
+        }
         return self::$session_save_path;
+    }
+
+    /**
+     * ZealPHP's own session directory: `ZEALPHP_SESSION_DIR` when set, else
+     * `<log dir>/sessions`, created 0700 for the server's user.
+     */
+    public static function defaultSessionSavePath(): string
+    {
+        $env = getenv('ZEALPHP_SESSION_DIR');
+        if (is_string($env) && trim($env) !== '') {
+            $dir = rtrim(trim($env), '/');
+        } else {
+            $logDir = \ZealPHP\resolve_log_dir();
+            $dir = ($logDir !== null ? rtrim($logDir, '/') : rtrim(sys_get_temp_dir(), '/') . '/zealphp') . '/sessions';
+        }
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0700, true);
+        }
+        return $dir;
     }
 
     /**
@@ -9573,6 +9602,17 @@ class App
             \ini_set('log_errors', '1');
         }
 
+        // Sessions in PHP's own directory are shared with every mod_php/FPM app
+        // on the host (adopted ids, cross-app GC). Say so at boot.
+        $phpSessionDir = (string) \ini_get('session.save_path');
+        $phpSessionDir = $phpSessionDir !== '' ? $phpSessionDir : '/var/lib/php/sessions';
+        $zealSessionDir = \realpath(self::sessionSavePath());
+        if ($zealSessionDir !== false && $zealSessionDir === \realpath($phpSessionDir)) {
+            \error_log('[warn] App::sessionSavePath() is PHP\'s own session.save_path (' . $zealSessionDir . '). '
+                . 'Other PHP apps on this host share it: ZealPHP strict mode accepts their session ids (with their data) '
+                . 'and its GC removes their sessions. Use a ZealPHP-only directory (the default, or ZEALPHP_SESSION_DIR).');
+        }
+
         // Deterministic session GC on a worker-0 timer — ZealPHP replaced PHP's
         // probabilistic per-request GC, so without this sess_* files / handler
         // entries accumulate forever and leaked PHPSESSIDs never expire.
@@ -11085,6 +11125,10 @@ class App
                             $GLOBALS['_SESSION'] = [];
                         }
                         $g->session_params = [];
+                        // And forget the id: a session_start() in the route's
+                        // open handler would otherwise read it back from the
+                        // cookie and write sess_<forged id> after all.
+                        unset($g->cookie[$sessionName]);
                         \ZealPHP\elog('[security] WebSocket upgrade on ' . $path . ' presented a session id the store never issued: session not loaded', 'warn');
                     }
                 }
