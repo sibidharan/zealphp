@@ -254,9 +254,12 @@ final class CgiProcHardeningTest extends TestCase
             $pool->close();
         }
         $this->assertSame('ok', $resp['body']);
+        $params = $resp['session_cookie'] ?? null;
+        $this->assertIsArray($params);
+        unset($params['partitioned']);   // PHP 8.5 adds it to session_get_cookie_params()
         $this->assertSame(
             ['lifetime' => 3600, 'path' => '/app', 'domain' => 'example.test', 'secure' => true, 'httponly' => true, 'samesite' => 'Strict'],
-            $resp['session_cookie'] ?? null
+            $params
         );
     }
 
