@@ -159,7 +159,7 @@ final class ResponseSecurityPassTest extends TestCase
         $this->requestHeaders(['range' => 'bytes=0-0,2-' . $limit]);
         $fake = new FakeOpenSwooleResponse();
         (new ZResponse($fake))->sendFile($file);
-        $this->assertSame(206, RequestContext::instance()->status);
+        $this->assertContains(['status', 206, ''], $fake->log);
         $this->assertSame([], array_values(array_filter($fake->log, static fn (array $e): bool => $e[0] === 'sendfile')));
     }
 
@@ -171,7 +171,7 @@ final class ResponseSecurityPassTest extends TestCase
         $this->requestHeaders(['range' => 'bytes=0-0,2-' . ($limit + 1)]);
         $fake = new FakeOpenSwooleResponse();
         (new ZResponse($fake))->sendFile($file);
-        $this->assertNotSame(206, RequestContext::instance()->status);
+        $this->assertNotContains(['status', 206, ''], $fake->log);
         $this->assertContains(['sendfile', $file, 0, $size], $fake->log, 'whole file, zero-copy');
     }
 

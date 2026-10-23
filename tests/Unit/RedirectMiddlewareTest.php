@@ -197,6 +197,14 @@ class RedirectMiddlewareTest extends TestCase
         $this->assertSame('/safe/@evil.test', $response->getHeaderLine('Location'));
     }
 
+    public function testCaptureMayFillASubdomainLabelOnly(): void
+    {
+        $mw = new RedirectMiddleware([['match' => '#^/u/([a-z]+)$#', 'to' => 'https://$1.example.test/']]);
+        $this->assertSame('https://blog.example.test/', $this->process($mw, '/u/blog')->getHeaderLine('Location'));
+        $wide = new RedirectMiddleware([['match' => '#^/u/(.*)$#', 'to' => 'https://$1.example.test/']]);
+        $this->assertSame(200, $this->process($wide, '/u/evil.test')->getStatusCode(), 'evil.test.example.test: a capture may not add labels');
+    }
+
     public function testProtocolRelativeTargetAllowedWhenTheRulePointsThere(): void
     {
         $mw = new RedirectMiddleware([['from' => '/cdn', 'to' => '//cdn.example.test']]);
