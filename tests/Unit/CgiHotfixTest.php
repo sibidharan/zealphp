@@ -556,4 +556,56 @@ PHP);
 
         $this->assertTrue($killed, 'SIGKILL escalation must terminate a sleeping subprocess');
     }
+
+    // -------------------------------------------------------------------------
+    // M1: cgi_worker error handler — escape, honor error_reporting / display
+    // -------------------------------------------------------------------------
+
+    /**
+     * The handler used to echo every error raw into the page. With display
+     * on (dev), the message and file must be HTML-escaped so a warning that
+     * carries request data cannot inject markup.
+     */
+    public function testCgiWorkerEscapesDisplayedErrors(): void
+    {
+        $f = $this->fixture('m1_xss.php',
+            '<?php $a = []; echo $a[$_GET["k"]]; echo "|end";');
+        $r = $this->runWorker($f, ['get' => ['k' => '<script>alert(1)</script>']], '',
+            ['ZEALPHP_CGI_DISPLAY_ERRORS' => '1']);
+
+        $this->assertStringNotContainsString('<script>', $r['stdout'], 'error text must be escaped');
+        $this->assertStringContainsString('&lt;script&gt;', $r['stdout']);
+        $this->assertStringContainsString('|end', $r['stdout']);
+    }
+
+    /**
+     * Production default (display off): no error text, path or payload in the
+     * response; the error goes to stderr AFTER the metadata line so it is
+     * logged without breaking the protocol.
+     */
+    public function testCgiWorkerHidesErrorsWhenDisplayOff(): void
+    {
+        $f = $this->fixture('m1_hidden.php',
+            '<?php header("X-M1: kept"); $a = []; echo $a[$_GET["k"]]; echo "body";');
+        $r = $this->runWorker($f, ['get' => ['k' => '<b>probe</b>']], '',
+            ['ZEALPHP_CGI_DISPLAY_ERRORS' => '0']);
+
+        $this->assertSame('body', $r['stdout'], 'nothing but the page body reaches the client');
+        $meta = $this->parseMeta($r['stderr']);
+        $this->assertSame([['X-M1', 'kept']], $meta['headers'] ?? null,
+            'the queued warning must not displace the metadata line');
+        $this->assertStringContainsString('Undefined array key "<b>probe</b>"', $r['stderr']);
+    }
+
+    /** @-suppressed and error_reporting-masked errors are never displayed. */
+    public function testCgiWorkerHonorsErrorReportingAndSilence(): void
+    {
+        $f = $this->fixture('m1_silenced.php',
+            '<?php $a = []; $x = @$a["nope"]; error_reporting(E_ALL & ~E_WARNING); $y = $a["masked"];'
+            . ' $e = error_get_last(); echo "last=" . ($e === null ? "none" : "set");');
+        $r = $this->runWorker($f, [], '', ['ZEALPHP_CGI_DISPLAY_ERRORS' => '1']);
+
+        $this->assertSame('last=set', $r['stdout'], 'no error text; error_get_last() still works for @');
+        $this->assertStringNotContainsString('Undefined array key', $r['stderr']);
+    }
 }

@@ -98,6 +98,9 @@ class Dispatcher
 
         $env['ZEALPHP_REQUEST_CONTEXT'] = $ctx;
         $env['ZEALPHP_CWD'] = App::$cwd;
+        // cgi_worker.php shows PHP errors in the page only when the host would
+        // (secure-by-default App::displayErrors(); see the worker's handler).
+        $env['ZEALPHP_CGI_DISPLAY_ERRORS'] = App::displayErrors() ? '1' : '0';
         // Gate the Composer autoloader load in cgi_worker.php. Default off
         // (see App::$cgi_subprocess_autoload docblock — fixes the v0.2.41
         // WordPress wp-cron deadlock by restoring the v0.2.0 zero-overhead

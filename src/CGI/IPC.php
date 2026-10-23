@@ -27,13 +27,32 @@ final class IPC
      */
     public static function writeFrame($fp, array $payload): void
     {
+        fwrite($fp, self::encodeFrame($payload));
+        fflush($fp);
+    }
+
+    /**
+     * Encode a payload as one length-prefixed JSON frame (header + body) without
+     * writing it, so a caller can push it through a non-blocking pipe itself.
+     *
+     * Encoding falls back in steps rather than dropping the payload: a binary
+     * `body` is base64-encoded first (byte-exact round trip); any remaining
+     * invalid UTF-8 (a raw byte in a query string, cookie or header) is
+     * substituted with U+FFFD so the request still goes through. Only a
+     * payload that is unencodable for another reason (a resource, recursion)
+     * becomes the synthetic 500 frame.
+     *
+     * @param array<mixed,mixed> $payload Anything json_encode-able.
+     */
+    public static function encodeFrame(array $payload): string
+    {
         $json = json_encode($payload, JSON_UNESCAPED_SLASHES);
         if ($json === false) {
             if (isset($payload['body']) && is_string($payload['body'])) {
                 $payload['body'] = base64_encode($payload['body']);
                 $payload['body_encoding'] = 'base64';
             }
-            $json = json_encode($payload, JSON_UNESCAPED_SLASHES);
+            $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
         }
         if ($json === false) {
             $json = (string) json_encode([
@@ -43,9 +62,7 @@ final class IPC
                 'cookies' => [],
             ], JSON_UNESCAPED_SLASHES);
         }
-        $hdr = pack('N', strlen($json));
-        fwrite($fp, $hdr . $json);
-        fflush($fp);
+        return pack('N', strlen($json)) . $json;
     }
 
     /**

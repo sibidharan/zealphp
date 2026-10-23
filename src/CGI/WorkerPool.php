@@ -36,28 +36,33 @@ use OpenSwoole\Coroutine\Channel;
 final class WorkerPool
 {
     /**
-     * FD-3 IPC architecture (v0.3.x): the subprocess writes the response BODY
-     * to STDOUT freely (no length-prefixed framing → no risk of corruption
-     * from user code that calls `flush()` / `fastcgi_finish_request()`) and
-     * writes the response METADATA frame (status, headers, cookies) to fd 3.
+     * FD-3 IPC architecture: the subprocess writes the response metadata
+     * frame (status, headers, cookies, `body_length`, `body_fd` = 3) to fd 3
+     * and the body bytes right after it on fd 3. App code cannot reach fd 3
+     * by accident, so nothing it does can shift the framing.
      *
      * The metadata channel uses a destructor on a static class instance —
      * PHP runs destructors EVEN AFTER `exit()` from inside a shutdown
      * function (phpMyAdmin's `ResponseRenderer->response()` does exactly
-     * this). Routing metadata through fd 3 keeps the body channel clean and
-     * gives us a guaranteed delivery path for status/headers regardless of
-     * how the app terminates.
+     * this). Routing metadata through fd 3 gives us a guaranteed delivery
+     * path for status/headers regardless of how the app terminates.
      *
-     * Parent reads the metadata frame from `pipes[3]` first (small,
-     * ~256 bytes), then drains body bytes from STDOUT until EOF.
+     * STDOUT is NOT the body. It used to be (only the length was framed), and
+     * any direct write to fd 1 (`fwrite(STDOUT)`, a php://stdout logger, a
+     * destructor echo after output buffering closed) then leaked into the
+     * NEXT request's response on that subprocess. STDOUT and STDERR are now
+     * drained on every dispatch and logged, never returned to a client.
      *
-     * Backward compat — older worker entry scripts that still ship the
-     * IPC-frame-on-STDOUT protocol fall through to the legacy single-channel
-     * read path when no fd 3 frame is received within a short window.
+     * Backward compat — entry scripts that put the body on STDOUT after an
+     * fd 3 frame without `body_fd`, or the whole frame on STDOUT with no fd 3
+     * frame at all, are still read (see exchange()).
      *
      * @var list<array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int}>
      */
     private array $workers = [];
+
+    /** Most stray stdout / stderr kept per dispatch for the log; the rest is read and dropped. */
+    private const DIAG_CAP_BYTES = 1024 * 1024;
 
     /**
      * Coroutine idle queue. Created lazily — Channel push REQUIRES coroutine
@@ -134,41 +139,26 @@ final class WorkerPool
 
         $w = $this->workers[$idx];
 
-        IPC::writeFrame($w['stdin'], $request);
-
-        // FD-3 IPC: when fd 3 is open, it's the CANONICAL completion signal.
-        // The subprocess's destructor + shutdown handler writes the metadata
-        // frame on fd 3, regardless of whether user code did exit()/die()
-        // mid-output. STDOUT carries the body bytes and is read AFTER fd 3
-        // tells us `body_length`. Racing fd 3 vs STDOUT readability was a
-        // pre-destructor design that broke apps which echo HTML mid-request
-        // (phpMyAdmin: HTML hits STDOUT first → parent picks legacy STDOUT
-        // path → tries to parse HTML as a JSON frame → "subprocess died").
-        //
-        // We still keep the legacy STDOUT-frame path for test stubs that
-        // don't open fd 3 at all — but only as a fallback when fd 3 EOFs
-        // without ever delivering a frame (i.e., the subprocess closed fd 3
-        // before writing). A live subprocess always writes fd 3 first.
-        $resp = null;
-        $bodyFromStdout = null;
-        if ($w['fd3'] !== null) {
-            $resp = IPC::readFrame($w['fd3'], $timeout);
-            if ($resp !== null) {
-                $bodyLen = (isset($resp['body_length']) && is_numeric($resp['body_length']))
-                    ? (int) $resp['body_length']
-                    : 0;
-                if ($bodyLen > 0) {
-                    $bodyFromStdout = $this->readBody($w['stdout'], $bodyLen, $timeout);
-                } else {
-                    $bodyFromStdout = '';
-                }
-            }
+        // One select loop does the whole exchange: it writes the request frame,
+        // reads the response off fd 3, and drains STDOUT and STDERR the whole
+        // time. Draining matters both ways. A subprocess whose stderr (warnings)
+        // or stdout fills its 64 KB pipe blocks inside fwrite() and never
+        // answers, so a blocking read on fd 3 alone waits forever (M9). And
+        // bytes written straight to fd 1 by app code (fwrite(STDOUT),
+        // php://stdout loggers, a destructor echo after the output buffer is
+        // closed) must never be counted as response body: when the body rode
+        // STDOUT with only its length framed, a stray write shifted bytes into
+        // the NEXT request's response, i.e. into another user's page (H2).
+        // The pool worker now sends the body on fd 3 after the frame
+        // (`body_fd` = 3); STDOUT is diagnostics only and goes to the log, as
+        // FPM's catch_workers_output does.
+        $io = $this->exchange($w, IPC::encodeFrame($request), $timeout);
+        $resp = $io['resp'];
+        if ($io['stdout'] !== '') {
+            self::logSubprocessOutput('stdout', $w['pid'], $io['stdout']);
         }
-        if ($resp === null) {
-            // Legacy: metadata + body in one frame on STDOUT.
-            // Reached when: (1) fd 3 not opened (old subprocess / test stub),
-            // (2) subprocess died before writing fd 3 frame.
-            $resp = IPC::readFrame($w['stdout'], $timeout);
+        if ($io['stderr'] !== '') {
+            self::logSubprocessOutput('stderr', $w['pid'], $io['stderr']);
         }
 
         $this->workers[$idx]['served']++;
@@ -179,26 +169,34 @@ final class WorkerPool
         // carries the _exit flag (the pool worker's shutdown function sent
         // an IPC frame before exit() terminated the process — the worker
         // may still be exiting when isAlive checks, so the flag forces
-        // respawn to avoid dispatching to a zombie).
-        $err = '';
-        if ($resp === null) {
-            stream_set_blocking($w['stderr'], false);
-            $err = (string) stream_get_contents($w['stderr']);
-        }
+        // respawn to avoid dispatching to a zombie). A timed-out exchange
+        // also respawns: the subprocess may be mid-write, and the next
+        // request must not read the tail of this one.
+        $err = $resp === null ? $io['stderr'] : '';
         $exitFlag = is_array($resp) && !empty($resp['_exit']);
 
         if ($resp === null || $exitFlag || $served >= $this->maxRequestsPerWorker || !$this->isAlive($w)) {
+            $alive = false;
+            if ($resp === null && !$io['eof']) {
+                // Every channel at EOF means the subprocess exited, even if
+                // the OS has not reaped it yet; only a deadline miss is a 504.
+                try {
+                    $alive = $this->isAlive($w);
+                } catch (\Throwable) {
+                    $alive = false;
+                }
+                if ($alive) {
+                    // Wedged, not dead: proc_close() would wait on it forever.
+                    @proc_terminate($w['proc'], 9);
+                }
+            }
             $this->respawn($idx);
         } else {
+            $alive = true;
             $this->returnToIdle($idx);
         }
 
         if ($resp === null) {
-            try {
-                $alive = $this->isAlive($w);
-            } catch (\Throwable) {
-                $alive = false;
-            }
             $status = $alive ? 504 : 500;
             $msg = $status === 504
                 ? 'WorkerPool: subprocess timed out after ' . $timeout . 's'
@@ -209,12 +207,6 @@ final class WorkerPool
                 'headers' => [],
                 'cookies' => [],
             ];
-        }
-
-        // FD-3 IPC: when the metadata frame came from fd 3, the actual
-        // response body lives on STDOUT (not in the frame). Override.
-        if ($bodyFromStdout !== null) {
-            $resp['body'] = $bodyFromStdout;
         }
 
         // Decode base64-encoded bodies (binary responses that can't be JSON-encoded directly).
@@ -235,45 +227,206 @@ final class WorkerPool
     }
 
     /**
-     * Read exactly $n body bytes from STDOUT. The subprocess wrote
-     * `body_length = $n` into the fd 3 metadata frame and immediately
-     * after streamed $n bytes to STDOUT. Hard-capped at IPC::MAX_FRAME_BYTES
-     * (64 MB) to match the framing channel — anything bigger is a corrupted
-     * length signal.
+     * Run one request/response exchange with a subprocess over non-blocking
+     * pipes: write `$frame` to stdin, read the response from fd 3, and drain
+     * stdout + stderr throughout so the child can never block on a full pipe.
      *
-     * @param resource $fp
-     * @param int<0, max> $n
+     * Response shapes accepted, in order of preference:
+     *  - fd 3 frame with `body_fd` = 3: the body follows the frame on fd 3
+     *    (`body_length` bytes). Everything on STDOUT is stray output.
+     *  - fd 3 frame without `body_fd` (older entry scripts / test stubs): the
+     *    body is the first `body_length` bytes on STDOUT.
+     *  - no fd 3, or fd 3 closed without a frame: a single legacy frame
+     *    (metadata + body) on STDOUT.
+     *
+     * Returns `resp` = null on timeout or when every channel hit EOF before a
+     * full response arrived (`eof` = true for the latter). `stdout` holds the STDOUT bytes not used as body,
+     * `stderr` everything read from stderr (each capped at
+     * self::DIAG_CAP_BYTES; the rest is read and discarded).
+     *
+     * @param array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int} $w
+     * @return array{resp: array<mixed,mixed>|null, eof: bool, stdout: string, stderr: string}
      */
-    private function readBody($fp, int $n, float $timeout): string
+    private function exchange(array $w, string $frame, float $timeout): array
     {
-        if ($n <= 0) {
-            return '';
-        }
-        if ($n > IPC::MAX_FRAME_BYTES) {
-            // Corrupted or hostile length — refuse silently.
-            return '';
-        }
-        $out = '';
         $deadline = microtime(true) + $timeout;
-        while (strlen($out) < $n) {
-            $remaining = $n - strlen($out);
-            if ($remaining < 1) {
+        /** @var array<int, resource> $open */
+        $open = [1 => $w['stdout'], 2 => $w['stderr']];
+        if ($w['fd3'] !== null) {
+            $open[3] = $w['fd3'];
+        }
+        $buf = [1 => '', 2 => '', 3 => ''];
+        $pending = $frame;
+        $stdin = $w['stdin'];
+        $resp = null;
+        $stdoutBody = false; // true when the body is taken from the STDOUT buffer
+
+        if (Coroutine::getCid() > 0) {
+            // Under HOOK_ALL a non-blocking fwrite() that hits a full pipe
+            // fails and breaks the hooked stream instead of returning a short
+            // count, so a frame larger than the pipe buffer never arrives. A
+            // blocking write yields this coroutine until the child has read it.
+            // The child reads the whole frame before it runs anything, so the
+            // only output that could hold it up is what it already wrote while
+            // resetting after the previous request: take that first.
+            foreach ([1, 2] as $fd) {
+                $chunk = @fread($open[$fd], 65536);
+                if (is_string($chunk) && $chunk !== '') {
+                    $buf[$fd] .= $chunk;
+                }
+            }
+            stream_set_blocking($stdin, true);
+            while ($pending !== '') {
+                $n = @fwrite($stdin, $pending);
+                if (!is_int($n) || $n <= 0) {
+                    break; // broken pipe: the read loop below sees the EOFs
+                }
+                $pending = (string) substr($pending, $n);
+            }
+            stream_set_blocking($stdin, false);
+            $pending = '';
+        }
+
+        while (true) {
+            // Parse whatever has arrived so far.
+            if ($buf[3] !== '') {
+                $meta = self::parseFrame($buf[3]);
+                if ($meta !== null) {
+                    [$frameData, $used] = $meta;
+                    $len = (isset($frameData['body_length']) && is_numeric($frameData['body_length']))
+                        ? max(0, (int) $frameData['body_length'])
+                        : 0;
+                    if ($len > IPC::MAX_FRAME_BYTES) {
+                        $len = 0; // corrupted or hostile length — refuse the body
+                    }
+                    if (($frameData['body_fd'] ?? null) === 3) {
+                        if (strlen($buf[3]) - $used >= $len) {
+                            $frameData['body'] = (string) substr($buf[3], $used, $len);
+                            $resp = $frameData;
+                            break;
+                        }
+                    } elseif (strlen($buf[1]) >= $len || !isset($open[1])) {
+                        $frameData['body'] = (string) substr($buf[1], 0, $len);
+                        $buf[1] = (string) substr($buf[1], $len);
+                        $stdoutBody = true;
+                        $resp = $frameData;
+                        break;
+                    }
+                }
+            }
+            if ($w['fd3'] === null || (!isset($open[3]) && self::parseFrame($buf[3]) === null)) {
+                // Legacy single-channel frame on STDOUT.
+                $legacy = self::parseFrame($buf[1]);
+                if ($legacy !== null) {
+                    $resp = $legacy[0];
+                    $buf[1] = (string) substr($buf[1], $legacy[1]);
+                    $stdoutBody = true;
+                    break;
+                }
+            }
+            $readers = array_values($open);
+            if ($readers === [] || microtime(true) >= $deadline) {
                 break;
             }
-            $chunk = fread($fp, min($remaining, 65536));
-            if ($chunk !== false && $chunk !== '') {
-                $out .= $chunk;
+
+            $writers = $pending !== '' ? [$stdin] : [];
+            $except = null;
+            $wait = max(0.0, min(1.0, $deadline - microtime(true)));
+            $sec = (int) $wait;
+            $sel = @stream_select($readers, $writers, $except, $sec, (int) (($wait - $sec) * 1_000_000));
+            if ($sel === false) {
+                usleep(1000); // EINTR (e.g. SIGCHLD) — retry
                 continue;
             }
-            if (feof($fp)) {
-                break;
+            if ($writers !== []) { // only selected while a request is pending
+                $n = @fwrite($stdin, $pending);
+                if (is_int($n) && $n > 0) {
+                    $pending = (string) substr($pending, $n);
+                }
             }
-            if (microtime(true) >= $deadline) {
-                break;
+            foreach ($readers as $stream) {
+                $fd = (int) array_search($stream, $open, true);
+                $chunk = @fread($stream, 65536);
+                if ($chunk === false || $chunk === '') {
+                    if (feof($stream)) {
+                        unset($open[$fd]); // EOF on this channel — stop selecting it
+                    }
+                    continue;
+                }
+                // fd 3 carries frame + body, each bounded by the frame cap.
+                // stdout is bounded by the frame cap too (the legacy protocols
+                // put the body there); stderr is diagnostics only.
+                $cap = match ($fd) {
+                    3       => 2 * IPC::MAX_FRAME_BYTES + 4,
+                    1       => IPC::MAX_FRAME_BYTES + 4,
+                    default => self::DIAG_CAP_BYTES,
+                };
+                if (strlen($buf[$fd]) < $cap) {
+                    $buf[$fd] .= $chunk;
+                }
             }
-            usleep(5000);
         }
-        return $out;
+
+        // The response is in; pick up anything already sitting in the
+        // diagnostic pipes without waiting for more.
+        if ($resp !== null) {
+            foreach ([1, 2] as $fd) {
+                if (!isset($open[$fd])) {
+                    continue;
+                }
+                $chunk = @fread($open[$fd], 65536);
+                if (is_string($chunk) && $chunk !== '' && strlen($buf[$fd]) < self::DIAG_CAP_BYTES) {
+                    $buf[$fd] .= $chunk;
+                }
+            }
+        }
+
+        $stray = $buf[1];
+        if (!$stdoutBody && strlen($stray) > self::DIAG_CAP_BYTES) {
+            $stray = substr($stray, 0, self::DIAG_CAP_BYTES);
+        }
+
+        return ['resp' => $resp, 'eof' => $open === [], 'stdout' => $stray, 'stderr' => $buf[2]];
+    }
+
+    /**
+     * Decode one complete length-prefixed frame from the front of `$buf`.
+     *
+     * @return array{0: array<mixed,mixed>, 1: int}|null The frame and the bytes
+     *         it used, or null when `$buf` does not yet hold a complete, valid frame.
+     */
+    private static function parseFrame(string $buf): ?array
+    {
+        if (strlen($buf) < 4) {
+            return null;
+        }
+        /** @var array{1:int} $u */
+        $u = unpack('N', substr($buf, 0, 4));
+        $len = $u[1];
+        if ($len <= 0 || $len > IPC::MAX_FRAME_BYTES || strlen($buf) < 4 + $len) {
+            return null;
+        }
+        $decoded = json_decode(substr($buf, 4, $len), true);
+        return is_array($decoded) ? [$decoded, 4 + $len] : null;
+    }
+
+    /**
+     * Send a subprocess's stray stdout / stderr to the framework log. Never to
+     * the client: under FPM and mod_php, php://stdout is not the response.
+     */
+    private static function logSubprocessOutput(string $channel, int $pid, string $bytes): void
+    {
+        if (!function_exists('ZealPHP\elog')) {
+            return;
+        }
+        $text = rtrim($bytes);
+        if ($text === '') {
+            return;
+        }
+        if (strlen($text) > 8192) {
+            $text = substr($text, 0, 8192) . ' … [' . (strlen($text) - 8192) . ' more bytes]';
+        }
+        \ZealPHP\elog("[cgi_pool] subprocess {$pid} {$channel}: " . $text, 'cgi_pool');
     }
 
     /** How many workers are alive right now. */
@@ -447,17 +600,16 @@ final class WorkerPool
             throw new \RuntimeException("WorkerPool: worker entry not found: $entry");
         }
 
-        // FD-3 IPC: fd 3 is the metadata channel (status/headers/cookies).
-        // STDOUT is the body channel (raw user output). Splitting the two
-        // streams means user code that writes to STDOUT (via flush() or
-        // fastcgi_finish_request()) can't corrupt the IPC framing, and a
-        // metadata frame written from a destructor still gets delivered
-        // even when phpMyAdmin-style apps call exit() mid-shutdown.
+        // FD-3 IPC: fd 3 carries the response (metadata frame + body). STDOUT
+        // and STDERR are diagnostics, drained and logged by exchange(), so
+        // user code that writes to STDOUT can't corrupt the IPC framing, and
+        // a frame written from a destructor still gets delivered even when
+        // phpMyAdmin-style apps call exit() mid-shutdown.
         $desc = [
             0 => ['pipe', 'r'], // stdin   — parent writes requests
-            1 => ['pipe', 'w'], // stdout  — parent reads response BODY stream
-            2 => ['pipe', 'w'], // stderr  — diagnostics
-            3 => ['pipe', 'w'], // fd 3    — IPC metadata frame channel
+            1 => ['pipe', 'w'], // stdout  — stray app output (logged)
+            2 => ['pipe', 'w'], // stderr  — diagnostics (logged)
+            3 => ['pipe', 'w'], // fd 3    — IPC response channel
         ];
         $pipes = [];
         /** @var array<string,string> $parentEnv */
@@ -504,6 +656,15 @@ final class WorkerPool
         // mocked test stubs that override descriptor setup), fall back to
         // the legacy single-channel protocol on STDOUT.
         $fd3 = isset($pipes[3]) && is_resource($pipes[3]) ? $pipes[3] : null;
+
+        // Every channel is non-blocking from here on: exchange() multiplexes
+        // them with stream_select so no single full pipe can wedge either side.
+        stream_set_blocking($pipes[0], false);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        if ($fd3 !== null) {
+            stream_set_blocking($fd3, false);
+        }
 
         return [
             'proc'   => $proc,

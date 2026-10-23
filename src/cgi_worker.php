@@ -183,6 +183,12 @@ function __z_send_meta() {
         $payload['return_value'] = $__z_return_value;
     }
     fwrite(STDERR, json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n");
+    // Errors queued while the metadata line was pending (see the error handler).
+    global $__z_error_log;
+    if (is_array($__z_error_log) && $__z_error_log !== []) {
+        fwrite(STDERR, implode('', $__z_error_log));
+        $__z_error_log = [];
+    }
 }
 
 $z_override = function(string $name, \Closure $cb, bool $execute = true): void {
@@ -520,14 +526,52 @@ if (!function_exists('virtual')) {
     }
 }
 
+// Error display (M1). This handler used to echo EVERY error into the response,
+// unescaped: it ignored error_reporting() (so @-suppressed and masked errors
+// showed too) and display_errors, which turned any warning carrying request
+// data (a filename, an array key, a URL) into reflected XSS and leaked server
+// paths in production.
+//
+// display_errors here is forced to "stderr" (above, and by the parent's -d) so
+// it says nothing about what the operator wants. The parent passes its own
+// decision in ZEALPHP_CGI_DISPLAY_ERRORS (App::displayErrors(): off unless
+// ZEALPHP_DEV or an explicit App::displayErrors(true)). When on, errors are
+// shown in the page, HTML-escaped. When off, they go to stderr for the log;
+// errors raised before the metadata line is sent are queued, because the
+// parent reads the FIRST stderr line as that metadata.
+$__z_display_errors = getenv('ZEALPHP_CGI_DISPLAY_ERRORS') === '1';
+/** @var list<string> $__z_error_log */
+$__z_error_log = [];
+
 set_error_handler(function($severity, $message, $file, $line) {
+    global $__z_display_errors, $__z_meta_sent, $__z_error_log;
+    if ((error_reporting() & $severity) === 0) {
+        // @-suppressed or masked: let PHP's handler record it for
+        // error_get_last() — it displays nothing for these.
+        return false;
+    }
     $label = match($severity) {
         E_WARNING, E_USER_WARNING => 'Warning',
         E_NOTICE, E_USER_NOTICE => 'Notice',
         E_DEPRECATED, E_USER_DEPRECATED => 'Deprecated',
         default => 'Error',
     };
-    echo "<br>\n<b>{$label}</b>: {$message} in <b>{$file}</b> on line <b>{$line}</b><br>\n";
+    if ($__z_display_errors) {
+        $h = static fn ($v): string => htmlspecialchars((string) $v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        echo "<br>\n<b>{$label}</b>: " . $h($message) . ' in <b>' . $h($file) . '</b> on line <b>' . (int) $line . "</b><br>\n";
+        return true;
+    }
+    $entry = "PHP {$label}: {$message} in {$file} on line {$line}\n";
+    if ($__z_meta_sent) {
+        fwrite(STDERR, $entry);
+        return true;
+    }
+    if (!is_array($__z_error_log)) {
+        $__z_error_log = [];
+    }
+    if (count($__z_error_log) < 1000) {
+        $__z_error_log[] = $entry;
+    }
     return true;
 });
 
