@@ -612,6 +612,10 @@ if (function_exists('ini_get_all')) {
     unset($__pw_session_ini_all, $__pw_k, $__pw_v);
 }
 
+// Environment baseline for pool_reset_env() (C9): putenv() from one request
+// must not reach the next one.
+$__pw_env_baseline = getenv();
+
 // $GLOBALS snapshot for FPM-style per-request cleanup (issue #18 follow-up).
 // Captures every key in $GLOBALS RIGHT NOW — after autoloader load, after
 // uopz overrides, after `use ZealPHP\CGI\IPC` etc., but BEFORE the first
@@ -642,6 +646,9 @@ if (function_exists('ini_get_all')) {
 //     bootstraps via require_once chains and re-entry via plain `require`
 //     gated on $wp_did_header.
 $__pw_globals_snapshot = array_fill_keys(array_keys($GLOBALS), true);
+// array_keys($GLOBALS) ran before this variable was assigned, so it is not in
+// its own list; add it, or the first cleanup would unset it.
+$__pw_globals_snapshot['__pw_globals_snapshot'] = true;
 
 // FPM parity: snapshot constants + classes + functions + included_files at
 // boot so pool_reset_request_state() can roll them back to this baseline
@@ -903,6 +910,58 @@ function pool_finish_request(mixed $result, ?\Throwable $error, mixed $prevCwd):
 }
 
 /**
+ * Drop every error and exception handler the request installed, so none of
+ * them runs in the next request (C9). The worker installs none of its own.
+ *
+ * PHP has no call that clears the handler stack, and set_error_handler(null)
+ * pushes the old handler instead of dropping it. Each round below sets a null
+ * handler to read the current one, undoes that push, then pops one level; it
+ * stops once no handler is left.
+ */
+function pool_reset_handlers(): void
+{
+    for ($i = 0; $i < 1000; $i++) {
+        $prev = set_error_handler(null);
+        restore_error_handler();
+        if ($prev === null) {
+            break;
+        }
+        restore_error_handler();
+    }
+    for ($i = 0; $i < 1000; $i++) {
+        $prev = set_exception_handler(null);
+        restore_exception_handler();
+        if ($prev === null) {
+            break;
+        }
+        restore_exception_handler();
+    }
+}
+
+/**
+ * Put the process environment back to its boot state (C9): putenv() from one
+ * request must not reach the next one, as FPM restores it at request end.
+ *
+ * @param array<string,string> $baseline getenv() at boot
+ */
+function pool_reset_env(array $baseline): void
+{
+    $now = getenv();
+    foreach ($now as $name => $value) {
+        if (!array_key_exists($name, $baseline)) {
+            putenv((string) $name);
+        } elseif ($baseline[$name] !== $value) {
+            putenv($name . '=' . $baseline[$name]);
+        }
+    }
+    foreach ($baseline as $name => $value) {
+        if (!array_key_exists($name, $now)) {
+            putenv($name . '=' . $value);
+        }
+    }
+}
+
+/**
  * Reset all per-request state between pool iterations.
  *
  * Clears superglobals (`$_SERVER`, `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`,
@@ -963,10 +1022,19 @@ function pool_reset_request_state(): void
 
     // FPM-style request-scope cleanup. Unset every $GLOBALS key that wasn't
     // in the boot snapshot. Skip:
-    //   - Anything starting with `_` (superglobals + our `__pw_*` internals
-    //     are all reset above explicitly; PHP-defined `_ENV` etc. stay)
+    //   - the PHP superglobals (reset above explicitly; `_ENV` stays)
+    //   - the worker's own `__pw_*` / `__zeal_*` state (some of it, like the
+    //     loop's `$__pw_prep`, is created after the boot snapshot)
     //   - `GLOBALS` (self-reference; touching it is a runtime error)
     // See the snapshot block at boot for the full rationale.
+    //
+    // C9 — this used to skip EVERY name starting with `_`, so an app global
+    // like `$_current_user` or `$_auth` set for one user was still there,
+    // with that user's data, for the next user served by this subprocess.
+    $__pw_superglobals = [
+        '_GET' => true, '_POST' => true, '_COOKIE' => true, '_FILES' => true, '_SERVER' => true,
+        '_ENV' => true, '_REQUEST' => true, '_SESSION' => true,
+    ];
     if (is_array($__pw_globals_snapshot)) {
         foreach (array_keys($GLOBALS) as $__pw_key) {
             if (!is_string($__pw_key)) {
@@ -975,12 +1043,20 @@ function pool_reset_request_state(): void
             if (isset($__pw_globals_snapshot[$__pw_key])) {
                 continue;
             }
-            if ($__pw_key === 'GLOBALS' || str_starts_with($__pw_key, '_')) {
+            if ($__pw_key === 'GLOBALS' || isset($__pw_superglobals[$__pw_key])
+                || str_starts_with($__pw_key, '__pw_') || str_starts_with($__pw_key, '__zeal_')) {
                 continue;
             }
             unset($GLOBALS[$__pw_key]);
         }
     }
+
+    // C9 — error / exception handlers and putenv() values set by this
+    // request. FPM drops both at request end; a reused subprocess kept them,
+    // so the previous user's handler (and whatever it had captured) ran, and
+    // wrote output, inside the next user's request.
+    pool_reset_handlers();
+    pool_reset_env(is_array($GLOBALS['__pw_env_baseline'] ?? null) ? $GLOBALS['__pw_env_baseline'] : []);
 
     // FPM parity for constants, classes, functions, included_files —
     // ext-zealphp's process_state_clean removes everything added during
