@@ -67,33 +67,126 @@ $GLOBALS['__zeal_cgi_raw_input'] = '';
 @stream_wrapper_unregister('php');
 @stream_wrapper_register('php', \ZealPHP\CGI\CgiInputStream::class);
 
-// #467 — the request `include` below runs at GLOBAL scope, so these loop-control
-// vars MUST follow the worker's `$__pw_` collision-safe convention (every other
-// worker-state var already does). Unprefixed `$count`/`$maxRequests` were readable
-// AND writable by the included app — a WordPress global `$count` (a non-alphanumeric
-// string) then made `$count++` emit "Increment on non-alphanumeric string" every
-// request (fatal on PHP 9) and let the app corrupt the subprocess recycle counter.
-$__pw_max_requests = (int) (getenv('ZEALPHP_POOL_MAX_REQUESTS') ?: '500');
-$__pw_count        = 0;
-
 // Per-request capture state. Reset by reset_request_state() between frames.
 $__pw_headers    = [];   /** @var list<array{0:string,1:string}> */
 $__pw_cookies    = [];   /** @var list<array<string,mixed>> */
 $__pw_rawcookies = [];   /** @var list<array<string,mixed>> */
 $__pw_status     = 200;
 $__pw_shutdown_functions = [];
-$__pw_mid_request = false;
 
-// FD-3 IPC: open fd 3 once at boot — the parent's proc_open spec includes
-// fd 3 as a writable pipe. Reuse the handle across every iteration; the
-// IPC_Sender destructor writes a metadata frame to it.
-// When fd 3 isn't open (very old tests / legacy environments), the file
-// pointer is false; the destructor falls back to writing the frame on
-// STDOUT (legacy protocol).
-$__pw_fd3 = @fopen('php://fd/3', 'w');
-if ($__pw_fd3 === false) {
-    $__pw_fd3 = null;
+/**
+ * Loop control and the response channel, kept out of the included script's
+ * reach (C1).
+ *
+ * The request `include` runs at GLOBAL scope (legacy apps need their top-level
+ * variables to be real globals), so anything the loop keeps in a global the
+ * script can overwrite. These used to be `$__pw_max_requests`, `$__pw_count`,
+ * `$__pw_fd3` and `$__pw_mid_request`: nulling `$__pw_fd3` sent the response
+ * down a channel the parent no longer reads, and rewinding `$__pw_count`
+ * defeated the recycle. Private statics of a final class cannot be reached by
+ * ordinary code. (Reflection can still reach them: this guards against bugs,
+ * not against a hostile script, which the pool does not claim to contain.)
+ *
+ * The class also carries the per-request token the parent sends with every
+ * request frame. Every response frame echoes it, so the parent can tell its
+ * own subprocess's frame from bytes some script wrote to fd 3.
+ *
+ * #467 — `$__pw_count` / `$__pw_max_requests` were themselves the fix for an
+ * unprefixed `$count` the included app clobbered; moving them here closes the
+ * same hole for good.
+ */
+final class ZealPHP_Pool_State
+{
+    private static int $maxRequests = 500;
+    private static int $count = 0;
+    /** @var resource|null */
+    private static $fd3 = null;
+    private static bool $midRequest = false;
+    private static string $token = '';
+
+    public static function boot(): void
+    {
+        self::$maxRequests = max(1, (int) (getenv('ZEALPHP_POOL_MAX_REQUESTS') ?: '500'));
+        // FD-3 IPC: open fd 3 once at boot — the parent's proc_open spec
+        // includes fd 3 as a writable pipe. When it isn't open (very old tests
+        // / legacy environments) responses fall back to STDOUT (legacy protocol).
+        $fd3 = @fopen('php://fd/3', 'w');
+        self::$fd3 = $fd3 === false ? null : $fd3;
+    }
+
+    public static function more(): bool
+    {
+        return self::$count < self::$maxRequests;
+    }
+
+    /**
+     * Read the next request frame. The token is taken out and kept here, so
+     * the included script never sees it.
+     *
+     * @return array<mixed,mixed>|null null on EOF (parent closed the pipe)
+     */
+    public static function read(): ?array
+    {
+        $req = IPC::readFrame(STDIN);
+        if ($req === null) {
+            return null;
+        }
+        self::$token = isset($req['_zp_token']) && is_string($req['_zp_token']) ? $req['_zp_token'] : '';
+        unset($req['_zp_token']);
+        self::$midRequest = true;
+        return $req;
+    }
+
+    public static function midRequest(): bool
+    {
+        return self::$midRequest;
+    }
+
+    /**
+     * Send the response for the current request (metadata frame, then body)
+     * and leave the mid-request state. Called once per request: by the loop,
+     * or by ZealPHP_IPC_Sender's destructor when exit() cut the request short.
+     *
+     * @param array<mixed,mixed> $resp
+     */
+    public static function respond(array $resp, string $body): void
+    {
+        if (!self::$midRequest) {
+            return;
+        }
+        self::$midRequest = false;
+        if (self::$token !== '') {
+            $resp['_zp_token'] = self::$token;
+        }
+        self::$token = '';
+        if (self::$fd3 !== null && is_resource(self::$fd3)) {
+            // fd 3 carries the metadata frame (with `body_length` and
+            // `body_fd` = 3) and then exactly that many body bytes.
+            //
+            // The body used to go to STDOUT with only its length framed. Any
+            // direct write to fd 1 by app code — fwrite(STDOUT), a php://stdout
+            // logger, a destructor echo during reset after output buffering is
+            // closed — then shifted bytes into the NEXT request's response on
+            // this subprocess, i.e. another user's page. The parent drains
+            // STDOUT separately and logs it.
+            $resp['body_length'] = strlen($body);
+            $resp['body_fd'] = 3;
+            fwrite(self::$fd3, IPC::encodeFrame($resp) . $body);
+            fflush(self::$fd3);
+            return;
+        }
+        // Legacy single-channel fallback: the whole frame, body included, on STDOUT.
+        $resp['body'] = $body;
+        IPC::writeFrame(STDOUT, $resp);
+    }
+
+    public static function served(): void
+    {
+        self::$count++;
+    }
 }
+
+ZealPHP_Pool_State::boot();
 
 /**
  * Destructor-based metadata frame sender. PHP runs destructors even after
@@ -120,10 +213,9 @@ final class ZealPHP_IPC_Sender
 
     public function __destruct()
     {
-        global $__pw_mid_request, $__pw_status, $__pw_headers, $__pw_cookies,
-               $__pw_rawcookies, $__pw_shutdown_functions, $__pw_fd3;
+        global $__pw_status, $__pw_headers, $__pw_cookies, $__pw_rawcookies;
 
-        if (!$__pw_mid_request) {
+        if (!ZealPHP_Pool_State::midRequest()) {
             return;
         }
 
@@ -171,15 +263,8 @@ final class ZealPHP_IPC_Sender
         ];
 
         try {
-            if ($__pw_fd3 !== null && is_resource($__pw_fd3)) {
-                // FD-3 IPC: metadata frame, then the body, both on fd 3
-                // (see pool_send_response()).
-                pool_send_response($__pw_fd3, $resp, $body);
-            } else {
-                // Legacy single-channel: stuff body into the frame.
-                $resp['body'] = $body;
-                IPC::writeFrame(STDOUT, $resp);
-            }
+            // Metadata frame + body on fd 3 (legacy STDOUT without fd 3).
+            ZealPHP_Pool_State::respond($resp, $body);
         } catch (\Throwable $e) {
             // pipes may be broken — nothing we can do
         }
@@ -213,9 +298,9 @@ final class ZealPHP_Pool_NullSessionHandler implements \SessionHandlerInterface
 // preempted before this handler completed. ob_buffer drain happens in the
 // destructor either way.
 register_shutdown_function(function (): void {
-    global $__pw_mid_request, $__pw_shutdown_functions;
+    global $__pw_shutdown_functions;
 
-    if (!$__pw_mid_request) {
+    if (!ZealPHP_Pool_State::midRequest()) {
         return;
     }
 
@@ -568,18 +653,20 @@ if (function_exists('zealphp_process_state_snapshot')) {
 
 // READY signal on stderr — the framing channel (stdout) stays pure. Parent
 // reads this for boot sync (bounds the dispatch-after-spawn window).
-fwrite(STDERR, "ZEALPHP_POOL_WORKER_READY\n");
+// `proto=2`: response frames echo the per-request `_zp_token` (see
+// ZealPHP_Pool_State), so the parent can refuse a frame it did not ask for.
+fwrite(STDERR, "ZEALPHP_POOL_WORKER_READY proto=2\n");
 
-while ($__pw_count < $__pw_max_requests) {
-    $req = IPC::readFrame(STDIN);
-    if ($req === null) {
+while (ZealPHP_Pool_State::more()) {
+    $__pw_req = ZealPHP_Pool_State::read();
+    if ($__pw_req === null) {
         break; // parent closed pipe → clean exit
     }
 
-    $__pw_mid_request = true;
     // Run the include AT GLOBAL SCOPE (not inside pool_handle_request) so a
     // legacy app's top-level variables become real $GLOBALS. [Issue 1]
-    $__pw_prep = pool_prepare_request($req);
+    $__pw_prep = pool_prepare_request($__pw_req);
+    unset($__pw_req);
     if (isset($__pw_prep['__error'])) {
         $resp = $__pw_prep['__error'];
     } else {
@@ -602,45 +689,13 @@ while ($__pw_count < $__pw_max_requests) {
         $body = $resp['body'];
         unset($resp['body']);
     }
-
-    if ($__pw_fd3 !== null && is_resource($__pw_fd3)) {
-        pool_send_response($__pw_fd3, $resp, $body);
-    } else {
-        // Legacy fallback: parent reads a single frame from STDOUT when
-        // fd 3 isn't open. Put the body back into the frame.
-        $resp['body'] = $body;
-        IPC::writeFrame(STDOUT, $resp);
-    }
-
-    $__pw_mid_request = false;
+    ZealPHP_Pool_State::respond($resp, $body);
 
     pool_reset_request_state();
-    $__pw_count++;
+    ZealPHP_Pool_State::served();
 }
 
 exit(0);
-
-/**
- * Write one response to the fd 3 channel: the metadata frame (with
- * `body_length` and `body_fd` = 3), then exactly that many body bytes.
- *
- * The body used to go to STDOUT with only its length framed. Any direct write
- * to fd 1 by app code — fwrite(STDOUT), a php://stdout logger, a destructor
- * echo during reset after output buffering is closed — then shifted bytes into
- * the NEXT request's response on this subprocess, i.e. another user's page.
- * fd 3 is written only here, so the framing cannot drift; the parent drains
- * STDOUT separately and logs it.
- *
- * @param resource            $fd3
- * @param array<mixed,mixed>  $resp
- */
-function pool_send_response($fd3, array $resp, string $body): void
-{
-    $resp['body_length'] = strlen($body);
-    $resp['body_fd'] = 3;
-    fwrite($fd3, IPC::encodeFrame($resp) . $body);
-    fflush($fd3);
-}
 
 /**
  * Forget the previous request's session before the next one runs (H1).
