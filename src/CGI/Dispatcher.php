@@ -273,23 +273,6 @@ class Dispatcher
         }
     }
 
-    /**
-     * Dispatch a legacy include to a FastCGI backend (e.g. php-fpm) via the
-     * FCGI binary protocol. Used when App::cgiMode() === 'fcgi'.
-     *
-     * Builds CGI env via App::buildCgiEnv(), adds SCRIPT_FILENAME / SCRIPT_NAME,
-     * reads the request body, calls \ZealPHP\CGI\FastCgiClient::request(), maps
-     * the response (status, headers, body, stderr) back through the universal
-     * return contract. The FastCgiClient socket layer is OpenSwoole-native
-     * (Coroutine\Client) — the call never blocks the worker.
-     *
-     * On connection failure or protocol error, logs via elog() and returns 502.
-     *
-     * @param string|null $address     Per-backend FastCGI address override (host:port or unix:/path).
-     *   null → falls back to App::$fcgi_address.
-     * @param array<string,string> $extraParams  Extra FCGI params merged after buildCgiEnv()
-     *   (Apache SetEnvIf / nginx fastcgi_param parity).
-     */
     /** @var array<string, true> FastCGI upstreams already warned about in this worker. */
     private static array $fcgi_upstreams_warned = [];
 
@@ -310,6 +293,23 @@ class Dispatcher
             . '(CVE-2026-109618/109619; 8.2.35, 8.3.36, 8.4.27, 8.5.12 or a distro backport).', 'warn');
     }
 
+    /**
+     * Dispatch a legacy include to a FastCGI backend (e.g. php-fpm) via the
+     * FCGI binary protocol. Used when App::cgiMode() === 'fcgi'.
+     *
+     * Builds CGI env via App::buildCgiEnv(), adds SCRIPT_FILENAME / SCRIPT_NAME,
+     * reads the request body, calls \ZealPHP\CGI\FastCgiClient::request(), maps
+     * the response (status, headers, body, stderr) back through the universal
+     * return contract. The FastCgiClient socket layer is OpenSwoole-native
+     * (Coroutine\Client) — the call never blocks the worker.
+     *
+     * On connection failure or protocol error, logs via elog() and returns 502.
+     *
+     * @param string|null $address     Per-backend FastCGI address override (host:port or unix:/path).
+     *   null → falls back to App::$fcgi_address.
+     * @param array<string,string> $extraParams  Extra FCGI params merged after buildCgiEnv()
+     *   (Apache SetEnvIf / nginx fastcgi_param parity).
+     */
     public static function cgiFcgi(string $path, ?string $address = null, array $extraParams = []): mixed
     {
         $g = RequestContext::instance();
