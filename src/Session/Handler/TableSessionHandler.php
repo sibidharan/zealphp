@@ -374,6 +374,11 @@ final class TableSessionHandler implements \SessionHandlerInterface
     private function remember(string $sessionId, array $base, int $version): void
     {
         $cid = \ZealPHP\RequestContext::ownerCid();
+        // A fire-and-forget child that outlives its request: the owner's
+        // cleanup already ran, so key this snapshot to the child itself.
+        if ($cid !== Coroutine::getCid() && !Coroutine::exists($cid)) {
+            $cid = Coroutine::getCid();
+        }
         // The cleanup must run when the REQUEST ends: register it only from the
         // owning coroutine (a child's defer fires when the child ends). A
         // child-first read is still dropped by close() at write_close.
@@ -411,14 +416,20 @@ final class TableSessionHandler implements \SessionHandlerInterface
     {
         $me = getmypid() ?: 1;
         $spin = 100; // microseconds
-        $deadline = microtime(true) + self::$lockTimeoutSeconds;
+        $start = microtime(true);
+        $deadline = $start + self::$lockTimeoutSeconds;
+        $nextProbe = $start + 0.1;   // a dead holder is reclaimed after ~100 ms, not the full timeout
         while (!$lock->cmpset(0, $me)) {
-            if (microtime(true) >= $deadline) {
+            $now = microtime(true);
+            if ($now >= $nextProbe) {
+                $nextProbe = $now + 0.1;
                 $holder = $lock->get();
                 if ($holder > 0 && $holder !== $me && self::processIsGone($holder) && $lock->cmpset($holder, $me)) {
                     return;   // the holder is gone: reclaim its lock
                 }
-                throw new \RuntimeException('TableSessionHandler: session shard lock held by pid ' . $holder . ' for over '
+            }
+            if ($now >= $deadline) {
+                throw new \RuntimeException('TableSessionHandler: session shard lock held by pid ' . $lock->get() . ' for over '
                     . self::$lockTimeoutSeconds . 's; failing this session write');
             }
             if (Coroutine::getCid() > 0) {

@@ -364,10 +364,15 @@ class RedisSessionHandler implements \SessionHandlerInterface
         $cid = \ZealPHP\RequestContext::ownerCid();
         $out = $this->io(function (\Redis $redis) use ($key, $sid, $cid): string {
             // Sliding expiry, like PHP's own session.lazy_write timestamp
-            // update: a session that is read but not changed stays alive.
-            // BEFORE the WATCH — an EXPIRE after it counts as a modification
-            // and would abort this request's own EXEC.
-            $redis->expire($key, $this->ttl);
+            // update: a session that is read but not changed stays alive. Only
+            // once less than half the TTL is left: an EXPIRE is a modification,
+            // so refreshing on every read would abort the WATCH of every
+            // concurrent request on the same session (parallel ajax). And
+            // BEFORE our own WATCH, for the same reason.
+            $left = $redis->ttl($key);
+            if (is_int($left) && $left >= 0 && $left < intdiv($this->ttl, 2)) {
+                $redis->expire($key, $this->ttl);
+            }
             $redis->watch($key);
             $data = $redis->get($key);
             $base = is_string($data) ? $data : '';

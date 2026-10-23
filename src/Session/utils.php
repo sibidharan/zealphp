@@ -1030,7 +1030,13 @@ function zeal_session_destroy(): bool
     assert(is_string($save_path));
     $dHandler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
     if ($dHandler instanceof \SessionHandlerInterface) {
-        $dHandler->destroy((string) $session_id);
+        try {
+            $dHandler->destroy((string) $session_id);
+        } catch (\Throwable $e) {
+            // A store failure (e.g. a Table shard lock timeout) fails this
+            // destroy, logged, like a failed write — not the request.
+            \ZealPHP\elog('Session destroy failed: ' . $e->getMessage(), 'error');
+        }
         zeal_session_close_handler();
     } else {
         $session_file = $save_path . '/sess_' . basename((string)$session_id);
@@ -1124,9 +1130,16 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
         $data = $superglobals ? ($GLOBALS['_SESSION'] ?? []) : (isset($g->session) ? $g->session : []);
         $data = is_array($data) ? $data : [];
         /** @var array<string, mixed> $data */
-        $handler->write((string) $new_session_id, php_session_encode_from_array($data));
-        if ($delete_old_session && is_string($old_session_id) && $old_session_id !== '') {
-            $handler->destroy((string) $old_session_id);
+        try {
+            $handler->write((string) $new_session_id, php_session_encode_from_array($data));
+            if ($delete_old_session && is_string($old_session_id) && $old_session_id !== '') {
+                $handler->destroy((string) $old_session_id);
+            }
+        } catch (\Throwable $e) {
+            // Same contract as the managers' close: a store failure is logged
+            // and fails this operation, not the login flow around it.
+            \ZealPHP\elog('Session regenerate failed: ' . $e->getMessage(), 'error');
+            return false;
         }
     } else {
         // File handler: keep old data by renaming the backing file.

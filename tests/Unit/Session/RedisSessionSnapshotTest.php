@@ -33,6 +33,15 @@ namespace {
             public function get(string $key): string|false { return self::$data[$key] ?? false; }
             /** @var array<string, int> TTL set by the last expire() per key */
             public static array $expired = [];
+            /** @var array<string, int> remaining TTL ttl() reports per key */
+            public static array $ttlLeft = [];
+            public function ttl(string $key): int|false
+            {
+                if (!isset(self::$data[$key])) {
+                    return -2;
+                }
+                return self::$ttlLeft[$key] ?? -1;
+            }
             public function expire(string $key, int $ttl): bool
             {
                 self::$expired[$key] = $ttl;
@@ -129,13 +138,24 @@ namespace ZealPHP\Tests\Unit\Session {
             return $v;
         }
 
-        /** A session that is only read (never changed) keeps sliding: read() refreshes its TTL. */
-        public function testReadRefreshesTheTtl(): void
+        /**
+         * A session that is only read keeps sliding, once less than half its TTL
+         * is left; a fresh one is not touched (an EXPIRE would abort concurrent
+         * readers' WATCH, so refreshing on every read made parallel requests on
+         * one session fail their writes).
+         */
+        public function testReadRefreshesTheTtlOnlyPastHalfLife(): void
         {
             \Redis::$data['T:abc'] = 'user|s:5:"alice";';
             \Redis::$expired = [];
             $h = new RedisSessionHandler('127.0.0.1', 6379, 'T:', 900);
+
+            \Redis::$ttlLeft['T:abc'] = 800;
             $this->assertSame('user|s:5:"alice";', $h->read('abc'));
+            $this->assertSame([], \Redis::$expired, 'a fresh TTL is left alone');
+
+            \Redis::$ttlLeft['T:abc'] = 300;
+            $h->read('abc');
             $this->assertSame(['T:abc' => 900], \Redis::$expired);
         }
 
