@@ -27,6 +27,22 @@ use function ZealPHP\response_set_status;
 class Dispatcher
 {
     /**
+     * Most output buffered from one non-PHP CGI script (headers + body) before
+     * it is stopped and the request fails (C10). Same ceiling as an IPC frame.
+     */
+    public const CGI_OUTPUT_CAP_BYTES = IPC::MAX_FRAME_BYTES;
+
+    /** Most stderr kept per CGI request for the log; the rest is read and dropped. */
+    private const DIAG_CAP_BYTES = 1024 * 1024;
+
+    /**
+     * Largest ZEALPHP_REQUEST_CONTEXT still put in a non-PHP script's env.
+     * exec() refuses one env string past 128 KB (MAX_ARG_STRLEN), and the
+     * whole request would fail with E2BIG (C12).
+     */
+    private const CGI_ENV_CONTEXT_MAX_BYTES = 100_000;
+
+    /**
      * Build the OS-level environment array passed to the CGI subprocess.
      *
      * Extracted as a public static method so unit tests can assert the exact
@@ -212,15 +228,16 @@ class Dispatcher
         }
         $g->cookie[$name] = $sid;
         if ($g->openswoole_response !== null && $g->openswoole_response->isWritable()) {
-            $g->openswoole_response->cookie(
-                $name,
-                $sid,
-                0,        // session cookie (no expiry)
-                '/',
-                '',
-                false,
-                true      // httponly
-            );
+            // C8 — minted before the script runs, so the app's own cookie
+            // params are not known yet. Keep the old attributes, except Secure,
+            // which follows the host's own session cookies: ZEALPHP_SESSION_SECURE,
+            // else whether this request came over HTTPS. SameSite is left
+            // unset as before, so an old app's cross-site flows keep working.
+            $envSecure = getenv('ZEALPHP_SESSION_SECURE');
+            $secure = $envSecure !== false
+                ? filter_var($envSecure, FILTER_VALIDATE_BOOLEAN)
+                : App::requestIsHttps($g->server);
+            $g->openswoole_response->cookie($name, $sid, 0, '/', '', $secure, true);
         }
         return $sid;
     }
@@ -272,8 +289,42 @@ class Dispatcher
             return;
         }
         if (is_callable([$response, 'cookie'])) {
-            $response->cookie($name, $sid, 0, '/', '', false, true);
+            $c = self::sessionCookieAttributes($meta['session_cookie'] ?? null);
+            $response->cookie($name, $sid, $c[0], $c[1], $c[2], $c[3], $c[4], $c[5]);
         }
+    }
+
+    /**
+     * Set-Cookie attributes for a CGI session cookie, from the subprocess's
+     * session_get_cookie_params() (C8).
+     *
+     * The host used to emit every CGI session cookie as
+     * `(0, '/', '', secure=false, httponly=true)`, whatever the app had set
+     * with session_set_cookie_params() or session.cookie_* — an app that asked
+     * for Secure, SameSite, a domain, a path or a lifetime did not get it. The
+     * app's values are used now. HttpOnly stays on regardless: the host always
+     * set it, and an old app that never asked for it must not lose it.
+     * Missing or malformed values fall back to those old defaults.
+     *
+     * @return array{0:int,1:string,2:string,3:bool,4:bool,5:string} expires, path, domain, secure, httponly, samesite
+     */
+    private static function sessionCookieAttributes(mixed $params): array
+    {
+        if (!is_array($params)) {
+            return [0, '/', '', false, true, ''];
+        }
+        $lifetime = isset($params['lifetime']) && is_numeric($params['lifetime']) ? (int) $params['lifetime'] : 0;
+        $path     = isset($params['path']) && is_string($params['path']) && $params['path'] !== '' ? $params['path'] : '/';
+        $domain   = isset($params['domain']) && is_string($params['domain']) ? $params['domain'] : '';
+        $samesite = isset($params['samesite']) && is_string($params['samesite']) ? $params['samesite'] : '';
+        return [
+            $lifetime > 0 ? time() + $lifetime : 0,
+            $path,
+            $domain,
+            !empty($params['secure']),
+            true,
+            $samesite,
+        ];
     }
 
     /** @var array<string, true> FastCGI upstreams already warned about in this worker. */
@@ -434,7 +485,8 @@ class Dispatcher
             'env'    => $g->env ?? $_ENV,
         ], JSON_UNESCAPED_SLASHES);
 
-        $env = self::buildCgiEnv($g->server, is_string($ctx) ? $ctx : '{}');
+        $ctx = is_string($ctx) ? $ctx : '{}';
+        $isPhp = $interpreter === null && str_ends_with(strtolower($path), '.php');
 
         $descriptors = [
             0 => ['pipe', 'r'],
@@ -442,27 +494,42 @@ class Dispatcher
             2 => ['pipe', 'w'],
         ];
 
-        if ($interpreter === null) {
-            $isPhp = str_ends_with(strtolower($path), '.php');
-            if ($isPhp) {
-                // PHP target: route through cgi_worker.php for uopz header/cookie captures.
-                $cgiWorker = __DIR__ . '/../cgi_worker.php';
-                $cmd = PHP_BINARY . ' -d display_errors=stderr -d ' . App::subprocessStrictModeIni() . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
-            } else {
+        if ($isPhp) {
+            // C12 — the context goes to cgi_worker.php over its own pipe (fd 4),
+            // not in ZEALPHP_REQUEST_CONTEXT: exec() refuses a single env
+            // string past ~128 KB (E2BIG), so a large form post or cookie set
+            // failed the request. C7 — the metadata line comes back on fd 3,
+            // which nothing else writes, instead of being the first stderr line.
+            $env = self::buildCgiEnv($g->server, '');
+            unset($env['ZEALPHP_REQUEST_CONTEXT']);
+            $env['ZEALPHP_CGI_META_FD'] = '3';
+            $env['ZEALPHP_CGI_CONTEXT_FD'] = '4';
+            $descriptors[3] = ['pipe', 'w'];
+            $descriptors[4] = ['pipe', 'r'];
+            // PHP target: route through cgi_worker.php for uopz header/cookie captures.
+            $cgiWorker = __DIR__ . '/../cgi_worker.php';
+            $cmd = PHP_BINARY . ' -d display_errors=stderr -d ' . App::subprocessStrictModeIni() . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
+        } else {
+            $env = self::buildCgiEnv($g->server, $ctx);
+            if (strlen($ctx) > self::CGI_ENV_CONTEXT_MAX_BYTES) {
+                // A non-PHP script reads its request from the CGI env and stdin;
+                // this copy is a convenience it cannot get past E2BIG anyway.
+                unset($env['ZEALPHP_REQUEST_CONTEXT']);
+            }
+            if ($interpreter === null) {
                 // Non-PHP file with no explicit interpreter (the `cgiScriptAlias`-only
                 // path): exec the file directly, relying on its `#!` shebang line.
-                // Apache `ScriptAlias` parity — Apache requires the file to be
-                // executable (+x) for CGI dispatch; we do the same.
-                if (!is_executable($path)) {
-                    elog("cgiSubprocess: file not executable; ScriptAlias dispatch requires +x and a #! shebang: $path", "error");
+                $refusal = self::scriptAliasRefusal($path);
+                if ($refusal !== null) {
+                    elog("cgiSubprocess: {$refusal}: {$path}", 'error');
                     return 500;
                 }
                 $cmd = escapeshellarg($path);
+            } else {
+                // Non-PHP target with an explicit interpreter (e.g. `.py` + `/usr/bin/python3`).
+                // The script must output CGI/1.1 headers (Content-Type + blank line + body).
+                $cmd = escapeshellarg($interpreter) . ' ' . escapeshellarg($path);
             }
-        } else {
-            // Non-PHP target with an explicit interpreter (e.g. `.py` + `/usr/bin/python3`).
-            // The script must output CGI/1.1 headers (Content-Type + blank line + body).
-            $cmd = escapeshellarg($interpreter) . ' ' . escapeshellarg($path);
         }
 
         $process = proc_open(
@@ -478,44 +545,45 @@ class Dispatcher
             return 500;
         }
 
+        $deadline = microtime(true) + App::$cgi_timeout;
+        if ($isPhp) {
+            // cgi_worker.php reads the whole context before anything else.
+            self::writeAll($pipes[4], $ctx, $deadline);
+            fclose($pipes[4]);
+        }
         try {
             // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before any route dispatches
             $postBody = $g->zealphp_request->parent->getContent();
-            if ($postBody) fwrite($pipes[0], (string)$postBody);
+            if ($postBody) self::writeAll($pipes[0], (string) $postBody, $deadline);
         } catch (\Throwable $e) {}
         fclose($pipes[0]);
 
         // ── Non-PHP CGI path (RFC 3875) ───────────────────────────────────
         // A raw Python/Perl/etc. CGI script — whether reached via an explicit
         // `interpreter` registration OR via shebang exec under a `cgiScriptAlias`
-        // — knows nothing about the cgi_worker stderr-metadata protocol below.
+        // — knows nothing about the cgi_worker metadata protocol below.
         // It writes a standard CGI response to STDOUT: header lines, a blank
         // line, then the body. Parse that directly (Apache mod_cgi parity:
         // ap_scan_script_header_err_brigade_ex()). stderr is drained for error
         // visibility (cgi_common.h log_script_err()).
-        if ($interpreter !== null || !str_ends_with(strtolower($path), '.php')) {
+        if (!$isPhp) {
             return self::cgiInterpreterResponse($process, $pipes, $path);
         }
 
-        // Protocol: CGI worker sends metadata as a single JSON line on stderr
+        // Protocol: CGI worker sends metadata as a single JSON line on fd 3
         // BEFORE streaming body on stdout. This enables SSE and streaming.
         // Apply a configurable read timeout (App::$cgi_timeout seconds) so a
         // hung subprocess never blocks the OpenSwoole worker indefinitely.
         // Apache parity: CGIScriptTimeout / apr_file_pipe_timeout_set() (mod_cgi.c:437,444).
-        stream_set_blocking($pipes[2], false);
-        $deadline = microtime(true) + App::$cgi_timeout;
-        $metaLine = '';
-        while (microtime(true) < $deadline) {
-            $line = fgets($pipes[2]);
-            if ($line !== false) {
-                $metaLine = $line;
-                break;
-            }
-            if (feof($pipes[2])) {
-                break;
-            }
-            usleep(5000);
-        }
+        //
+        // stdout and stderr are drained while we wait, so a script that writes
+        // a lot to either before its metadata is sent (a flood of warnings, an
+        // fwrite(STDOUT)) cannot block on a full pipe. stdout read here is the
+        // start of the body.
+        $early = self::readCgiMetaLine($pipes, $deadline);
+        $metaLine = $early['meta'];
+        $stderrRemainder = $early['stderr'];
+        $bodyHead = $early['stdout'];
         if ($metaLine === '') {
             // Subprocess timed out or died without metadata — kill it.
             proc_terminate($process, 15); // SIGTERM
@@ -531,11 +599,11 @@ class Dispatcher
             }
             // Drain remaining stderr for visibility.
             stream_set_blocking($pipes[2], true);
-            $stderrRemainder = stream_get_contents($pipes[2]);
+            $stderrRemainder .= (string) stream_get_contents($pipes[2], self::DIAG_CAP_BYTES);
             fclose($pipes[2]);
             fclose($pipes[1]);
             proc_close($process);
-            if (is_string($stderrRemainder) && $stderrRemainder !== '') {
+            if ($stderrRemainder !== '') {
                 elog("[cgi_worker] (timeout) stderr: " . rtrim($stderrRemainder), "cgi_worker");
             }
             elog("cgiSubprocess: timeout after " . App::$cgi_timeout . "s for $path", "error");
@@ -543,14 +611,13 @@ class Dispatcher
         }
 
         // NOTE: stderr is deliberately NOT drained to EOF here. The worker writes
-        // the metadata line to stderr and THEN the (often >64 KB) body to stdout at
+        // the metadata line and THEN the (often >64 KB) body to stdout at
         // shutdown; blocking on stderr-to-EOF before reading stdout deadlocks once
         // the body exceeds the ~64 KB OS pipe buffer — the child blocks writing the
         // stdout we aren't reading, while we block reading the stderr the child
         // won't close until it exits (the WordPress-on-proc hang, Issue 3). stdout
         // and any remaining stderr (for log visibility — Apache cgi_common.h:103-126
         // log_script_err parity) are drained CONCURRENTLY below instead.
-        $stderrRemainder = '';
 
         $streaming   = false;
         $returnValue = null;
@@ -610,6 +677,10 @@ class Dispatcher
         if ($streaming && $g->openswoole_response->isWritable()) {
             // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
             $g->zealphp_response->flush();
+            if ($bodyHead !== '') {
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                $g->openswoole_response->write($bodyHead);
+            }
             stream_set_blocking($pipes[1], false);
             stream_set_blocking($pipes[2], false);
             while (!feof($pipes[1])) {
@@ -656,7 +727,7 @@ class Dispatcher
         // and is a plain blocking syscall in legacy-cgi (no scheduler).
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
-        $body = '';
+        $body = $bodyHead;
         $open = [1 => $pipes[1], 2 => $pipes[2]];
         $drainDeadline = microtime(true) + App::$cgi_timeout;
         while ($open !== []) {
@@ -699,6 +770,128 @@ class Dispatcher
             return $returnValue;
         }
         return $body !== '' ? $body : null;
+    }
+
+    /**
+     * Why a ScriptAlias target must not run, or null when it may (C11).
+     *
+     * Apache runs a ScriptAlias file only through its `#!` line; without one,
+     * exec() fails with ENOEXEC and /bin/sh (via `sh -c` and execvp's own
+     * fallback) would run the file as a shell script, whatever it contains.
+     * suexec also refuses a script anyone but its owner can write. Both are
+     * required here.
+     */
+    private static function scriptAliasRefusal(string $path): ?string
+    {
+        if (!is_executable($path)) {
+            return 'file not executable; ScriptAlias dispatch requires +x and a #! shebang';
+        }
+        $perms = @fileperms($path);
+        if ($perms === false || ($perms & 0022) !== 0) {
+            return 'script is group- or world-writable; ScriptAlias refuses to run it (suexec parity)';
+        }
+        $fh = @fopen($path, 'rb');
+        $magic = $fh !== false ? (string) fread($fh, 2) : '';
+        if ($fh !== false) {
+            fclose($fh);
+        }
+        if ($magic !== '#!') {
+            return 'script has no #! line; ScriptAlias runs only files that name their interpreter (Apache parity)';
+        }
+        return null;
+    }
+
+    /**
+     * Write all of `$data` to a child's pipe by `$deadline`, never blocking
+     * past it. Inside a coroutine at most PIPE_BUF bytes go per writable event
+     * (see WorkerPool::exchange()). Returns false on a broken pipe or timeout.
+     *
+     * @param resource $pipe
+     */
+    private static function writeAll($pipe, string $data, float $deadline): bool
+    {
+        stream_set_blocking($pipe, false);
+        $chunk = \OpenSwoole\Coroutine::getCid() > 0 ? 4096 : 65536;
+        while ($data !== '') {
+            $wait = $deadline - microtime(true);
+            if ($wait <= 0) {
+                return false;
+            }
+            $wait = max(0.001, min(1.0, $wait));
+            $sec = (int) $wait;
+            $r = null;
+            $w = [$pipe];
+            $e = null;
+            $sel = @stream_select($r, $w, $e, $sec, (int) (($wait - $sec) * 1_000_000));
+            if ($sel === false) {
+                usleep(1000); // EINTR — retry
+                continue;
+            }
+            if ($sel === 0) {
+                continue; // not writable yet (the only stream selected)
+            }
+            $n = @fwrite($pipe, strlen($data) > $chunk ? substr($data, 0, $chunk) : $data);
+            if ($n === false) {
+                return false;
+            }
+            $data = (string) substr($data, $n);
+        }
+        return true;
+    }
+
+    /**
+     * Wait for cgi_worker.php's metadata line on fd 3, draining stdout and
+     * stderr meanwhile (C7). Returns the line ('' on timeout or when fd 3
+     * closed without one), the stdout read so far (the start of the body), and
+     * the stderr read so far.
+     *
+     * @param array<int,resource> $pipes
+     * @return array{meta:string, stdout:string, stderr:string}
+     */
+    private static function readCgiMetaLine(array $pipes, float $deadline): array
+    {
+        /** @var array<int,resource> $open */
+        $open = [1 => $pipes[1], 2 => $pipes[2], 3 => $pipes[3]];
+        foreach ($open as $p) {
+            stream_set_blocking($p, false);
+        }
+        $buf = [1 => '', 2 => '', 3 => ''];
+        $meta = '';
+        while (true) {
+            $nl = strpos($buf[3], "\n");
+            if ($nl !== false) {
+                $meta = substr($buf[3], 0, $nl + 1);
+                break;
+            }
+            if (!isset($open[3]) || microtime(true) >= $deadline) {
+                break;
+            }
+            $read = array_values($open);
+            $w = $e = null;
+            $wait = max(0.001, min(1.0, $deadline - microtime(true)));
+            $sec = (int) $wait;
+            $sel = @stream_select($read, $w, $e, $sec, (int) (($wait - $sec) * 1_000_000));
+            if ($sel === false) {
+                usleep(1000); // EINTR — retry
+                continue;
+            }
+            foreach ($read as $stream) {
+                $fd = (int) array_search($stream, $open, true);
+                $data = @fread($stream, 65536);
+                if ($data === false || $data === '') {
+                    if (feof($stream)) {
+                        unset($open[$fd]);
+                    }
+                    continue;
+                }
+                $cap = $fd === 2 ? self::DIAG_CAP_BYTES : self::CGI_OUTPUT_CAP_BYTES;
+                if (strlen($buf[$fd]) < $cap) {
+                    $buf[$fd] .= $data;
+                }
+            }
+        }
+        @fclose($pipes[3]);
+        return ['meta' => $meta, 'stdout' => $buf[1], 'stderr' => $buf[2]];
     }
 
     /**
@@ -831,31 +1024,62 @@ class Dispatcher
     {
         $g = RequestContext::instance();
 
-        // Read the full stdout (headers + body) under the CGI timeout. A trivial
-        // CGI script completes near-instantly; the deadline only guards a hang.
+        // Read the full stdout (headers + body) under the CGI timeout, draining
+        // stderr in the same select loop. A trivial CGI script completes
+        // near-instantly; the deadline only guards a hang.
+        //
+        // C10 — stderr used to be read only after stdout hit EOF, so a script
+        // that wrote more than a pipe's worth (~64 KB) of warnings blocked on
+        // it and the request waited out the CGI timeout. The buffered output
+        // is capped too (it was unbounded): past CGI_OUTPUT_CAP_BYTES the
+        // script is stopped and the request fails.
         stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
         $deadline = microtime(true) + App::$cgi_timeout;
         $raw = '';
-        $timedOut = true;
-        while (microtime(true) < $deadline) {
-            $chunk = fread($pipes[1], 8192);
-            if ($chunk !== false && $chunk !== '') {
-                $raw .= $chunk;
-                continue;
-            }
-            if (feof($pipes[1])) {
-                $timedOut = false;
+        $stderr = '';
+        $timedOut = false;
+        $overCap = false;
+        $open = [1 => $pipes[1], 2 => $pipes[2]];
+        while ($open !== []) {
+            if (microtime(true) >= $deadline) {
+                $timedOut = true;
                 break;
             }
-            usleep(2000);
+            $read = array_values($open);
+            $w = $e = null;
+            $wait = max(0.001, min(1.0, $deadline - microtime(true)));
+            $sec = (int) $wait;
+            $sel = @stream_select($read, $w, $e, $sec, (int) (($wait - $sec) * 1_000_000));
+            if ($sel === false) { usleep(1000); continue; } // EINTR — retry
+            foreach ($read as $stream) {
+                $fd = $stream === $pipes[1] ? 1 : 2;
+                $chunk = @fread($stream, 65536);
+                if ($chunk === false || $chunk === '') {
+                    if (feof($stream)) {
+                        unset($open[$fd]);
+                    }
+                    continue;
+                }
+                if ($fd === 2) {
+                    // Apache logs child stderr (log_script_err); keep a bounded copy.
+                    if (strlen($stderr) < self::DIAG_CAP_BYTES) {
+                        $stderr .= $chunk;
+                    }
+                    continue;
+                }
+                $raw .= $chunk;
+                if (strlen($raw) > self::CGI_OUTPUT_CAP_BYTES) {
+                    $overCap = true;
+                    break 2;
+                }
+            }
         }
-
-        // Drain stderr (non-blocking) for error visibility — Apache logs child
-        // stderr line-by-line; we route it through elog() under the cgi tag.
-        stream_set_blocking($pipes[2], false);
-        $stderr = stream_get_contents($pipes[2]);
         fclose($pipes[2]);
 
+        if ($overCap) {
+            $timedOut = true; // same teardown: stop the script, fail the request
+        }
         if ($timedOut) {
             proc_terminate($process, 15);
             $killDeadline = microtime(true) + 5.0;
@@ -870,10 +1094,12 @@ class Dispatcher
             }
             fclose($pipes[1]);
             proc_close($process);
-            if (is_string($stderr) && $stderr !== '') {
+            if ($stderr !== '') {
                 elog("[cgi] (timeout) stderr: " . rtrim($stderr), "cgi");
             }
-            elog("cgiInterpreterResponse: timeout after " . App::$cgi_timeout . "s for $path", "error");
+            elog($overCap
+                ? 'cgiInterpreterResponse: output exceeds ' . self::CGI_OUTPUT_CAP_BYTES . " bytes for $path"
+                : 'cgiInterpreterResponse: timeout after ' . App::$cgi_timeout . "s for $path", 'error');
             return 500;
         }
 
@@ -881,7 +1107,7 @@ class Dispatcher
         $exit = proc_get_status($process)['exitcode'];
         proc_close($process);
 
-        if (is_string($stderr) && $stderr !== '') {
+        if ($stderr !== '') {
             elog("[cgi] stderr: " . rtrim($stderr), "cgi");
         }
 

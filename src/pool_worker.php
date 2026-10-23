@@ -893,6 +893,10 @@ function pool_finish_request(mixed $result, ?\Throwable $error, mixed $prevCwd):
             $frame['session_name'] = function_exists('session_name') && is_string(session_name())
                 ? session_name()
                 : 'PHPSESSID';
+            // C8 — the app's cookie settings, so the host's Set-Cookie matches them.
+            if (function_exists('session_get_cookie_params')) {
+                $frame['session_cookie'] = session_get_cookie_params();
+            }
         }
     }
     return $frame;
