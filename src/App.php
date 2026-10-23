@@ -5042,14 +5042,32 @@ class App
         $g = \ZealPHP\RequestContext::instance();
         $out = '';
         foreach ($tokens as $tok) {
-            $out .= self::renderAccessLogToken($tok, $g, $status, $length, $durationSec);
+            $value = self::renderAccessLogToken($tok, $g, $status, $length, $durationSec);
+            $out .= $tok['kind'] === 'lit' ? $value : self::escapeAccessLogValue($value);
         }
-        // Log-injection defence (Apache mod_log_config parity): escape CR/LF/NUL
-        // so an attacker-controlled token (REQUEST_URI, Referer, User-Agent, …)
-        // cannot inject a forged physical log line. Compiled format literals are
-        // single-line (spaces/quotes/brackets), so this only neutralises smuggled
-        // control characters; tab/space field separators are preserved.
-        return strtr($out, ["\r" => '\\r', "\n" => '\\n', "\0" => '\\0']);
+        return $out;
+    }
+
+    /**
+     * Log-injection defence, Apache mod_log_config parity (ap_escape_logitem):
+     * in every value that can come from the request (REQUEST_URI, Referer,
+     * User-Agent, headers …) escape `"` and `\` and write other control bytes as
+     * \xhh. Before, only CR/LF/NUL were escaped: a `"` broke field parsing for
+     * log tooling, and ESC sequences reached whoever ran `tail` on the log.
+     * Format literals (quotes, brackets, spaces) are left alone.
+     */
+    private static function escapeAccessLogValue(string $value): string
+    {
+        return (string) preg_replace_callback('/[\x00-\x1F\x7F"\\\\]/', static function (array $m): string {
+            return match ($m[0]) {
+                '"' => '\\"',
+                '\\' => '\\\\',
+                "\n" => '\\n',
+                "\r" => '\\r',
+                "\t" => '\\t',
+                default => sprintf('\\x%02x', ord($m[0])),
+            };
+        }, $value);
     }
 
     /**
