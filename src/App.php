@@ -9904,6 +9904,12 @@ class App
             && \function_exists('zealphp_coroutine_statics')
         ) {
             (\zealphp_coroutine_statics(...))((bool) true);
+            // perf: the framework's own class statics (route tables, the pipelining
+            // turnstile, the fatal guard, memo caches) are per-worker state that
+            // concurrent requests share by design — never carry them per coroutine.
+            if (\function_exists('zealphp_shared_static_classes')) {
+                (\zealphp_shared_static_classes(...))(['ZealPHP\\']);
+            }
         } elseif (self::$coroutine_statics_isolation) {
             elog(
                 "[warn] coroutineStaticsIsolation(true) requires ext-zealphp "
