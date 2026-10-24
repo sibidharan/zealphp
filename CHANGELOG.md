@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.17] - 2026-10-24
+
+Second security release in the PHP2Shell series: the findings deferred from 0.4.16 (CGI modes, session-store lows, ext-zealphp isolation) plus a Mythos 5.1 review of these fixes themselves. Each fix has a test that fails on 0.4.16. coroutine-legacy now requires **ext-zealphp 0.4.1**.
+
+### Security
+- **The CGI pool can no longer hand one user's response to the next.**
+  - Every request carries a token that its response must echo.
+  - A subprocess with stray bytes, a forged frame or an oversized frame is killed and replaced, and that request gets a 502.
+  - The worker loop's state is out of the app's reach.
+- **CGI pool resets cover three more cross-user leaks**, as FPM does: `_`-prefixed globals, error/exception handlers, and `putenv()`. The keep-vs-reset policy for legacy apps is otherwise unchanged.
+- **CGI response headers end at the first blank line.** A body containing `\r\n\r\n` could inject Location/Set-Cookie.
+- **Strict session mode reaches php-fpm** (`PHP_VALUE session.use_strict_mode`). An FPM app that sets its own session id should override `PHP_VALUE` in its backend's `fcgi_params`.
+- **The request context and environment are no longer sent to php-fpm by default.** Opt in with `App::fcgiForwardContext(true)` or `ZEALPHP_FCGI_FORWARD_CONTEXT=1`.
+- **proc mode:**
+  - metadata travels on fd 3, so an early stderr write can no longer drop a `Location` guard;
+  - the context goes over a pipe (no E2BIG);
+  - an undelivered context is a 500.
+- **The CGI session cookie follows the app's cookie params** (Secure/SameSite/domain/lifetime).
+- **ScriptAlias** runs only `#!` scripts and compiled binaries (no `/bin/sh` fallback) and refuses world-writable files.
+- **Session store:**
+  - session ids follow PHP's alphabet, capped at 128 bytes;
+  - the validated id is what goes into Set-Cookie;
+  - expired Table sessions stay expired;
+  - integer keys are no longer renumbered;
+  - a dead worker's shard lock is reclaimed, and a live one past 5 s fails only that write;
+  - Redis refreshes the TTL past half-life;
+  - `go()` children share their request's session snapshots.
+- **ext-zealphp 0.4.1:**
+  - destructors never run inside the scheduler callbacks (no fatal or segfault when a `go()` child's or `$_SESSION` object is freed);
+  - copy-on-write superglobal snapshots (big POSTs no longer multiply memory per yield);
+  - namespaced constants are isolated;
+  - traits get per-class statics;
+  - the op_array cache revalidates on change;
+  - `open_basedir` is restored per request.
+
+### Changed
+- `go()` children share their request's globals and statics by default (ext 0.4.1). `zealphp_child_coroutine_isolation(true)` gives each child its own copy.
+- A CGI script that writes to fd 3 itself gets a 502. In pool mode, stray stdout goes to the log.
+- CGI pool or interpreter output over 64 MB is a 502/500 instead of being silently truncated or buffered without limit.
+
 ## [0.4.16] - 2026-10-24
 
 Security release. Findings from four audits after PHP2Shell (CVE-2026-109618/109619): static reviews of the HTTP surface, of sessions/WebSocket/CGI/state, and of ext-zealphp, plus an independent second-model review. Each was reproduced in a lab before it was fixed, and every fix has a regression test that fails on 0.4.15. PHP2Shell itself never reaches the default runtime; patch PHP anyway.

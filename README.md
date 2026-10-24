@@ -97,7 +97,7 @@ docker compose up app
 
 ```bash
 # New project
-composer create-project zealphp/project:^0.4.16 my-project
+composer create-project zealphp/project:^0.4.17 my-project
 cd my-project
 php app.php
 # → https://php.zeal.ninja
@@ -469,16 +469,16 @@ The fine-grained setters (`App::superglobals()`, `App::isolation()`, `App::enabl
 2. Run `composer validate`, `./vendor/bin/phpunit`, and `./vendor/bin/phpstan analyse --no-progress` (level 10, zero errors).
 3. Open a release PR, wait for required checks to go green, and merge (rebase):
    ```bash
-   git checkout -b release/v0.4.16
-   git commit -am "chore: release v0.4.16"
-   git push origin1 release/v0.4.16
-   gh pr create --base master --head release/v0.4.16 --title "chore: release v0.4.16"
+   git checkout -b release/v0.4.17
+   git commit -am "chore: release v0.4.17"
+   git push origin1 release/v0.4.17
+   gh pr create --base master --head release/v0.4.17 --title "chore: release v0.4.17"
    ```
 4. After merge, tag the merged commit and push to both remotes (tags aren't protected):
    ```bash
    git checkout master && git pull origin1 master --ff-only
-   git tag -a v0.4.16 -m "Release v0.4.16"
-   git push origin v0.4.16 && git push origin1 v0.4.16
+   git tag -a v0.4.17 -m "Release v0.4.17"
+   git push origin v0.4.17 && git push origin1 v0.4.17
    ```
 5. Bump `zealphp/project` (the scaffold) to the same version and refresh its `llms.txt`. Packagist auto-syncs via webhook for both packages.
 
