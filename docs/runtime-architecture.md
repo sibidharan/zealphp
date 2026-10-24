@@ -65,6 +65,7 @@ Traditional PHP scripts rely on `$_GET`, `$_POST`, `$_SERVER`, etc. ZealPHP emul
 ZealPHP favours a single-request-per-worker model to protect superglobals. When you need to isolate work:
 
 - `App::cgiMode('pool' | 'proc' | 'fork' | 'fcgi')` selects the per-request isolation strategy for legacy `public/*.php` files. `'pool'` (default) uses a **pre-spawned subprocess pool** (mod_php-style global isolation, ~1–3 ms warm — what unmodified WordPress/Drupal needs). `'proc'` forks a fresh PHP interpreter per request via `proc_open` + `cgi_worker.php` (~30–50 ms cold start; use when true fresh-process isolation is required every request). `'fork'` is the Apache MPM prefork runner — a fork-master forks a fresh child per request at true global scope (~1 ms fork cost, **EXPERIMENTAL**, requires `pcntl`+`posix`). `'fcgi'` forwards to an upstream php-fpm pool via `App::fcgiAddress()` — no child process at all. See [tasks-and-concurrency.md](./tasks-and-concurrency.md) for the trade-off table.
+- **Not a tenant boundary.** These modes, per-extension backends and per-domain CGI routing serve one owner's sites; all the code they run is trusted alike. The pool guards response integrity (a bug can't hand one user's response, session or input to the next user — see [fastcgi-backends.md](fastcgi-backends.md#the-cgi-pool-is-not-a-tenant-boundary)), but it does not isolate mutually distrusting tenants. Use separate OS users, containers or hosts for that.
 - `coprocess()` / `coproc()` create dedicated processes with coroutine support for longer-running workloads that should not block the main worker. These helpers are only available when superglobals are enabled (`coproc` throws otherwise).
 
 ### Custom CGI backends — host any language
@@ -156,6 +157,10 @@ an unregistered fallback (`['mode' => App::$cgi_mode]`, `mayExecute = false`).
 > `App::include()` but does **not** yet get an automatic `/{file}.<ext>` route.
 > Pair `cgiScriptAlias()` with a `registerCgiBackend()` for the extensions you
 > want auto-routed, or add an explicit route. (Follow-up.)
+
+Without an `interpreter`, a ScriptAlias file is exec'd directly: it must be a
+`#!` script or a compiled binary (ELF/Mach-O), and must not be world-writable,
+or the request fails with a 500 (Apache parity: nothing falls back to /bin/sh).
 
 `App::resolveCgiBackend('/path/file.py', '/cgi-bin/file.py')` returns
 `['backend' => [...], 'mayExecute' => bool]` for a given path + URL. Full

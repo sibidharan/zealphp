@@ -130,6 +130,13 @@ regardless of extension. It takes the same `mode` / `interpreter` / `address` /
 App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3']);
 ```
 
+> **What ScriptAlias will run.** With no `interpreter`, a file is exec'd
+> directly, so it must be a **`#!` script or a compiled binary** (ELF/Mach-O).
+> Apache parity: anything else made `exec()` fail and `/bin/sh` ran the file as
+> a shell script, whatever it contained. It must also **not be world-writable**.
+> Group-writable is fine (deploy-group setups); only suexec refuses that.
+> Either failure is a 500 with the reason in the error log.
+
 > **Implicit URL routing is automatic for ScriptAlias prefixes.** `run()`
 > registers a `patternRoute('#^<prefix>/(?P<rest>.+?)/?$#', …)` for every
 > `cgiScriptAlias()` prefix (`registerImplicitRoutes()`), so a ScriptAlias-only
@@ -154,6 +161,59 @@ response.
 
 `HTTP_PROXY` is **never** forwarded (httpoxy / CVE-2016-5385 mitigation) —
 same as Apache's `mod_cgi`.
+
+**ZealPHP's own subprocess channels stay home by default.**
+`ZEALPHP_REQUEST_CONTEXT` is the JSON copy of the request — and of the
+server's environment, database passwords and API keys included — that
+`cgi_worker.php` uses to rebuild its superglobals. PHP-FPM builds its
+superglobals from the CGI params and needs none of it, so it is not sent to a
+FastCGI upstream, and neither are `ZEALPHP_CWD`, `ZEALPHP_CGI_DISPLAY_ERRORS`
+or `ZEALPHP_CGI_AUTOLOAD`. Opt in only for an upstream script that reads
+`ZEALPHP_REQUEST_CONTEXT`:
+
+```php
+App::fcgiForwardContext(true);   // or ZEALPHP_FCGI_FORWARD_CONTEXT=1
+```
+
+**Session strict mode reaches FPM.** Every request carries
+`PHP_VALUE: session.use_strict_mode=1` (or `=0`), following
+`App::$session_strict_mode` exactly as the `proc` / `pool` / `fork` subprocesses
+do. FPM otherwise reads `php.ini`, and Debian/Ubuntu ship strict mode off, so a
+client-chosen `PHPSESSID` was adopted. A `PHP_VALUE` in a backend's
+`fcgi_params` is appended after that line, so an explicit setting there wins.
+
+**Response parsing.** The header block ends at the first blank line, `CRLF` or
+bare `LF`, so a body that contains `CRLF CRLF` can never be read as headers. A
+`Status:` value must be a code in 100–599 (anything else is ignored), and an
+`END_REQUEST` whose `protocolStatus` is not `REQUEST_COMPLETE` (the upstream
+was overloaded or refused the role) is a **502**, not a response.
+
+---
+
+## The CGI pool is not a tenant boundary
+
+`cgiMode('pool' | 'proc' | 'fork' | 'fcgi')`, per-extension backends and
+per-domain routing (`HostRouterMiddleware` sending each of your domains to its
+own CGI backend) exist so **one owner** can run their sites — legacy apps
+included — side by side. Every script they run is that owner's code. ZealPHP
+does **not** isolate mutually distrusting tenants from each other: a script in
+a pool subprocess can read the files, environment and memory that subprocess
+can, a reused subprocess deliberately keeps some process state between
+requests — `ini_set()` values, constants and statics of code that stays
+loaded — so traditional apps run unmodified and fast (the keep-vs-reset
+choices are graded per app in
+[compatibility-database.md](compatibility-database.md)), and nothing stops a
+deliberately hostile script from interfering with the next request it shares a
+process with. Hosting customers who must not see each other needs separate
+OS users, containers or hosts, not separate backends.
+
+What the pool **does** guarantee is integrity against bugs in that code: one
+user's response, session, cookies or request input are never handed to the
+next user served by the same subprocess. Each request frame carries a fresh
+token the response must echo; bytes left on the response channel, a
+`body_length` over the 64 MB cap, or a frame that cannot decode get the
+subprocess killed and replaced (the request gets a **502**), and request
+frames over the cap are refused with a **413** before they reach a subprocess.
 
 ---
 

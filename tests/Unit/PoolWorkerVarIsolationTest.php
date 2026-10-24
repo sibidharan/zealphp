@@ -14,12 +14,13 @@ use PHPUnit\Framework\TestCase;
  * originally bare `$count`/`$maxRequests`: WordPress leaves a non-alphanumeric
  * global `$count`, so the worker's `$count++` emitted "Increment on
  * non-alphanumeric string" every request and the app could corrupt the
- * subprocess recycle counter. The fix renamed them `$__pw_count`/
- * `$__pw_max_requests`.
+ * subprocess recycle counter. #467 renamed them `$__pw_count`/
+ * `$__pw_max_requests`; C1 then moved them (and the response channel) into
+ * private statics, since any global is writable by the included script.
  *
  * This is a token-level contract test: no `$count`/`$maxRequests` may exist at
  * the file's TOP-LEVEL scope (function/closure bodies are fine — they have
- * their own scope), and the `$__pw_`-prefixed replacements must be present.
+ * their own scope), and neither may the loop-control state.
  */
 final class PoolWorkerVarIsolationTest extends TestCase
 {
@@ -59,9 +60,15 @@ final class PoolWorkerVarIsolationTest extends TestCase
         $this->assertArrayNotHasKey('$maxRequests', $vars,
             '#467 regression: bare $maxRequests at pool-worker global scope is app-corruptible recycle state');
 
-        $this->assertArrayHasKey('$__pw_count', $vars,
-            'the __pw_-prefixed request counter must exist at top level');
-        $this->assertArrayHasKey('$__pw_max_requests', $vars,
-            'the __pw_-prefixed recycle ceiling must exist at top level');
+        // C1 — the loop-control state moved off the global scope entirely
+        // (private statics of ZealPHP_Pool_State): a global, prefixed or not,
+        // is writable by the included script, which could null the response
+        // channel or rewind the recycle counter.
+        foreach (['$__pw_count', '$__pw_max_requests', '$__pw_fd3', '$__pw_mid_request'] as $name) {
+            $this->assertArrayNotHasKey($name, $vars,
+                "C1 regression: {$name} at pool-worker global scope is writable by the included script");
+        }
+        $this->assertStringContainsString('final class ZealPHP_Pool_State', $source);
+        $this->assertStringContainsString('while (ZealPHP_Pool_State::more())', $source);
     }
 }

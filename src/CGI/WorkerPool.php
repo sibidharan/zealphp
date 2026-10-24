@@ -57,12 +57,15 @@ final class WorkerPool
      * fd 3 frame without `body_fd`, or the whole frame on STDOUT with no fd 3
      * frame at all, are still read (see exchange()).
      *
-     * @var list<array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int}>
+     * @var list<array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int, proto: int}>
      */
     private array $workers = [];
 
     /** Most stray stdout / stderr kept per dispatch for the log; the rest is read and dropped. */
     private const DIAG_CAP_BYTES = 1024 * 1024;
+
+    /** Bytes per request-pipe write inside a coroutine (POSIX PIPE_BUF on Linux); see exchange(). */
+    private const PIPE_BUF = 4096;
 
     /**
      * Coroutine idle queue. Created lazily — Channel push REQUIRES coroutine
@@ -127,6 +130,24 @@ final class WorkerPool
             throw new \RuntimeException('WorkerPool: already closed');
         }
 
+        // C1 — a fresh token per request. A proto=2 subprocess echoes it in
+        // its response frame, so a frame some script wrote to fd 3 (it cannot
+        // know the token) is never taken for this request's response.
+        $token = bin2hex(random_bytes(8));
+        $request['_zp_token'] = $token;
+        $frame = IPC::encodeFrame($request);
+
+        // C4 — a frame over the IPC cap would be dropped by the subprocess
+        // (which then exits); refuse it here, before it costs a subprocess.
+        if (strlen($frame) - 4 > IPC::MAX_FRAME_BYTES) {
+            return [
+                'status'  => 413,
+                'body'    => 'WorkerPool: request exceeds the ' . IPC::MAX_FRAME_BYTES . '-byte IPC frame cap',
+                'headers' => [],
+                'cookies' => [],
+            ];
+        }
+
         $idx = $this->popIdleWorker($timeout);
         if ($idx === null) {
             return [
@@ -135,6 +156,30 @@ final class WorkerPool
                 'headers' => [],
                 'cookies' => [],
             ];
+        }
+
+        // A slot whose last spawn failed: start its subprocess now, or give
+        // the slot back and answer 503 rather than touch its dead pipes.
+        if (isset($this->spawnFailed[$idx])) {
+            $this->reapAndSpawn($idx);
+            if (isset($this->spawnFailed[$idx])) {
+                $this->returnToIdle($idx);
+                return [
+                    'status'  => 503,
+                    'body'    => 'WorkerPool: subprocess could not be started',
+                    'headers' => [],
+                    'cookies' => [],
+                ];
+            }
+        }
+
+        // C1 — anything already waiting on fd 3 was written after the previous
+        // response (a destructor during the reset, say) and belongs to no
+        // request. Reading it as this request's response would hand this user
+        // whatever that was. Replace the subprocess and serve on a clean one.
+        if (self::hasUnsolicitedBytes($this->workers[$idx])) {
+            self::logProtocolError($this->workers[$idx]['pid'], 'bytes on fd 3 between requests; subprocess replaced');
+            $this->replace($idx);
         }
 
         $w = $this->workers[$idx];
@@ -152,13 +197,30 @@ final class WorkerPool
         // The pool worker now sends the body on fd 3 after the frame
         // (`body_fd` = 3); STDOUT is diagnostics only and goes to the log, as
         // FPM's catch_workers_output does.
-        $io = $this->exchange($w, IPC::encodeFrame($request), $timeout);
+        $io = $this->exchange($w, $frame, $timeout, $w['proto'] >= 2 ? $token : null);
         $resp = $io['resp'];
         if ($io['stdout'] !== '') {
             self::logSubprocessOutput('stdout', $w['pid'], $io['stdout']);
         }
         if ($io['stderr'] !== '') {
             self::logSubprocessOutput('stderr', $w['pid'], $io['stderr']);
+        }
+
+        // C1 / C4 — the exchange did not add up: a frame without our token,
+        // bytes left over after the response, an over-cap body_length, or a
+        // corrupt frame. Whatever is still in the pipes would become the next
+        // user's response, so this subprocess is killed and replaced, and this
+        // request gets a 502.
+        if ($io['error'] !== null) {
+            self::logProtocolError($w['pid'], $io['error'] . '; subprocess replaced');
+            $this->replace($idx);
+            $this->returnToIdle($idx);
+            return [
+                'status'  => 502,
+                'body'    => 'WorkerPool: protocol error from subprocess (' . $io['error'] . ')',
+                'headers' => [],
+                'cookies' => [],
+            ];
         }
 
         $this->workers[$idx]['served']++;
@@ -230,6 +292,9 @@ final class WorkerPool
      * Run one request/response exchange with a subprocess over non-blocking
      * pipes: write `$frame` to stdin, read the response from fd 3, and drain
      * stdout + stderr throughout so the child can never block on a full pipe.
+     * The request write happens inside the same select loop, under the same
+     * deadline, in a coroutine too (C3): a child that is not reading its stdin
+     * costs one timed-out request, never a slot held forever.
      *
      * Response shapes accepted, in order of preference:
      *  - fd 3 frame with `body_fd` = 3: the body follows the frame on fd 3
@@ -239,15 +304,22 @@ final class WorkerPool
      *  - no fd 3, or fd 3 closed without a frame: a single legacy frame
      *    (metadata + body) on STDOUT.
      *
+     * Integrity (C1, C4): with a `$token` (proto=2 subprocess) the frame must
+     * carry it. Bytes left on the response channel after the response (fd 3,
+     * or STDOUT when STDOUT carried the body), a `body_length` over the cap,
+     * or a complete-but-undecodable frame set `error`; the caller then kills
+     * the subprocess, because those bytes would otherwise be read as the next
+     * request's response.
+     *
      * Returns `resp` = null on timeout or when every channel hit EOF before a
      * full response arrived (`eof` = true for the latter). `stdout` holds the STDOUT bytes not used as body,
      * `stderr` everything read from stderr (each capped at
      * self::DIAG_CAP_BYTES; the rest is read and discarded).
      *
-     * @param array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int} $w
-     * @return array{resp: array<mixed,mixed>|null, eof: bool, stdout: string, stderr: string}
+     * @param array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int, proto: int} $w
+     * @return array{resp: array<mixed,mixed>|null, eof: bool, stdout: string, stderr: string, error: string|null}
      */
-    private function exchange(array $w, string $frame, float $timeout): array
+    private function exchange(array $w, string $frame, float $timeout, ?string $token = null): array
     {
         $deadline = microtime(true) + $timeout;
         /** @var array<int, resource> $open */
@@ -259,55 +331,45 @@ final class WorkerPool
         $pending = $frame;
         $stdin = $w['stdin'];
         $resp = null;
+        $error = null;
         $stdoutBody = false; // true when the body is taken from the STDOUT buffer
-
-        if (Coroutine::getCid() > 0) {
-            // Under HOOK_ALL a non-blocking fwrite() that hits a full pipe
-            // fails and breaks the hooked stream instead of returning a short
-            // count, so a frame larger than the pipe buffer never arrives. A
-            // blocking write yields this coroutine until the child has read it.
-            // The child reads the whole frame before it runs anything, so the
-            // only output that could hold it up is what it already wrote while
-            // resetting after the previous request: take that first.
-            foreach ([1, 2] as $fd) {
-                $chunk = @fread($open[$fd], 65536);
-                if (is_string($chunk) && $chunk !== '') {
-                    $buf[$fd] .= $chunk;
-                }
-            }
-            stream_set_blocking($stdin, true);
-            while ($pending !== '') {
-                $n = @fwrite($stdin, $pending);
-                if (!is_int($n) || $n <= 0) {
-                    break; // broken pipe: the read loop below sees the EOFs
-                }
-                $pending = (string) substr($pending, $n);
-            }
-            stream_set_blocking($stdin, false);
-            $pending = '';
-        }
+        // Under HOOK_ALL a non-blocking fwrite() that hits a full pipe fails
+        // and breaks the hooked stream instead of returning a short count. So
+        // in a coroutine, write only once select reports the pipe writable and
+        // at most PIPE_BUF bytes at a time: a pipe that is writable has room
+        // for that much, so the write never meets a full pipe.
+        $chunk = Coroutine::getCid() > 0 ? self::PIPE_BUF : \PHP_INT_MAX;
 
         while (true) {
             // Parse whatever has arrived so far.
             if ($buf[3] !== '') {
                 $meta = self::parseFrame($buf[3]);
+                if ($meta === false) {
+                    $error = 'corrupt frame on fd 3';
+                    break;
+                }
                 if ($meta !== null) {
                     [$frameData, $used] = $meta;
                     $len = (isset($frameData['body_length']) && is_numeric($frameData['body_length']))
                         ? max(0, (int) $frameData['body_length'])
                         : 0;
                     if ($len > IPC::MAX_FRAME_BYTES) {
-                        $len = 0; // corrupted or hostile length — refuse the body
+                        // C4: a protocol error, not a body to zero and skip —
+                        // its bytes would stay in the pipe for the next request.
+                        $error = 'body_length ' . $len . ' exceeds the ' . IPC::MAX_FRAME_BYTES . '-byte cap';
+                        break;
                     }
                     if (($frameData['body_fd'] ?? null) === 3) {
                         if (strlen($buf[3]) - $used >= $len) {
                             $frameData['body'] = (string) substr($buf[3], $used, $len);
+                            $buf[3] = (string) substr($buf[3], $used + $len);
                             $resp = $frameData;
                             break;
                         }
                     } elseif (strlen($buf[1]) >= $len || !isset($open[1])) {
                         $frameData['body'] = (string) substr($buf[1], 0, $len);
                         $buf[1] = (string) substr($buf[1], $len);
+                        $buf[3] = (string) substr($buf[3], $used);
                         $stdoutBody = true;
                         $resp = $frameData;
                         break;
@@ -317,7 +379,7 @@ final class WorkerPool
             if ($w['fd3'] === null || (!isset($open[3]) && self::parseFrame($buf[3]) === null)) {
                 // Legacy single-channel frame on STDOUT.
                 $legacy = self::parseFrame($buf[1]);
-                if ($legacy !== null) {
+                if (is_array($legacy)) {
                     $resp = $legacy[0];
                     $buf[1] = (string) substr($buf[1], $legacy[1]);
                     $stdoutBody = true;
@@ -331,7 +393,10 @@ final class WorkerPool
 
             $writers = $pending !== '' ? [$stdin] : [];
             $except = null;
-            $wait = max(0.0, min(1.0, $deadline - microtime(true)));
+            // At least 1 ms: under HOOK_ALL a zero timeout is rejected by the
+            // coroutine timer ("msec value[0] is invalid") and the select then
+            // waits for the next event instead, which can be past the deadline.
+            $wait = max(0.001, min(1.0, $deadline - microtime(true)));
             $sec = (int) $wait;
             $sel = @stream_select($readers, $writers, $except, $sec, (int) (($wait - $sec) * 1_000_000));
             if ($sel === false) {
@@ -339,15 +404,17 @@ final class WorkerPool
                 continue;
             }
             if ($writers !== []) { // only selected while a request is pending
-                $n = @fwrite($stdin, $pending);
-                if (is_int($n) && $n > 0) {
+                $n = @fwrite($stdin, $chunk >= strlen($pending) ? $pending : substr($pending, 0, $chunk));
+                if ($n === false) {
+                    $pending = ''; // broken pipe: the reads below see the EOFs
+                } elseif ($n > 0) {
                     $pending = (string) substr($pending, $n);
                 }
             }
             foreach ($readers as $stream) {
                 $fd = (int) array_search($stream, $open, true);
-                $chunk = @fread($stream, 65536);
-                if ($chunk === false || $chunk === '') {
+                $data = @fread($stream, 65536);
+                if ($data === false || $data === '') {
                     if (feof($stream)) {
                         unset($open[$fd]); // EOF on this channel — stop selecting it
                     }
@@ -362,40 +429,55 @@ final class WorkerPool
                     default => self::DIAG_CAP_BYTES,
                 };
                 if (strlen($buf[$fd]) < $cap) {
-                    $buf[$fd] .= $chunk;
+                    $buf[$fd] .= $data;
                 }
             }
         }
 
-        // The response is in; pick up anything already sitting in the
-        // diagnostic pipes without waiting for more.
         if ($resp !== null) {
-            foreach ([1, 2] as $fd) {
+            // The response is in; pick up anything already sitting in the
+            // pipes without waiting for more.
+            foreach ([1, 2, 3] as $fd) {
                 if (!isset($open[$fd])) {
                     continue;
                 }
-                $chunk = @fread($open[$fd], 65536);
-                if (is_string($chunk) && $chunk !== '' && strlen($buf[$fd]) < self::DIAG_CAP_BYTES) {
-                    $buf[$fd] .= $chunk;
+                $data = @fread($open[$fd], 65536);
+                if (is_string($data) && $data !== '' && strlen($buf[$fd]) < self::DIAG_CAP_BYTES) {
+                    $buf[$fd] .= $data;
                 }
             }
+            if ($token !== null && ($resp['_zp_token'] ?? null) !== $token) {
+                $error = 'response frame without this request\'s token (a script wrote to fd 3?)';
+            } elseif ($buf[3] !== '') {
+                $error = strlen($buf[3]) . ' unread bytes on fd 3 after the response';
+            } elseif ($stdoutBody && $buf[1] !== '') {
+                $error = strlen($buf[1]) . ' unread bytes on stdout after the response';
+            }
+            unset($resp['_zp_token']);
+        }
+        if ($error !== null) {
+            $resp = null;
         }
 
         $stray = $buf[1];
-        if (!$stdoutBody && strlen($stray) > self::DIAG_CAP_BYTES) {
+        if ($stdoutBody) {
+            $stray = ''; // reported through `error` above, never as output
+        } elseif (strlen($stray) > self::DIAG_CAP_BYTES) {
             $stray = substr($stray, 0, self::DIAG_CAP_BYTES);
         }
 
-        return ['resp' => $resp, 'eof' => $open === [], 'stdout' => $stray, 'stderr' => $buf[2]];
+        return ['resp' => $resp, 'eof' => $open === [], 'stdout' => $stray, 'stderr' => $buf[2], 'error' => $error];
     }
 
     /**
      * Decode one complete length-prefixed frame from the front of `$buf`.
      *
-     * @return array{0: array<mixed,mixed>, 1: int}|null The frame and the bytes
-     *         it used, or null when `$buf` does not yet hold a complete, valid frame.
+     * @return array{0: array<mixed,mixed>, 1: int}|false|null The frame and the
+     *         bytes it used; null when `$buf` does not yet hold a complete frame;
+     *         false when it never will (a length outside 1..MAX_FRAME_BYTES, or a
+     *         complete frame that is not a JSON object).
      */
-    private static function parseFrame(string $buf): ?array
+    private static function parseFrame(string $buf): array|false|null
     {
         if (strlen($buf) < 4) {
             return null;
@@ -403,11 +485,37 @@ final class WorkerPool
         /** @var array{1:int} $u */
         $u = unpack('N', substr($buf, 0, 4));
         $len = $u[1];
-        if ($len <= 0 || $len > IPC::MAX_FRAME_BYTES || strlen($buf) < 4 + $len) {
+        if ($len <= 0 || $len > IPC::MAX_FRAME_BYTES) {
+            return false;
+        }
+        if (strlen($buf) < 4 + $len) {
             return null;
         }
         $decoded = json_decode(substr($buf, 4, $len), true);
-        return is_array($decoded) ? [$decoded, 4 + $len] : null;
+        return is_array($decoded) ? [$decoded, 4 + $len] : false;
+    }
+
+    /**
+     * True when the subprocess has written to fd 3 while no request was in
+     * flight. Never blocks: fd 3 is non-blocking.
+     *
+     * @param array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int, proto: int} $w
+     */
+    private static function hasUnsolicitedBytes(array $w): bool
+    {
+        if ($w['fd3'] === null) {
+            return false;
+        }
+        $data = @fread($w['fd3'], 65536);
+        return is_string($data) && $data !== '';
+    }
+
+    /** Log a broken exchange; the caller replaces the subprocess. */
+    private static function logProtocolError(int $pid, string $what): void
+    {
+        if (function_exists('ZealPHP\elog')) {
+            \ZealPHP\elog("[cgi_pool] subprocess {$pid}: {$what}", 'error');
+        }
     }
 
     /**
@@ -452,7 +560,10 @@ final class WorkerPool
             return;
         }
         $this->closed = true;
-        foreach ($this->workers as $w) {
+        foreach ($this->workers as $i => $w) {
+            if (isset($this->spawnFailed[$i])) {
+                continue;   // already reaped; its replacement never started
+            }
             @fclose($w['stdin']);   // signal EOF → subprocess exits its loop
             @fclose($w['stdout']);
             @fclose($w['stderr']);
@@ -537,7 +648,7 @@ final class WorkerPool
     }
 
     /**
-     * @param array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int} $w
+     * @param array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int, proto: int} $w
      */
     private function isAlive(array $w): bool
     {
@@ -591,7 +702,7 @@ final class WorkerPool
     }
 
     /**
-     * @return array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int}
+     * @return array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int, proto: int}
      */
     private function spawn(): array
     {
@@ -630,6 +741,7 @@ final class WorkerPool
         // deprecation warnings that PHP/OpenSwoole emit before READY (#133).
         $bootLines = '';
         $foundReady = false;
+        $proto = 1;
         $deadline = microtime(true) + 10.0; // 10s timeout
         while (microtime(true) < $deadline) {
             $line = fgets($pipes[2]);
@@ -640,6 +752,9 @@ final class WorkerPool
             }
             if (str_contains($line, 'READY')) {
                 $foundReady = true;
+                // `proto=2` (src/pool_worker.php): response frames echo the
+                // per-request token. Custom entries that predate it get none.
+                $proto = preg_match('/\bproto=(\d+)/', $line, $m) === 1 ? (int) $m[1] : 1;
                 break;
             }
             $bootLines .= $line;
@@ -674,6 +789,7 @@ final class WorkerPool
             'fd3'    => $fd3,
             'pid'    => $pid,
             'served' => 0,
+            'proto'  => $proto,
         ];
     }
 
@@ -685,6 +801,58 @@ final class WorkerPool
      */
     private function respawn(int $idx): void
     {
+        $this->reapAndSpawn($idx);
+        $this->returnToIdle($idx);
+    }
+
+    /**
+     * Slots whose replacement subprocess could not be started. The slot stays
+     * in the pool (it used to be lost for good, shrinking the pool with every
+     * failed spawn) and is spawned again when next checked out.
+     *
+     * @var array<int, true>
+     */
+    private array $spawnFailed = [];
+
+    /** Reap the slot's subprocess (unless already reaped) and start a new one; never throws. */
+    private function reapAndSpawn(int $idx): void
+    {
+        if (!isset($this->spawnFailed[$idx])) {
+            $this->reap($idx);
+        }
+        try {
+            $this->workers[$idx] = $this->spawn();
+            unset($this->spawnFailed[$idx]);
+        } catch (\Throwable $e) {
+            $this->spawnFailed[$idx] = true;
+            \ZealPHP\elog('WorkerPool: could not start a subprocess for slot ' . $idx . ': ' . $e->getMessage(), 'error');
+        }
+    }
+
+    /**
+     * Kill the subprocess at `$idx` (it is not trusted to exit by itself, and
+     * whatever it still writes must not reach anyone) and put a fresh one in
+     * its slot. Unlike respawn(), the slot is NOT returned to the idle pool:
+     * the caller is still holding it.
+     */
+    private function replace(int $idx): void
+    {
+        if (!isset($this->spawnFailed[$idx])) {
+            $old = $this->workers[$idx];
+            try {
+                if ($this->isAlive($old)) {
+                    @proc_terminate($old['proc'], 9);
+                }
+            } catch (\Throwable) {
+                // already gone
+            }
+        }
+        $this->reapAndSpawn($idx);
+    }
+
+    /** Close every pipe of the subprocess at `$idx` and wait for it to exit. */
+    private function reap(int $idx): void
+    {
         $old = $this->workers[$idx];
         @fclose($old['stdin']);
         @fclose($old['stdout']);
@@ -693,8 +861,5 @@ final class WorkerPool
             @fclose($old['fd3']);
         }
         @proc_close($old['proc']);
-
-        $this->workers[$idx] = $this->spawn();
-        $this->returnToIdle($idx);
     }
 }

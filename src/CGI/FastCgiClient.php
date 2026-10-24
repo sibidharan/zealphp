@@ -44,6 +44,9 @@ final class FastCgiClient
     public const FCGI_RESPONDER = 1;
     public const FCGI_KEEP_CONN = 1;
 
+    /** END_REQUEST protocolStatus for a request the upstream ran (FCGI 1.0 §5.5). */
+    public const FCGI_REQUEST_COMPLETE = 0;
+
     // ── Framing limits ──────────────────────────────────────────────────────
     public const MAX_CONTENT = 65535;
     public const HEADER_LEN  = 8;
@@ -336,6 +339,17 @@ final class FastCgiClient
                         if ($end !== false && is_int($end['appStatus'])) {
                             $appStatus = $end['appStatus'];
                         }
+                        // C13 — FCGI 1.0 §5.5: anything but REQUEST_COMPLETE
+                        // means the upstream did not run the request
+                        // (CANT_MPX_CONN, OVERLOADED, UNKNOWN_ROLE). Whatever
+                        // it put on STDOUT is not a response; fail as a 502
+                        // like any other upstream error.
+                        $protocolStatus = $end !== false && is_int($end['protocolStatus']) ? $end['protocolStatus'] : 0;
+                        if ($protocolStatus !== self::FCGI_REQUEST_COMPLETE) {
+                            throw new FastCgiException(
+                                "FastCGI: upstream rejected the request (protocolStatus {$protocolStatus})"
+                            );
+                        }
                     }
                     $done = true;
                     break;
@@ -352,9 +366,11 @@ final class FastCgiClient
     /**
      * Parse raw `STDOUT` bytes into status + headers + body.
      *
-     * CGI header block ends at first blank line (`CRLFCRLF` or `LFLF`).
-     * `Status:` header is extracted and removed (nginx: `ngx_http_fastcgi_module.c:648-656`;
-     * Apache: `ap_scan_script_header_err_brigade_ex`).
+     * The CGI header block ends at the FIRST blank line, `CRLF CRLF` or
+     * `LF LF` alike (see {@see self::splitHeaderBlock()}). `Status:` is
+     * extracted and removed (nginx: `ngx_http_fastcgi_module.c:648-656`;
+     * Apache: `ap_scan_script_header_err_brigade_ex`); only a 3-digit code in
+     * 100–599 is honoured, as in {@see Dispatcher::parseCgiResponse()}.
      *
      * @return array{status:int,headers:list<array{0:string,1:string}>,body:string,stderr:string}
      */
@@ -363,21 +379,12 @@ final class FastCgiClient
         $status  = 200;
         $headers = [];
 
-        // Split at blank line (CRLFCRLF preferred, LFLF fallback)
-        $sepPos = strpos($stdout, "\r\n\r\n");
-        if ($sepPos !== false) {
-            $headerBlock = substr($stdout, 0, $sepPos);
-            $body        = substr($stdout, $sepPos + 4);
-        } else {
-            $sepPos2 = strpos($stdout, "\n\n");
-            if ($sepPos2 !== false) {
-                $headerBlock = substr($stdout, 0, $sepPos2);
-                $body        = substr($stdout, $sepPos2 + 2);
-            } else {
-                // No blank line — treat everything as body
-                return ['status' => $status, 'headers' => $headers, 'body' => $stdout, 'stderr' => $stderr];
-            }
+        $split = self::splitHeaderBlock($stdout);
+        if ($split === null) {
+            // No blank line — treat everything as body
+            return ['status' => $status, 'headers' => $headers, 'body' => $stdout, 'stderr' => $stderr];
         }
+        [$headerBlock, $body] = $split;
 
         $lines = preg_split('/\r?\n/', $headerBlock) ?: [];
         foreach ($lines as $line) {
@@ -392,7 +399,12 @@ final class FastCgiClient
             $value = trim(substr($line, $colonPos + 1));
 
             if (strcasecmp($name, 'Status') === 0) {
-                $status = (int) $value; // "302 Found" → 302
+                // C13 — "302 Found" → 302. `(int)` turned "abc" into 0 and
+                // "99999" into 99999; an invalid code is ignored instead.
+                $code = self::statusCode($value);
+                if ($code !== null) {
+                    $status = $code;
+                }
                 continue;
             }
 
@@ -408,6 +420,46 @@ final class FastCgiClient
             'body'    => $body,
             'stderr'  => $stderr,
         ];
+    }
+
+    /**
+     * Split a CGI response into its header block and body at the FIRST blank
+     * line, whichever line ending it uses.
+     *
+     * C2 — searching for `CRLF CRLF` anywhere before falling back to `LF LF`
+     * let a script that writes LF-terminated headers, and a body that happens
+     * to contain `CRLF CRLF`, have part of its body parsed as headers
+     * (Location, Set-Cookie). The first empty line (`LF` or `CRLF` alone)
+     * ends the headers, as in Apache's ap_scan_script_header_err_core().
+     *
+     * @return array{0:string,1:string}|null `[headerBlock, body]`, or null when
+     *         there is no blank line at all
+     */
+    public static function splitHeaderBlock(string $raw): ?array
+    {
+        $offset = 0;
+        while (($nl = strpos($raw, "\n", $offset)) !== false) {
+            $lineLength = $nl - $offset;
+            if ($lineLength === 0 || ($lineLength === 1 && $raw[$offset] === "\r")) {
+                return [substr($raw, 0, $offset), substr($raw, $nl + 1)];
+            }
+            $offset = $nl + 1;
+        }
+        return null;
+    }
+
+    /**
+     * The status code of a CGI `Status:` value ("404 Not Found" → 404), or
+     * null unless it starts with a numeric code in 100–599 (RFC 3875 §6.3.3).
+     */
+    public static function statusCode(string $value): ?int
+    {
+        $codeStr = strtok($value, ' ');
+        if ($codeStr === false || !ctype_digit($codeStr)) {
+            return null;
+        }
+        $code = (int) $codeStr;
+        return $code >= 100 && $code <= 599 ? $code : null;
     }
 
     // ── Socket I/O ───────────────────────────────────────────────────────────

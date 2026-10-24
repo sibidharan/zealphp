@@ -2,11 +2,22 @@
 // ZealPHP CGI Worker — runs PHP files at true global scope for legacy app compatibility.
 //
 // Usage: `php cgi_worker.php /path/to/file.php`
-// Input:  stdin = POST body, env `ZEALPHP_REQUEST_CONTEXT` = JSON context
-// Output: stdout = response body, stderr = JSON metadata (one line, sent before body)
+// Input:  stdin = POST body; JSON request context on the fd named by
+//         `ZEALPHP_CGI_CONTEXT_FD` (Dispatcher passes fd 4), or in the env var
+//         `ZEALPHP_REQUEST_CONTEXT` when no fd is given
+// Output: stdout = response body; JSON metadata (one line, sent before the
+//         body) on the fd named by `ZEALPHP_CGI_META_FD` (fd 3), or on stderr
+//         when no fd is given
 //
-// Protocol: metadata is written to stderr FIRST (as a single JSON line),
-// then body streams to stdout. This enables SSE and streaming responses.
+// Protocol: metadata is written FIRST (as a single JSON line), then body
+// streams to stdout. This enables SSE and streaming responses.
+//
+// C7 — the metadata used to be the FIRST stderr line, so any earlier stderr
+// write (error_log(), a debug fwrite(STDERR)) took its place: the status and
+// headers were lost and a `header('Location: /login')` guard served the page
+// it was guarding. fd 3 carries nothing else.
+// C12 — the context used to ride a single env var, which exec() refuses past
+// ~128 KB (E2BIG): a large form post or cookie set made proc_open fail.
 //
 // This is a standalone subprocess entry point (not a class), already excluded
 // from PHPStan; its body runs in a forked `php cgi_worker.php` process and is
@@ -56,7 +67,46 @@ if (getenv('ZEALPHP_CGI_AUTOLOAD') === '1') {
     }
 }
 
-$__z_ctx = json_decode(getenv('ZEALPHP_REQUEST_CONTEXT') ?: '{}', true);
+// The parent names the fds it opened (it never relies on an fd being open by
+// accident: an inherited descriptor could be anything).
+$__z_fd_of = static function (string $var): ?int {
+    $v = getenv($var);
+    return is_string($v) && ctype_digit($v) && (int) $v > 2 ? (int) $v : null;
+};
+$__z_meta_fd = null;
+if (($__z_n = $__z_fd_of('ZEALPHP_CGI_META_FD')) !== null) {
+    $__z_meta_fd = @fopen('php://fd/' . $__z_n, 'w') ?: null;
+}
+$__z_ctx_json = null;
+if (($__z_n = $__z_fd_of('ZEALPHP_CGI_CONTEXT_FD')) !== null) {
+    $__z_ctx_fp = @fopen('php://fd/' . $__z_n, 'r');
+    if ($__z_ctx_fp !== false) {
+        $__z_ctx_json = (string) stream_get_contents($__z_ctx_fp);
+        fclose($__z_ctx_fp);
+    }
+    unset($__z_ctx_fp);
+}
+unset($__z_n, $__z_fd_of);
+$__z_ctx = json_decode($__z_ctx_json ?? (getenv('ZEALPHP_REQUEST_CONTEXT') ?: '{}'), true);
+unset($__z_ctx_json);
+
+/**
+ * Write the one metadata line: to the metadata fd when the parent opened one
+ * (C7), else to stderr (the protocol before fd 3, still used by direct
+ * invocations).
+ */
+function __z_write_meta(string $json): void
+{
+    global $__z_meta_fd;
+    if (is_resource($__z_meta_fd)) {
+        fwrite($__z_meta_fd, $json . "\n");
+        fflush($__z_meta_fd);
+        fclose($__z_meta_fd);
+        $__z_meta_fd = null;
+        return;
+    }
+    fwrite(STDERR, $json . "\n");
+}
 
 $_SERVER  = array_merge($_SERVER, $__z_ctx['server'] ?? []);
 $_GET     = $__z_ctx['get'] ?? [];
@@ -173,6 +223,11 @@ function __z_send_meta() {
             $payload['session_name'] = function_exists('session_name') && is_string(\session_name())
                 ? \session_name()
                 : 'PHPSESSID';
+            // C8 — the app's own cookie settings (session_set_cookie_params()
+            // / session.cookie_*), so the host's Set-Cookie matches them.
+            if (function_exists('session_get_cookie_params')) {
+                $payload['session_cookie'] = \session_get_cookie_params();
+            }
         }
     }
     // Universal return contract: surface the include's return value so the
@@ -182,7 +237,7 @@ function __z_send_meta() {
     if ($__z_has_return) {
         $payload['return_value'] = $__z_return_value;
     }
-    fwrite(STDERR, json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n");
+    __z_write_meta((string) json_encode($payload, JSON_UNESCAPED_SLASHES));
     // Errors queued while the metadata line was pending (see the error handler).
     global $__z_error_log;
     if (is_array($__z_error_log) && $__z_error_log !== []) {
@@ -537,14 +592,15 @@ if (!function_exists('virtual')) {
 // decision in ZEALPHP_CGI_DISPLAY_ERRORS (App::displayErrors(): off unless
 // ZEALPHP_DEV or an explicit App::displayErrors(true)). When on, errors are
 // shown in the page, HTML-escaped. When off, they go to stderr for the log;
-// errors raised before the metadata line is sent are queued, because the
-// parent reads the FIRST stderr line as that metadata.
+// errors raised before the metadata line is sent are queued when the metadata
+// itself rides stderr (no metadata fd), because the parent then reads the
+// FIRST stderr line as that metadata.
 $__z_display_errors = getenv('ZEALPHP_CGI_DISPLAY_ERRORS') === '1';
 /** @var list<string> $__z_error_log */
 $__z_error_log = [];
 
 set_error_handler(function($severity, $message, $file, $line) {
-    global $__z_display_errors, $__z_meta_sent, $__z_error_log;
+    global $__z_display_errors, $__z_meta_sent, $__z_error_log, $__z_meta_fd;
     if ((error_reporting() & $severity) === 0) {
         // @-suppressed or masked: let PHP's handler record it for
         // error_get_last() — it displays nothing for these.
@@ -562,7 +618,7 @@ set_error_handler(function($severity, $message, $file, $line) {
         return true;
     }
     $entry = "PHP {$label}: {$message} in {$file} on line {$line}\n";
-    if ($__z_meta_sent) {
+    if ($__z_meta_sent || is_resource($__z_meta_fd)) {
         fwrite(STDERR, $entry);
         return true;
     }
@@ -577,7 +633,7 @@ set_error_handler(function($severity, $message, $file, $line) {
 
 $__z_file = $argv[1] ?? null;
 if (!$__z_file || !file_exists($__z_file)) {
-    fwrite(STDERR, json_encode(['status_code' => 404, 'headers' => [], 'cookies' => [], 'rawcookies' => []]) . "\n");
+    __z_write_meta((string) json_encode(['status_code' => 404, 'headers' => [], 'cookies' => [], 'rawcookies' => []]));
     echo '<pre>404 Not Found</pre>';
     exit(1);
 }

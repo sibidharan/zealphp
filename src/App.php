@@ -796,6 +796,21 @@ class App
      */
     public static string $fcgi_address = '127.0.0.1:9000';
     /**
+     * Whether `cgiMode('fcgi')` / fcgi backends send ZealPHP's own subprocess
+     * channels to the FastCGI upstream: `ZEALPHP_REQUEST_CONTEXT` (a JSON copy
+     * of the request AND of the server's environment, which `cgi_worker.php`
+     * uses to rebuild superglobals), `ZEALPHP_CWD`, `ZEALPHP_CGI_DISPLAY_ERRORS`
+     * and `ZEALPHP_CGI_AUTOLOAD`. PHP-FPM builds its superglobals from the CGI
+     * params themselves and needs none of them.
+     *
+     * Default `false` (C6): only the CGI/1.1 params, `SCRIPT_FILENAME`,
+     * `SCRIPT_NAME`, `PHP_VALUE` and the backend's own `fcgi_params` are sent,
+     * so the server's environment (database passwords, API keys) never reaches
+     * the upstream's `$_SERVER`. Set `true` (or `ZEALPHP_FCGI_FORWARD_CONTEXT=1`)
+     * only for an upstream script that reads `ZEALPHP_REQUEST_CONTEXT`.
+     */
+    public static bool $fcgi_forward_context = false;
+    /**
      * Subprocess count for `cgiMode('pool')` — the native FCGI-style worker
      * pool. Each OpenSwoole worker process spawns this many persistent PHP
      * subprocesses on first dispatch (lazy). FPM `pm.max_children` parity:
@@ -841,6 +856,7 @@ class App
     public static bool $cgi_pool_size_set = false;
     public static bool $cgi_timeout_set = false;
     public static bool $fcgi_address_set = false;
+    public static bool $fcgi_forward_context_set = false;
     public static bool $cgi_fork_max_concurrent_set = false;
     /**
      * Whether `cgi_worker.php` (proc-mode subprocess entry) loads Composer's
@@ -3450,6 +3466,23 @@ class App
     }
 
     /**
+     * Opt in to sending ZealPHP's subprocess channels (`ZEALPHP_REQUEST_CONTEXT`,
+     * which carries a copy of the server's environment, plus `ZEALPHP_CWD`,
+     * `ZEALPHP_CGI_DISPLAY_ERRORS`, `ZEALPHP_CGI_AUTOLOAD`) to the FastCGI
+     * upstream. Default off; PHP-FPM needs none of them. No-arg returns the
+     * current value. Env: `ZEALPHP_FCGI_FORWARD_CONTEXT` (applied at boot
+     * unless set explicitly here). See `App::$fcgi_forward_context`.
+     */
+    public static function fcgiForwardContext(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$fcgi_forward_context = $on;
+            self::$fcgi_forward_context_set = true;
+        }
+        return self::$fcgi_forward_context;
+    }
+
+    /**
      * Max seconds to wait for a `proc`-mode CGI subprocess to emit its metadata
      * line before SIGTERM/SIGKILL. Apache `CGIScriptTimeout` parity. Default 60.
      * No-arg returns the current value; with-arg sets and returns it. Env:
@@ -3496,6 +3529,7 @@ class App
      * | `ZEALPHP_CGI_MAX_REQUESTS`     | `cgi_pool_max_requests` | `cgiPoolMaxRequests()` |
      * | `ZEALPHP_CGI_TIMEOUT`          | `cgi_timeout`           | `cgiTimeout()` |
      * | `ZEALPHP_FCGI_ADDRESS`        | `fcgi_address`          | `fcgiAddress()` |
+     * | `ZEALPHP_FCGI_FORWARD_CONTEXT` | `fcgi_forward_context` | `fcgiForwardContext()` |
      * | `ZEALPHP_CGI_FORK_MAX_CONCURRENT` | `cgi_fork_max_concurrent` | `cgiForkMaxConcurrent()` |
      */
     public static function resolveCgiEnv(): void
@@ -3530,6 +3564,12 @@ class App
             $v = getenv('ZEALPHP_FCGI_ADDRESS');
             if (is_string($v) && $v !== '') {
                 self::$fcgi_address = $v;
+            }
+        }
+        if (!self::$fcgi_forward_context_set) {
+            $v = getenv('ZEALPHP_FCGI_FORWARD_CONTEXT');
+            if (is_string($v) && $v !== '') {
+                self::$fcgi_forward_context = filter_var($v, FILTER_VALIDATE_BOOLEAN);
             }
         }
     }

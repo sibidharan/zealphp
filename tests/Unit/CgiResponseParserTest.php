@@ -94,11 +94,14 @@ final class CgiResponseParserTest extends TestCase
     public function testNoHeadersBlankLineFirstIsAllBody(): void
     {
         // Raw starts with the blank line -> empty header block, rest is body.
-        $raw = "\r\n\r\nthis is all body";
+        // C2: the FIRST blank line ends the headers, so the second CRLF is
+        // already body (Apache ap_scan_script_header_err_core() parity).
+        $raw = "\r\nthis is all body";
         $r = App::parseCgiResponse($raw);
         $this->assertNull($r['status']);
         $this->assertSame([], $r['headers']);
         $this->assertSame('this is all body', $r['body']);
+        $this->assertSame("\r\nbody", App::parseCgiResponse("\r\n\r\nbody")['body']);
     }
 
     public function testBodyContainingBlankLinesOnlyFirstSeparatorSplits(): void

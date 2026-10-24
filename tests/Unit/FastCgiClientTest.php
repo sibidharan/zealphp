@@ -516,15 +516,15 @@ class FastCgiClientTest extends TestCase
         fclose($b);
     }
 
-    public function testMalformedEndRequestProtocolStatusIgnored(): void
+    public function testNonCompleteEndRequestProtocolStatusIsAnUpstreamError(): void
     {
-        // END_REQUEST with a non-zero protocolStatus byte (e.g. 2 = UNKNOWN_ROLE).
-        // The client must still set $done=true and return parsed output; it does
-        // NOT throw — unknown protocol status is a soft signal per spec §5.5.
+        // C13 — END_REQUEST with a non-zero protocolStatus (here 2 =
+        // OVERLOADED) means the upstream did not run the request (FCGI 1.0
+        // §5.5). It used to be ignored and whatever was on STDOUT served as a
+        // 200; it is now a FastCgiException, which cgiFcgi() maps to a 502.
         $stdoutContent = "Content-Type: text/plain\r\n\r\nresult";
         $stdoutRecord  = $this->client->encodeRecord(FastCgiClient::FCGI_STDOUT, 1, $stdoutContent);
         $stdoutEnd     = $this->client->encodeRecord(FastCgiClient::FCGI_STDOUT, 1, '');
-        // protocolStatus = 2 (UNKNOWN_ROLE) — non-zero but still well-formed END_REQUEST
         $endBody   = pack('NCC', 0, 2, 0) . "\x00\x00\x00";
         $endRecord = $this->client->encodeRecord(FastCgiClient::FCGI_END_REQUEST, 1, $endBody);
 
@@ -532,12 +532,32 @@ class FastCgiClientTest extends TestCase
         fwrite($a, $stdoutRecord . $stdoutEnd . $endRecord);
         fclose($a);
 
-        $conn   = $this->wrapSocket($b);
-        $result = $this->invokeReadResponse($conn, 1);
-        fclose($b);
+        $conn = $this->wrapSocket($b);
+        try {
+            $this->invokeReadResponse($conn, 1);
+            $this->fail('a non-complete protocolStatus must not be served');
+        } catch (FastCgiException $e) {
+            $this->assertStringContainsString('protocolStatus 2', $e->getMessage());
+        } finally {
+            fclose($b);
+        }
+    }
 
-        $this->assertSame(200, $result['status']);
-        $this->assertSame('result', $result['body']);
+    public function testRequestCompleteEndRequestIsServed(): void
+    {
+        $stdoutRecord = $this->client->encodeRecord(FastCgiClient::FCGI_STDOUT, 1, "Status: 201 Created\r\n\r\nok");
+        $endRecord    = $this->client->encodeRecord(
+            FastCgiClient::FCGI_END_REQUEST,
+            1,
+            pack('NCC', 0, FastCgiClient::FCGI_REQUEST_COMPLETE, 0) . "\x00\x00\x00"
+        );
+        [$a, $b] = $this->makeSocketPair();
+        fwrite($a, $stdoutRecord . $endRecord);
+        fclose($a);
+        $result = $this->invokeReadResponse($this->wrapSocket($b), 1);
+        fclose($b);
+        $this->assertSame(201, $result['status']);
+        $this->assertSame('ok', $result['body']);
     }
 
     public function testAbortDuringParamsServerClosesMidStream(): void
