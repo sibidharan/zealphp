@@ -24,7 +24,10 @@ class LegacyExtVersionAdvisoryTest extends TestCase
     public function testCurrentAndNewerExtArePassed(): void
     {
         $this->assertNull(App::legacyExtVersionAdvisory(true, true, App::MIN_EXT_VERSION_COROUTINE_LEGACY));
-        $this->assertNull(App::legacyExtVersionAdvisory(true, true, '0.4.0'));
+        // A version newer than the minimum: bump its last component.
+        $parts = explode('.', App::MIN_EXT_VERSION_COROUTINE_LEGACY);
+        $parts[count($parts) - 1] = (string) ((int) end($parts) + 1);
+        $this->assertNull(App::legacyExtVersionAdvisory(true, true, implode('.', $parts)));
     }
 
     public function testOtherModesAreNotGated(): void
