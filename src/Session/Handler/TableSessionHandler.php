@@ -159,7 +159,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
         // and zeal_session_destroy() call this once per request; the snapshot is
         // also dropped when the coroutine ends (see remember()), so a request
         // that never closes its session cannot grow the map either (#182).
-        unset($this->context[Coroutine::getCid()]);
+        unset($this->context[\ZealPHP\RequestContext::ownerCid()]);
         return true;
     }
 
@@ -207,7 +207,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
         $writeLock = $this->lockFor($sessionId);
 
         /** @var array{base: array<mixed,mixed>, version: int} $ctx */
-        $ctx = $this->context[Coroutine::getCid()][$sessionId] ?? ['base' => [], 'version' => 0];
+        $ctx = $this->context[\ZealPHP\RequestContext::ownerCid()][$sessionId] ?? ['base' => [], 'version' => 0];
         $base = $ctx['base'];
         $expectedVersion = $ctx['version'];
         $local = $this->decode($data);
@@ -236,7 +236,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
                         // destroyed (logout) or rotated since our read. Writing
                         // would bring it back — refuse (destroy() takes this
                         // same lock, so this check cannot race it).
-                        unset($this->context[Coroutine::getCid()][$sessionId]);
+                        unset($this->context[\ZealPHP\RequestContext::ownerCid()][$sessionId]);
                         return false;
                     }
                 }
@@ -294,7 +294,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
         } finally {
             $writeLock->set(0);
         }
-        unset($this->context[Coroutine::getCid()][$sessionId]);
+        unset($this->context[\ZealPHP\RequestContext::ownerCid()][$sessionId]);
         return true;
     }
 
@@ -373,8 +373,16 @@ final class TableSessionHandler implements \SessionHandlerInterface
      */
     private function remember(string $sessionId, array $base, int $version): void
     {
-        $cid = Coroutine::getCid();
-        if ($cid > 0 && !isset($this->context[$cid])) {
+        $cid = \ZealPHP\RequestContext::ownerCid();
+        // A fire-and-forget child that outlives its request: the owner's
+        // cleanup already ran, so key this snapshot to the child itself.
+        if ($cid !== Coroutine::getCid() && !Coroutine::exists($cid)) {
+            $cid = Coroutine::getCid();
+        }
+        // The cleanup must run when the REQUEST ends: register it only from the
+        // owning coroutine (a child's defer fires when the child ends). A
+        // child-first read is still dropped by close() at write_close.
+        if ($cid > 0 && !isset($this->context[$cid]) && $cid === Coroutine::getCid()) {
             Coroutine::defer(function () use ($cid): void {
                 unset($this->context[$cid]);
             });
@@ -382,10 +390,48 @@ final class TableSessionHandler implements \SessionHandlerInterface
         $this->context[$cid][$sessionId] = ['base' => $base, 'version' => $version];
     }
 
+    /**
+     * True only when no process has this pid. kill(pid, 0) also fails with
+     * EPERM for a LIVE process of another user; only ESRCH means it is gone.
+     */
+    private static function processIsGone(int $pid): bool
+    {
+        if (!function_exists('posix_kill') || @posix_kill($pid, 0)) {
+            return false;
+        }
+        return posix_get_last_error() === 3;   // ESRCH
+    }
+
+    /** Longest a request waits for a shard lock before failing its session write. */
+    public static float $lockTimeoutSeconds = 5.0;
+
+    /**
+     * Take a shard lock. The lock holds the owner's pid, so a lock left behind
+     * by a worker that died mid-write (it used to wedge that shard's sessions
+     * forever) is reclaimed. A lock a LIVE process still holds past
+     * $lockTimeoutSeconds fails this request's session I/O instead of
+     * blocking the worker indefinitely.
+     */
     private function acquire(Atomic $lock): void
     {
+        $me = getmypid() ?: 1;
         $spin = 100; // microseconds
-        while (!$lock->cmpset(0, 1)) {
+        $start = microtime(true);
+        $deadline = $start + self::$lockTimeoutSeconds;
+        $nextProbe = $start + 0.1;   // a dead holder is reclaimed after ~100 ms, not the full timeout
+        while (!$lock->cmpset(0, $me)) {
+            $now = microtime(true);
+            if ($now >= $nextProbe) {
+                $nextProbe = $now + 0.1;
+                $holder = $lock->get();
+                if ($holder > 0 && $holder !== $me && self::processIsGone($holder) && $lock->cmpset($holder, $me)) {
+                    return;   // the holder is gone: reclaim its lock
+                }
+            }
+            if ($now >= $deadline) {
+                throw new \RuntimeException('TableSessionHandler: session shard lock held by pid ' . $lock->get() . ' for over '
+                    . self::$lockTimeoutSeconds . 's; failing this session write');
+            }
             if (Coroutine::getCid() > 0) {
                 Coroutine::usleep($spin);
             } else {
@@ -501,6 +547,15 @@ final class TableSessionHandler implements \SessionHandlerInterface
     {
         $file = self::$savePath . '/sess_' . basename((string) $sessionId);
         if (!is_file($file)) return '';
+        // An expired session stays expired: the backing file outlives its Table
+        // row (its expired row was just deleted, or a worker restart emptied
+        // the Table), and promoting it would hand the session a fresh TTL until
+        // the next GC. Writes refresh the mtime, so mtime + TTL is the expiry.
+        $mtime = @filemtime($file);
+        if ($mtime !== false && $mtime + self::$ttl <= time()) {
+            @unlink($file);
+            return '';
+        }
         $fp = @fopen($file, 'r');
         if (!$fp) return '';
         try {
@@ -540,7 +595,9 @@ final class TableSessionHandler implements \SessionHandlerInterface
             if (is_string($disk) && $disk !== '') {
                 $diskData = $this->decode($disk);
                 if ($diskData !== []) {
-                    $merged = array_merge($diskData, $this->decode($data));
+                    // array_replace, not array_merge: integer keys ($_SESSION[5])
+                    // must keep their key, not be renumbered from 0.
+                    $merged = array_replace($diskData, $this->decode($data));
                     foreach ($deletedKeys as $dk) {
                         unset($merged[$dk]);
                     }
