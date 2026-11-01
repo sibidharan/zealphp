@@ -9784,6 +9784,16 @@ class App
         ) {
             (\zealphp_coroutine_superglobals(...))((bool) true);
             self::$coroutine_isolated_superglobals = true;
+            // The ext's per-coroutine class-static stage runs as soon as its
+            // coroutine hooks are on — not only under coroutineStaticsIsolation.
+            // Without this the framework's own statics (App::$instance, the
+            // route tables, the connection turnstile) are re-parked to their
+            // compile-time templates on every yield and the WebSocket close
+            // handler sees App::instance() === null (observed with
+            // App::mode('coroutine') + App::superglobals(true)).
+            if (\function_exists('zealphp_shared_static_classes')) {
+                (\zealphp_shared_static_classes(...))(['ZealPHP\\']);
+            }
 
             // Per-coroutine putenv/getenv: capture the boot environment with the
             // REAL getenv (before overriding to avoid recursion), then route
