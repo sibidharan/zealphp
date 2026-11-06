@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Output-escaping helpers** (#509): `ZealPHP\e()` for HTML text and quoted attributes, plus `ZealPHP\Escape::url()`, `safeUrl()` (refuses `javascript:`/`data:` and similar), `js()` (JSON safe inside `<script>`) and `raw()` for trusted markup. See [Escaping output](docs/templates-and-rendering.md#escaping-output).
+
+### Documentation
+- **`App::render()`'s echo side effect is documented and pinned by tests** (#509), including the nested-template pitfall: `<?= App::render('child') ?>` prints the child twice. Use `App::renderToString()` to compose.
+
+### Fixed
+- **`App::renderHtmx()` honours an explicit `$fragmentName`** (#509). A `fragment` key already in `$args` used to win over it.
+- **`App::renderHtmx()` always renders the full page for non-htmx requests** (#509), even when `$args` holds a `fragment` key.
+
 ## [0.4.17] - 2026-10-24
 
 Second security release in the PHP2Shell series: the findings deferred from 0.4.16 (CGI modes, session-store lows, ext-zealphp isolation) plus a Mythos 5.1 review of these fixes themselves. Each fix has a test that fails on 0.4.16. coroutine-legacy now requires **ext-zealphp 0.4.1**.

@@ -29,7 +29,7 @@
         <tr><td><code>string</code></td><td>HTML body, 200 OK</td><td><code>return '&lt;h1&gt;Hello&lt;/h1&gt;';</code></td></tr>
         <tr><td><code>array</code> / <code>object</code></td><td>JSON-encoded, <code>Content-Type: application/json</code></td><td><code>return ['ok' =&gt; true];</code></td></tr>
         <tr><td><code>\Generator</code></td><td>Streaming — each <code>yield</code> sent immediately</td><td><code>yield "&lt;li&gt;{$row-&gt;name}&lt;/li&gt;";</code></td></tr>
-        <tr><td><code>void</code> + <code>echo</code></td><td>Captured output buffer becomes the body</td><td><code>echo App::render(...);</code></td></tr>
+        <tr><td><code>void</code> + <code>echo</code></td><td>Captured output buffer becomes the body</td><td><code>App::render(...);</code></td></tr>
         <tr><td><code>ResponseInterface</code></td><td>PSR-7 passthrough — sent verbatim</td><td><code>return new \OpenSwoole\Core\Psr\Response($body, 200);</code></td></tr>
       </tbody>
     </table>

@@ -205,6 +205,53 @@ PHP);
     }
 
     // ──────────────────────────────────────────────────────────────
+    // #509 — fragment precedence between $fragmentName, $args, and headers.
+    // ──────────────────────────────────────────────────────────────
+
+    public function testExplicitFragmentNameOverridesFragmentInArgs(): void
+    {
+        // #509 — `$args + ['fragment' => …]` kept the left-hand key, so an
+        // existing $args['fragment'] silently beat the explicit argument.
+        $this->request(['hx-request' => 'true']);
+        $output = $this->render('page', ['fragment' => 'results'], 'search');
+        $this->assertSame('[SEARCH-PARTIAL]', trim($output));
+        $this->assertStringNotContainsString('[RESULTS-PARTIAL]', $output);
+    }
+
+    public function testFragmentInArgsIsUsedWhenNoExplicitName(): void
+    {
+        $this->request(['hx-request' => 'true']);
+        $output = $this->render('page', ['fragment' => 'results']);
+        $this->assertSame('[RESULTS-PARTIAL]', trim($output));
+    }
+
+    public function testFragmentInArgsBeatsHeaderDerivedFragment(): void
+    {
+        // A caller-supplied fragment is an explicit choice; HX-Target is a guess.
+        $this->request(['hx-request' => 'true', 'hx-target' => '#search']);
+        $output = $this->render('page', ['fragment' => 'results']);
+        $this->assertSame('[RESULTS-PARTIAL]', trim($output));
+    }
+
+    public function testNonHtmxRequestIgnoresFragmentInArgs(): void
+    {
+        // #509 — a non-htmx request must get the full page even when $args
+        // carries a fragment key; otherwise a normal page load returns a region.
+        $this->request([]);
+        $output = $this->render('page', ['fragment' => 'results']);
+        $this->assertStringContainsString('<shell>', $output);
+        $this->assertStringContainsString('[RESULTS-PARTIAL]', $output);
+        $this->assertStringContainsString('[SEARCH-PARTIAL]', $output);
+    }
+
+    public function testNoRequestInScopeIgnoresFragmentInArgs(): void
+    {
+        $output = $this->render('page', ['fragment' => 'search']);
+        $this->assertStringContainsString('<shell>', $output);
+        $this->assertStringContainsString('[RESULTS-PARTIAL]', $output);
+    }
+
+    // ──────────────────────────────────────────────────────────────
     // Return contract — renderHtmx() passes App::render()'s return through.
     // ──────────────────────────────────────────────────────────────
 
