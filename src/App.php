@@ -1795,6 +1795,10 @@ class App
      */
     public static function init($host = '0.0.0.0', $port = 8080, $cwd=null): App
     {
+        // `php app.php key:generate` needs nothing from the app: answer it
+        // before anything boots (route files, stores, boot checks).
+        \ZealPHP\CLI::handleEarlyCommands();
+
         // ZEALPHP_STORE_BACKEND=redis flips Store + Counter to the Redis backend
         // BEFORE app.php's Store::make() calls run. This was previously in
         // App::run(), which fired AFTER app.php had already made its tables
