@@ -6265,6 +6265,9 @@ class App
         }
     }
 
+    /** Set via {@see App::componentBinder()}. */
+    private static ?Component\ComponentBinder $component_binder = null;
+
     /**
      * Register classes to compile at worker start so they are never cold-
      * autoloaded under request concurrency (coroutine-legacy mode). Call BEFORE
@@ -7782,6 +7785,148 @@ class App
             echo $result;
         }
         return $result;
+    }
+
+    /**
+     * The binder that makes components interactive: {@see Component\HtmxBinder}
+     * by default, {@see Component\FormBinder} for pages without JavaScript, or
+     * your own {@see Component\ComponentBinder}. Pass one to set it (before
+     * `App::run()`); call with no argument to read it.
+     */
+    public static function componentBinder(?Component\ComponentBinder $binder = null): Component\ComponentBinder
+    {
+        if ($binder !== null) {
+            self::$component_binder = $binder;
+        }
+        return self::$component_binder ??= new Component\HtmxBinder();
+    }
+
+    /**
+     * Register server-driven components (#509). Call before `App::run()`.
+     *
+     * Each entry is a class (its name defaults to the kebab-case short name:
+     * `TodoList` → `todo-list`) or a `'name' => Class::class` pair. Only
+     * registered components are reachable from the browser. Classes are
+     * loaded and reflected here, in the master, so workers start with them
+     * compiled (no cold autoload under concurrency).
+     *
+     * ```php
+     * App::components([Counter::class, 'signup' => SignupForm::class]);
+     * ```
+     *
+     * @param array<int|string, class-string<Component\Component>> $components
+     */
+    public static function components(array $components): void
+    {
+        // Load the framework's component classes here too, in the master, so
+        // no request compiles them cold (coroutine-legacy's first-concurrent-
+        // wave race hits classes with extends/implements).
+        foreach ([
+            Component\Component::class, Component\ComponentBinder::class, Component\FormBinder::class,
+            Component\HtmxBinder::class, Component\ComponentException::class, Component\ValidationException::class,
+            Component\Endpoint::class, Component\Snapshot::class, Component\Attr::class, Component\Validator::class,
+            Component\Type::class, Component\Model::class, Component\Action::class, Component\Outcome::class,
+            AppKey::class, SafeHtml::class, Escape::class,
+        ] as $framework) {
+            class_exists($framework) || interface_exists($framework) || enum_exists($framework);
+        }
+        self::componentBinder();
+        foreach ($components as $name => $class) {
+            Component\Registry::register($class, is_string($name) ? $name : null);
+        }
+    }
+
+    /**
+     * Render a registered component for the page. Returns markup, never echoes:
+     * use `<?= App::component(…) ?>` in a template.
+     *
+     * `$props` sets initial public properties before `mount()` runs. `$key`
+     * names this instance (default: a per-request counter); give a stable key
+     * when the same component appears more than once or must keep its state
+     * across a no-JS form round trip.
+     *
+     * @param string               $component a registered class or name
+     * @param array<string, mixed> $props
+     */
+    public static function component(string $component, array $props = [], ?string $key = null): SafeHtml
+    {
+        $depth = RequestContext::instance()->memo['_zc_depth'] ?? 0;
+        if (is_int($depth) && $depth > 0) {
+            // A parent's requests would carry the child's snapshot too.
+            throw new \LogicException('Components cannot be nested yet: render ' . $component . ' outside other components');
+        }
+        $meta = Component\Registry::byName($component);
+        if ($meta === null && class_exists($component)) {
+            /** @var class-string<Component\Component> $component */
+            $meta = Component\Registry::byClass($component);
+        }
+        if ($meta === null) {
+            throw new \LogicException("Component {$component} is not registered; add it with App::components()");
+        }
+        if ($key === null) {
+            $g = RequestContext::instance();
+            $seq = $g->memo['_zc_seq'] ?? [];
+            $seq = is_array($seq) ? $seq : [];
+            $n = (is_int($seq[$meta->name] ?? null) ? $seq[$meta->name] : 0) + 1;
+            $seq[$meta->name] = $n;
+            $g->memo['_zc_seq'] = $seq;
+            $key = (string) $n;
+        } elseif (preg_match('/^[A-Za-z0-9_-]{1,64}$/', $key) !== 1) {
+            throw new \InvalidArgumentException('Component key must be 1-64 letters, digits, - or _');
+        }
+        $id = $meta->name . '-' . $key;
+
+        // A no-JS action left its result in the session (Post/Redirect/Get).
+        $flashed = Component\Endpoint::takeFlash($id);
+        $instance = null;
+        if ($flashed !== null) {
+            try {
+                $snapshot = Component\Snapshot::decode($flashed, $meta);
+                if ($snapshot->id === $id) {
+                    $instance = Component\Component::zcRestore($meta, $snapshot);
+                }
+            } catch (Component\ComponentException) {
+                $instance = null; // stale or foreign: mount fresh
+            }
+        }
+        $instance ??= Component\Component::zcMount($meta, $props, $id);
+        return new SafeHtml($instance->zcToHtml());
+    }
+
+    /**
+     * How long a component snapshot stays valid, in seconds (default 24 hours;
+     * 0 = no limit). Older snapshots are refused like ones from another build,
+     * so the page refreshes. This bounds how long an old snapshot can be
+     * replayed; see docs/live-components.md#security.
+     */
+    public static function componentMaxAge(?int $seconds = null): int
+    {
+        return Component\Snapshot::maxAge($seconds);
+    }
+
+    /**
+     * Boot-time check for the components signing key: none needed without
+     * components; in dev mode a missing key becomes a per-boot random one;
+     * otherwise a missing key refuses to boot.
+     *
+     * @return string|null an advisory to log
+     * @throws \RuntimeException when components are registered without a key outside dev mode
+     */
+    public static function componentKeyBootCheck(): ?string
+    {
+        if (Component\Registry::isEmpty() || AppKey::current() !== null) {
+            return null;
+        }
+        if (self::devReload()) {
+            AppKey::useEphemeral();
+            return '[components] ZEALPHP_APP_KEY is not set; using a random key for this boot (dev mode). '
+                . 'Pages opened before a restart reload when next used. Set ZEALPHP_APP_KEY for production '
+                . '(`php app.php key:generate`).';
+        }
+        throw new \RuntimeException(
+            'Components are registered but ZEALPHP_APP_KEY is not set. Generate one with '
+            . '`php app.php key:generate` and export it, or run with --dev for a temporary key.'
+        );
     }
 
     /**
@@ -9693,6 +9838,13 @@ class App
 
         $this->registerImplicitRoutes();
 
+        // #509 — components sign their state with ZEALPHP_APP_KEY. Checked after
+        // route files (which may register components), in the master, so every
+        // worker inherits the same key.
+        if (($componentKeyAdvisory = self::componentKeyBootCheck()) !== null) {
+            error_log($componentKeyAdvisory);
+        }
+
         // Complete the reload baseline now that the implicit routes are
         // registered: keep them as data (closures survive) so reloadRoutes()
         // re-appends them after the re-included route files, in priority order.
@@ -10225,6 +10377,21 @@ class App
                     $api->die($e);
                 }
             });
+        }
+
+        # #509 — the server-driven component endpoint, only when components
+        # are registered. POST only: snapshots stay out of URLs and logs.
+        if (!Component\Registry::isEmpty()) {
+            $this->route(Component\Component::ENDPOINT . '/{name}/{action}', ['methods' => ['POST']],
+                function (string $name, string $action, \ZealPHP\HTTP\Response $response) {
+                    $g = \ZealPHP\RequestContext::instance();
+                    $r = Component\Endpoint::handle($name, $action, $g->post, $g->server);
+                    foreach ($r['headers'] as $h => $v) {
+                        $response->header($h, $v);
+                    }
+                    $response->status($r['status']);
+                    return $r['body'];
+                });
         }
 
         # Implicit route for ignoring PHP extensions

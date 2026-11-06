@@ -7,6 +7,12 @@ All notable changes to this project will be documented in this file. The format 
 ### Added
 - **Output-escaping helpers** (#509): `ZealPHP\e()` for HTML text and quoted attributes, plus `ZealPHP\Escape::url()`, `safeUrl()` (refuses `javascript:`/`data:` and similar), `js()` (JSON safe inside `<script>`) and `raw()` for trusted markup. See [Escaping output](docs/templates-and-rendering.md#escaping-output).
 
+### Added — Live Components (#509)
+- **Server-driven components.** A component is a PHP class: public properties are its state, `#[Action]` methods are what buttons call, `#[Model]` properties bind to form inputs. Register with `App::components([...])`, render with `<?= App::component(Counter::class) ?>`. State travels in the page as an HMAC-signed, session-bound snapshot, so workers keep nothing between requests. Guide: [docs/live-components.md](docs/live-components.md); demo at `/live-components`.
+- **Input binding with validation.** `#[Model(rules: 'required|email', live: true)]`; deferred, `live` (debounced) and `blur` timing; errors render beside fields; `updated{Prop}()` hooks. The field being typed in is preserved across swaps.
+- **htmx first-class, not required.** The endpoint (`POST /_zeal/c/{name}/{action}`) speaks a documented plain-HTTP protocol. `HtmxBinder` (default) and `FormBinder` (no JavaScript) are included; custom clients implement `ComponentBinder`. Without JavaScript, components are real forms with a Post/Redirect/Get round trip.
+- **`ZEALPHP_APP_KEY`** (with `ZEALPHP_APP_KEY_PREVIOUS` for rotation) and `php app.php key:generate`. With components registered and no key, boot refuses outside dev mode.
+
 ### Documentation
 - **`App::render()`'s echo side effect is documented and pinned by tests** (#509), including the nested-template pitfall: `<?= App::render('child') ?>` prints the child twice. Use `App::renderToString()` to compose.
 

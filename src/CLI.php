@@ -78,6 +78,11 @@ class CLI
                 $i++;
                 continue;
             }
+            if ($arg === 'key:generate') {
+                // #509 — print a new ZEALPHP_APP_KEY and exit; never boots the server.
+                echo 'ZEALPHP_APP_KEY=' . \ZealPHP\AppKey::generate() . "\n";
+                exit(0);
+            }
             if ($arg === '-h' || $arg === '--help' || $arg === 'help') {
                 self::cliHelp();
                 exit(0);
@@ -720,6 +725,7 @@ Commands:
   restart  Stop and restart the server
   status   Check if server is running
   logs     Tail log files (Ctrl+C to stop)
+  key:generate  Print a new ZEALPHP_APP_KEY (signs component state)
 
 Options:
   -p, --port N         Listen port (default: from App::init)

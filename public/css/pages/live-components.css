@@ -1,0 +1,61 @@
+/* Page-scoped styles for /live-components and the live demo components. */
+.lc-page .lc-mt-2 { margin-top: 2rem; }
+.lc-page .lc-list { margin: .5rem 0 1rem 1.25rem; line-height: 1.7; }
+
+.lc-page .lc-demo-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+  margin: 1rem 0 1.5rem;
+}
+@media (max-width: 860px) {
+  .lc-page .lc-demo-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.lc-page .lc-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+  background: var(--bg);
+}
+.lc-page .lc-panel-label {
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 .75rem;
+}
+
+/* The components themselves. */
+.lc-demo { margin: 0; }
+.lc-counter { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; }
+.lc-counter .lc-count {
+  font-size: 2.25rem;
+  font-weight: 800;
+  min-width: 3ch;
+  font-variant-numeric: tabular-nums;
+}
+.lc-counter .lc-buttons { display: inline-flex; flex-wrap: wrap; gap: .4rem; }
+.lc-btn { border: 1px solid var(--border); color: var(--text); }
+
+.lc-signup { display: grid; gap: .35rem; max-width: 26rem; }
+.lc-signup label { font-weight: 600; font-size: .9rem; margin-top: .5rem; }
+.lc-signup label small { font-weight: 400; color: var(--text-muted); }
+.lc-signup input:not([type="checkbox"]),
+.lc-signup select {
+  width: 100%;
+  padding: .5rem .65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  background: var(--bg);
+  color: var(--text);
+}
+.lc-signup input[aria-invalid="true"] { border-color: var(--danger); }
+.lc-signup .lc-check { display: flex; align-items: center; gap: .5rem; font-weight: 400; }
+.lc-signup button[type="submit"] { justify-self: start; margin-top: .75rem; }
+.lc-success { color: var(--success); font-weight: 600; margin: 0 0 .75rem; }
+
+.zc-error { color: var(--danger); font-size: .85rem; }

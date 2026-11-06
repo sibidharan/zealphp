@@ -19,6 +19,7 @@ $links = [
   'legacy-apps'     => ['/legacy-apps',    'Legacy Apps'],
   'templates'       => ['/templates',      'Components'],
   'htmx'            => ['/htmx',            'HTMX'],
+  'live-components' => ['/live-components', 'Live Components'],
   'streaming'       => ['/streaming',      'Streaming'],
   'coroutines'      => ['/coroutines',     'Coroutines'],
   'websocket'       => ['/ws',             'WebSocket'],
