@@ -182,8 +182,11 @@ public static function renderHtmx(
 
 Fragment selection for an htmx request:
 
-1. If `$fragmentName` is passed, that region is rendered.
-2. Otherwise the framework derives the region from the request — the `HX-Target` element id (a leading `#` is stripped), falling back to `HX-Trigger-Name`. If neither is present, the template is rendered with no `fragment` key (its bare partial output).
+1. If `$fragmentName` is passed, that region is rendered. It overrides a `fragment` key in `$args`.
+2. Otherwise a `fragment` key in `$args` is used as given.
+3. Otherwise the framework derives the region from the request — the `HX-Target` element id (a leading `#` is stripped), falling back to `HX-Trigger-Name`. If neither is present, the template is rendered with no `fragment` key (its bare partial output).
+
+A non-htmx request always gets the full page; a `fragment` key in `$args` is ignored there.
 
 Called outside a request (a CLI render, a warmup), it falls back to the full-page path. It does **not** touch `executeFile()`; it only chooses *what* to render, so the universal return contract and streaming are preserved.
 

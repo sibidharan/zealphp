@@ -21,6 +21,24 @@ function get($key, $default = null)
 }
 
 /**
+ * Escape a value for HTML text or a quoted attribute value (#509).
+ *
+ * Shorthand for {@see Escape::html()}: encodes `& < > " '`, turns `null` into
+ * an empty string, and passes {@see SafeHtml} through unchanged. In a template:
+ *
+ * ```php
+ * <?php use function ZealPHP\e; ?>
+ * <a title="<?= e($title) ?>"><?= e($name) ?></a>
+ * ```
+ *
+ * For URLs, `<script>` values, or raw markup, see the other {@see Escape} methods.
+ */
+function e(mixed $value): string
+{
+    return Escape::html($value);
+}
+
+/**
  * Read a boolean environment variable using ZealPHP's truthiness convention.
  *
  * Returns `$default` when the variable is unset or empty. Otherwise, returns

@@ -45,7 +45,19 @@ $app->route('/users/{id}', function($id) {
 });
 ```
 
-**Backwards-compatibility behaviour.** Templates that only echo (no explicit `return`) have their captured output echoed back from `App::render()` — this keeps every existing `App::render('_master', ...)` call site in `public/*.php` working unchanged. Explicit non-string returns flow through to the caller so a route handler can `return App::render(...)` and have the universal contract apply at the response boundary.
+**Echo side effect.** When a template's result is a string — it only echoed, or it returned a string — `App::render()` both **echoes** that string and **returns** it. That keeps every `App::render('_master', ...)` statement in `public/*.php` working. Non-string results (an int status, an array, a Generator, a `ResponseInterface`) are returned without being echoed.
+
+What that means in practice:
+
+| Where you call it | What happens |
+|---|---|
+| `return App::render('page');` in a route handler | The body is sent once. A string return replaces anything echoed during the handler. |
+| `App::render('page');` as a statement (in `public/*.php` or a template) | The output is echoed once, where the call sits. |
+| `<?= App::render('child') ?>` inside a template | **The child appears twice** — once from `render()`'s echo, once from `<?=`. |
+| `$html = App::render('child');` inside a template | **The child is echoed immediately**, and again wherever you echo `$html`. |
+| `<?= App::renderToString('child') ?>` or `$html = App::renderToString('child');` | The child appears once. `renderToString()` never echoes. |
+
+To compose templates, call `App::render()` as a statement, or use `App::renderToString()` when you need the HTML as a value. `App::renderStream()` with `yield from` is the streaming equivalent. This behaviour is kept for backward compatibility; `tests/Unit/RenderEchoSemanticsTest.php` pins each row.
 
 ### Path resolution
 
@@ -305,9 +317,32 @@ Precise, and it keeps the undefined-variable check working for genuine typos. (T
 
 **Blunt fallback:** `{"intelephense.diagnostics.undefinedVariables": false}` in `.vscode/settings.json` silences it project-wide — but it also hides real undefined-variable bugs, so prefer 1–3. There is no `extract()`-stub trick: a static analyzer fundamentally can't know an arbitrary runtime array's keys, so the fix is always to make the variable *not* come from `extract()` (1, 3) or to *declare* it (2).
 
+## Escaping output
+
+PHP templates have no auto-escaping, so escape every value that came from a user, a database, or a URL. `ZealPHP\e()` is the short form for HTML text and quoted attribute values:
+
+```php
+<?php use function ZealPHP\e; ?>
+<a href="/users/<?= e($user['id']) ?>" title="<?= e($user['bio']) ?>"><?= e($user['name']) ?></a>
+```
+
+`e()` encodes `& < > " '`, turns `null` into an empty string, and replaces invalid UTF-8 with U+FFFD instead of returning an empty string. It's safe inside single- or double-quoted attributes. It is **not** safe in unquoted attributes, inside `<script>` or `<style>`, or in `on*` event-handler attributes.
+
+Other contexts have their own method on `ZealPHP\Escape`:
+
+| Where the value goes | Use | Example |
+|---|---|---|
+| HTML text, quoted attribute | `e($v)` / `Escape::html($v)` | `<p><?= e($bio) ?></p>` |
+| One URL component (path segment, query value) | `Escape::url($v)` | `<a href="/search?q=<?= Escape::url($q) ?>">` |
+| A whole URL from user input in `href` / `src` | `Escape::safeUrl($v)` | `<a href="<?= Escape::safeUrl($site) ?>">` — `javascript:`, `data:` and other schemes become `#` |
+| A value inside `<script>` or a `data-*` attribute | `Escape::js($v)` | `<script>const user = <?= Escape::js($user) ?>;</script>` |
+| Markup you built and trust | `Escape::raw($html)` | `e()` emits a `SafeHtml` value unchanged |
+
+`Escape::js()` emits JSON with `< > & ' "` escaped as `\u` sequences, so the value can't close the `<script>` element or a quoted attribute. Only wrap markup in `Escape::raw()` when every user-supplied part of it was already escaped.
+
 ## Tips for template authors
 
-- **Always escape user data** with `htmlspecialchars()`. PHP templates have no auto-escaping — full control, full responsibility.
+- **Always escape user data** — see [Escaping output](#escaping-output). PHP templates have no auto-escaping — full control, full responsibility.
 - Keep templates free of business logic. Transform data in route handlers or service classes and pass simple view models to `App::render()`.
 - Use the route-handler / public-file / API-closure layers for logic; templates are view-only.
 - Pair templates with CSS/JS assets in `public/` — ZealPHP does not prescribe an asset pipeline.

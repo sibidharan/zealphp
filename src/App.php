@@ -7797,11 +7797,16 @@ class App
      *  - **normal request** → render the whole page shell.
      *
      * Fragment selection for an htmx request:
-     *  1. If `$fragmentName` is passed, that region is rendered.
-     *  2. Otherwise the framework derives the region from the request: the
+     *  1. If `$fragmentName` is passed, that region is rendered — it overrides
+     *     any `fragment` key already in `$args` (#509).
+     *  2. Otherwise a `fragment` key in `$args` is used as given.
+     *  3. Otherwise the framework derives the region from the request: the
      *     `HX-Target` element id (a leading `#` is stripped), falling back to
      *     `HX-Trigger-Name`. If neither is present, the template is rendered
      *     with no `fragment` key — i.e. its bare partial output.
+     *
+     * A non-htmx request always gets the full page: a `fragment` key in
+     * `$args` is dropped on that path, since fragment selection is htmx-only.
      *
      * Called outside a request (no current `zealphp_request`), it falls back
      * to the full-page path so server-side renders never break.
@@ -7836,13 +7841,18 @@ class App
         RequestContext::instance()->zealphp_response?->header('Vary', 'HX-Request, HX-Target, HX-Trigger-Name', false);
 
         // No request in scope (CLI render, warmup, etc.) → full page.
+        // A `fragment` key in $args would make render() extract one region, so
+        // drop it: fragment selection only applies to htmx requests (#509).
         if (!$req instanceof \ZealPHP\HTTP\Request || !$req->isHtmx()) {
+            unset($args['fragment']);
             return self::render($fullPageTemplate ?? $template, $args);
         }
 
-        // Explicit fragment wins (either form).
+        // Explicit fragment wins (either form) — assign, not `+`, so it
+        // overrides a `fragment` key already in $args (#509).
         if ($fragmentName !== null) {
-            return self::render($template, $args + ['fragment' => $fragmentName]);
+            $args['fragment'] = $fragmentName;
+            return self::render($template, $args);
         }
 
         // #444 — separate-template form: a non-null $fullPageTemplate signals
@@ -7859,6 +7869,8 @@ class App
         // Single-template form: derive the fragment from the request — HX-Target
         // (strip a leading '#'), else HX-Trigger-Name. If neither is present,
         // render the template with no fragment key (its bare partial output).
+        // `+` is deliberate here: a caller-supplied $args['fragment'] beats the
+        // header-derived guess.
         $target = $req->htmxTarget();
         $derived = $target !== null ? ltrim($target, '#') : $req->htmxTriggerName();
         if ($derived !== null && $derived !== '') {
