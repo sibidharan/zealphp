@@ -26,22 +26,38 @@ namespace ZealPHP\Component;
  * - Validation errors come back as 200 (htmx doesn't swap 4xx by default);
  *   a snapshot from an older deploy answers `HX-Refresh: true`.
  *
- * `morph: true` swaps with idiomorph (`hx-swap="morph:outerHTML"`), which
- * keeps more DOM state across updates. It needs the htmx idiomorph extension
- * script on the page.
+ * `htmx: 2` (default) or `htmx: 4` picks the attribute dialect:
+ *
+ * - **htmx 4** always swaps with its built-in `outerMorph`. Morphing keeps the
+ *   DOM nodes, and htmx 4 never overwrites the value of the focused input, so
+ *   the field being typed in survives without `hx-preserve` (which in htmx 4
+ *   only works when the *existing* element already carries it). Kept nodes
+ *   also keep queued requests alive. The clicked button is disabled with
+ *   `hx-disable` (which means "ignore this element" in htmx 2).
+ * - **htmx 2** swaps `outerHTML` and marks the triggering field
+ *   `hx-preserve`; `morph: true` uses the idiomorph extension instead
+ *   (`morph:outerHTML`, needs the extension script on the page).
+ *
+ * Every attribute is set on the element that needs it, never inherited, so
+ * htmx 4's explicit inheritance changes nothing. Refused requests answer
+ * `HX-Reswap: none`, so htmx 4 (which swaps 4xx/5xx by default) leaves the
+ * component in place.
  */
 class HtmxBinder extends FormBinder
 {
     private const TARGET = 'closest [data-zc]';
 
-    public function __construct(private readonly bool $morph = false)
+    public function __construct(private readonly bool $morph = false, private readonly int $htmx = 2)
     {
+        if ($htmx !== 2 && $htmx !== 4) {
+            throw new \InvalidArgumentException('HtmxBinder supports htmx 2 and 4');
+        }
     }
 
     public function rootAttributes(Component $component, ?string $submitUrl): array
     {
         $attrs = parent::rootAttributes($component, $submitUrl);
-        if ($this->morph) {
+        if ($this->morph && $this->htmx === 2) {
             $attrs['hx-ext'] = 'morph';
         }
         if ($submitUrl !== null && $component->tag() === 'form') {
@@ -62,7 +78,7 @@ class HtmxBinder extends FormBinder
             'hx-include' => self::TARGET,
             'hx-vals' => (string) json_encode(['_zc_args' => $argsJson], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             'hx-sync' => self::TARGET . ':replace',
-            'hx-disabled-elt' => 'this',
+            ($this->htmx === 4 ? 'hx-disable' : 'hx-disabled-elt') => 'this',
         ]);
     }
 
@@ -78,7 +94,11 @@ class HtmxBinder extends FormBinder
             'hx-swap' => $this->swap(),
             'hx-include' => self::TARGET,
             'hx-sync' => self::TARGET . ':queue last',
-            'hx-preserve' => $preserve ? 'true' : null,
+            // Names the field that changed, in the body: works on every htmx
+            // version (htmx 4 doesn't send HX-Trigger-Name).
+            'hx-vals' => (string) json_encode(['_zc_trigger' => $prop], JSON_UNESCAPED_SLASHES),
+            // htmx 4 morphs, which already keeps the focused field.
+            'hx-preserve' => $preserve && $this->htmx === 2 ? 'true' : null,
         ];
     }
 
@@ -108,8 +128,16 @@ class HtmxBinder extends FormBinder
         return ['status' => 200, 'headers' => $headers];
     }
 
+    public function refusalHeaders(): array
+    {
+        return ['HX-Reswap' => 'none'];
+    }
+
     private function swap(): string
     {
+        if ($this->htmx === 4) {
+            return 'outerMorph';
+        }
         return $this->morph ? 'morph:outerHTML' : 'outerHTML';
     }
 }

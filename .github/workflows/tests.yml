@@ -205,8 +205,8 @@ jobs:
           # (e.g. the WebSocket ticker test on slower 8.5 runners).
           ZEALPHP_SKIP_DOCS_BUILD: '1'
         run: |
-          # A per-run random key enables the Live Components demo, so
-          # tests/Integration/LiveComponentsTest.php runs instead of skipping.
+          # A per-run random key enables the reactive components demo, so
+          # tests/Integration/ComponentsTest.php runs instead of skipping.
           export ZEALPHP_APP_KEY="base64:$(php -r 'echo base64_encode(random_bytes(32));')"
           php app.php >/tmp/zealphp-server.log 2>&1 &
           echo $! > /tmp/zealphp-server.pid

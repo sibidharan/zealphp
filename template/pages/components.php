@@ -8,12 +8,49 @@ $live = Registry::byClass(LikeCounter::class) !== null;
 ?>
 <section class="section">
 <div class="container lc-page">
-<h1 class="section-title">Live Components</h1>
-<p class="section-desc">Interactive UI from PHP classes and plain PHP templates. The server owns the state and renders HTML; the browser swaps it in. No client-side framework, no JSON API to keep in sync, and the page still works with JavaScript turned off.</p>
+<h1 class="section-title">Components</h1>
+<p class="section-desc">Build pages from components: plain PHP templates that take props, and — when you need interactivity — PHP classes that keep state, run actions and bind form inputs. The server renders HTML; the browser swaps it in. No client-side framework, no JSON API to keep in sync, and pages still work with JavaScript turned off.</p>
 
 <div class="callout info">
-  <p>A component is a PHP class. Its public properties are its state, <code>#[Action]</code> methods are what buttons can call, and <code>#[Model]</code> properties bind to form inputs. Every request builds a fresh instance from a signed snapshot in the page, so workers keep nothing between requests. The full guide is <a href="/docs/guide/live-components"><code>docs/live-components.md</code></a>.</p>
+  <p>One call renders both kinds: <code>App::component('card', $props)</code>. A name registered with <code>App::components()</code> is a <strong>reactive</strong> component; any other name renders a <strong>stateless</strong> template from <code>template/components/</code>. The full guide is <a href="/docs/guide/components"><code>docs/components.md</code></a>; <code>App::render()</code>, streaming and fragments are in the <a href="/templates">Templates &amp; Rendering reference</a>.</p>
 </div>
+
+<h2 id="stateless" class="lc-mt-2">Stateless components</h2>
+<p>A template in <code>template/components/</code> that takes props. Like a React function component without hooks: same props in, same HTML out. Pass child markup as the <code>slot</code> prop.</p>
+
+<div class="lc-demo-grid">
+  <div class="lc-panel">
+    <p class="lc-panel-label">Rendered</p>
+    <?= App::component('card', ['icon' => '⚛', 'title' => 'Reactive components', 'body' => 'State, actions and input binding — below.', 'href' => '#reactive']) ?>
+  </div>
+  <div>
+<?php App::render('/components/_code', [
+    'label' => 'a page template',
+    'lang'  => 'html',
+    'code'  => <<<'HTML'
+<?= App::component('card', [
+    'icon'  => '⚛',
+    'title' => 'Reactive components',
+    'body'  => 'State, actions and input binding — below.',
+    'href'  => '#reactive',
+]) ?>
+HTML]); ?>
+<?php App::render('/components/_code', [
+    'label' => 'template/components/_card.php (excerpt)',
+    'lang'  => 'html',
+    'code'  => <<<'HTML'
+<a href="<?= htmlspecialchars($href, ENT_QUOTES) ?>" class="card">
+  <div class="card-icon"><?= $icon ?></div>
+  <h3><?= htmlspecialchars($title) ?></h3>
+  <p><?= htmlspecialchars($body) ?></p>
+</a>
+HTML]); ?>
+  </div>
+</div>
+<p>The name resolves to <code>components/card.php</code>, then <code>components/_card.php</code>; use <code>'ui/button'</code> for folders. Stateless components can be used anywhere, including inside reactive ones.</p>
+
+<h2 id="reactive" class="lc-mt-2">Reactive components</h2>
+<p>A PHP class. Its public properties are its state, <code>#[Action]</code> methods are what buttons call, and <code>#[Model]</code> properties bind to form inputs. Every request builds a fresh instance from a signed snapshot in the page, so workers keep nothing between requests.</p>
 
 <?php if (!$live): ?>
 <div class="callout warn">
@@ -21,7 +58,7 @@ $live = Registry::byClass(LikeCounter::class) !== null;
 </div>
 <?php endif; ?>
 
-<h2 id="counter" class="lc-mt-2">A counter</h2>
+<h3 id="counter" class="lc-mt-2">A counter</h3>
 <p>Each button posts to the component endpoint, which restores the counter from its snapshot, runs <code>add()</code>, and returns the re-rendered component.</p>
 
 <div class="lc-demo-grid">
@@ -61,7 +98,7 @@ HTML]); ?>
   </div>
 </div>
 
-<h2 id="binding" class="lc-mt-2">Input binding and live validation</h2>
+<h3 id="binding" class="lc-mt-2">Input binding and live validation</h3>
 <p><code>username</code> is <code>live</code>: it's validated as you type (try <code>ab</code>, <code>admin</code>, or <code>a b</code>). The field you're typing in is never replaced, so focus and cursor stay put. <code>email</code>, <code>plan</code> and the checkbox are deferred — they ride along when you press <strong>Sign up</strong>, which runs <code>save()</code>.</p>
 
 <div class="lc-demo-grid">

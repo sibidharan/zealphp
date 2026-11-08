@@ -9,7 +9,7 @@ use ZealPHP\Component\Component;
 use ZealPHP\Component\Model;
 
 /**
- * Live Components demo: input binding with live validation. `username` is
+ * Reactive components demo: input binding with live validation. `username` is
  * validated as you type; `email` and `plan` ride along with Save.
  */
 final class SignupForm extends Component

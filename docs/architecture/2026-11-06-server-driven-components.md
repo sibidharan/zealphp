@@ -1,6 +1,6 @@
 # Server-driven components — design plan (#509, phase 5)
 
-Status: **phase 1 implemented** (`src/Component/`, guide: `docs/live-components.md`). Phases 2–5 are proposals. The #509 render fixes (`renderHtmx()` precedence, `e()`/`Escape`, `render()` echo semantics) landed separately in #510.
+Status: **phase 1 implemented** (`src/Component/`, guide: `docs/components.md`). Phases 2–5 are proposals. The #509 render fixes (`renderHtmx()` precedence, `e()`/`Escape`, `render()` echo semantics) landed separately in #510.
 
 ## Goal
 

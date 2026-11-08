@@ -540,6 +540,55 @@ class EndpointTest extends TestCase
         $this->assertStringContainsString('hx-sync="closest [data-zc]:queue last"', $signup);
     }
 
+    public function testHtmx4DialectAndMorph(): void
+    {
+        App::componentBinder(new HtmxBinder(htmx: 4));
+        $html = (string) App::component(Counter::class, [], 'v4');
+        $this->assertStringContainsString('hx-disable="this"', $html);
+        $this->assertStringNotContainsString('hx-disabled-elt', $html);
+        $this->assertStringContainsString('hx-swap="outerMorph"', $html, 'htmx 4 always morphs');
+
+        $live = (string) App::component(Signup::class, [], 'v4live');
+        $r = $this->post('signup', '_update', $live, ['username' => 'al', '_zc_trigger' => 'username']);
+        $this->assertStringNotContainsString('hx-preserve', $r['body'], 'morphing keeps the focused field in htmx 4');
+
+        App::componentBinder(new HtmxBinder(morph: true, htmx: 4));
+        $signup = (string) App::component(Signup::class, [], 'v4m');
+        $this->assertStringContainsString('hx-swap="outerMorph"', $signup);
+        $this->assertStringNotContainsString('hx-ext', $signup, 'htmx 4 morphs without an extension');
+
+        App::componentBinder(new HtmxBinder(morph: true));
+        $signup2 = (string) App::component(Signup::class, [], 'v2m');
+        $this->assertStringContainsString('hx-swap="morph:outerHTML"', $signup2);
+        $this->assertStringContainsString('hx-ext="morph"', $signup2);
+        $this->assertStringContainsString('hx-disabled-elt="this"', $signup2);
+    }
+
+    public function testUnsupportedHtmxVersionIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new HtmxBinder(htmx: 3);
+    }
+
+    public function testRefusalsTellHtmxNotToSwap(): void
+    {
+        $r = Endpoint::handle('counter', 'nope', ['_zc' => 'x.y'], self::HTMX);
+        $this->assertSame(404, $r['status']);
+        $this->assertSame('none', $r['headers']['HX-Reswap']);
+        App::componentBinder(new FormBinder());
+        $this->assertArrayNotHasKey('HX-Reswap', Endpoint::handle('counter', 'nope', ['_zc' => 'x.y'], ['HTTP_ZEAL_REQUEST' => '1'])['headers']);
+    }
+
+    public function testLiveInputsNameTheirFieldInTheBody(): void
+    {
+        $html = (string) App::component(Signup::class, [], 'body');
+        $this->assertMatchesRegularExpression('/id="signup-body-username"[^>]*hx-vals="\{&quot;_zc_trigger&quot;:&quot;username&quot;\}"/', $html);
+        // No HX-Trigger-Name header (htmx 4): the body field is enough.
+        $r = $this->post('signup', '_update', $html, ['username' => 'al', 'email' => 'x@y.co', '_zc_trigger' => 'username']);
+        $this->assertMatchesRegularExpression('/id="signup-body-username"[^>]*hx-preserve="true"/', $r['body']);
+        $this->assertDoesNotMatchRegularExpression('/id="signup-body-email"[^>]*hx-preserve/', $r['body']);
+    }
+
     public function testNestedComponentsAreRefused(): void
     {
         $this->expectException(\LogicException::class);

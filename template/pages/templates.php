@@ -1,8 +1,11 @@
 <?php use ZealPHP\App; ?>
 <section class="section">
 <div class="container">
-<h1 class="section-title">Components & Views</h1>
+<h1 class="section-title">Templates &amp; Rendering</h1>
 <p class="section-desc">No Blade. No Twig. No Mustache. <strong>PHP IS the component engine.</strong> ZealPHP components are plain <code>.php</code> files — loops, conditionals, expressions, classes, everything you know works. Zero learning curve, full language power.</p>
+<div class="callout info">
+  <p>This is the rendering reference: <code>App::render()</code>, streaming, fragments and the return contract. To build pages from <strong>components</strong> — stateless templates with props, or reactive components with state, actions and input binding — start at <a href="/components">Components</a>.</p>
+</div>
 
 <h2>Pass data, render a component</h2>
 

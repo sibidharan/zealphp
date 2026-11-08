@@ -8,7 +8,7 @@ use ZealPHP\Component\Action;
 use ZealPHP\Component\Component;
 
 /**
- * Live Components demo: a counter whose state lives in the page's signed
+ * Reactive components demo: a counter whose state lives in the page's signed
  * snapshot. Each click posts to /_zeal/c/like-counter/{action} and swaps the
  * re-rendered component in.
  */

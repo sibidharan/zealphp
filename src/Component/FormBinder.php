@@ -54,6 +54,11 @@ class FormBinder implements ComponentBinder
         return is_string($v) && $v !== '' ? $v : null;
     }
 
+    public function refusalHeaders(): array
+    {
+        return [];
+    }
+
     public function response(Outcome $outcome, array $events, ?string $redirect): array
     {
         $headers = [];

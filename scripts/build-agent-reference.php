@@ -59,7 +59,7 @@ $order = [
     'api-layer.md',
     'error-handling.md',
     'templates-and-rendering.md',
-    'live-components.md',
+    'components.md',
     'streaming.md',
     'websocket.md',
     'middleware-and-authentication.md',

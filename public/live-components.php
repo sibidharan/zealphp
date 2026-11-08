@@ -1,2 +1,3 @@
-<?php use ZealPHP\App;
-App::render('_master', ['title' => 'ZealPHP · Live Components', 'page' => 'live-components', 'active' => 'live-components']);
+<?php
+// Moved: Live Components are now part of /components.
+header('Location: /components', true, 301);

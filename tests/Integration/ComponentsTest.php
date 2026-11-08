@@ -6,20 +6,20 @@ namespace ZealPHP\Tests\Integration;
 use ZealPHP\Tests\TestCase;
 
 /**
- * Live Components over real HTTP (#509), against the /live-components demo.
+ * Reactive components over real HTTP (#509), against the /components demo.
  * Skips when the server has no ZEALPHP_APP_KEY (the demo is then disabled).
  */
-class LiveComponentsTest extends TestCase
+class ComponentsTest extends TestCase
 {
     private string $cookie = '';
 
     /** Load the page, keep its session cookie, return the snapshot of one component. */
     private function load(string $id): string
     {
-        $r = $this->get('/live-components', $this->cookie !== '' ? ['Cookie' => $this->cookie] : []);
+        $r = $this->get('/components', $this->cookie !== '' ? ['Cookie' => $this->cookie] : []);
         $this->assertStatus(200, $r);
         if (str_contains($r['body'], 'Demo disabled.')) {
-            $this->markTestSkipped('Server runs without ZEALPHP_APP_KEY; the Live Components demo is disabled');
+            $this->markTestSkipped('Server runs without ZEALPHP_APP_KEY; the reactive components demo is disabled');
         }
         if ($this->cookie === '' && preg_match('/PHPSESSID=([^;,\s]+)/', $r['headers']['set-cookie'] ?? '', $m) === 1) {
             $this->cookie = 'PHPSESSID=' . $m[1];
@@ -106,12 +106,12 @@ class LiveComponentsTest extends TestCase
         $wire = $this->load('like-counter-demo');
         $base = rtrim(self::$baseUrl, '/');
         $r = $this->act('/_zeal/c/like-counter/add', ['_zc' => $wire, '_zc_args' => '{"by":100}'], [
-            'Referer' => $base . '/live-components',
+            'Referer' => $base . '/components',
         ]);
         $this->assertStatus(303, $r);
-        $this->assertSame('/live-components', $r['headers']['location'] ?? null);
+        $this->assertSame('/components', $r['headers']['location'] ?? null);
 
-        $page = $this->get('/live-components', ['Cookie' => $this->cookie]);
+        $page = $this->get('/components', ['Cookie' => $this->cookie]);
         $this->assertStringContainsString('>103</span>', $page['body']);
     }
 }

@@ -62,7 +62,10 @@ final class Endpoint
                 if ($action === Component::UPDATE) {
                     // Validate first so errors added by updated*() hooks survive.
                     $component->zcValidateFields($changed);
-                    $trigger = $binder->triggerField($server);
+                    // The client names the changed field in the body (_zc_trigger);
+                    // older clients only send it as a header.
+                    $named = $input['_zc_trigger'] ?? null;
+                    $trigger = is_string($named) && $named !== '' ? $named : $binder->triggerField($server);
                     $component->zcSetTrigger($trigger ?? (count($changed) === 1 ? $changed[0] : null));
                     $component->zcRunUpdatedHooks($changed);
                 } else {
@@ -107,7 +110,7 @@ final class Endpoint
             }
             return [
                 'status' => $e->getCode(),
-                'headers' => ['Content-Type' => 'text/plain; charset=utf-8'] + self::baseHeaders(),
+                'headers' => ['Content-Type' => 'text/plain; charset=utf-8'] + $binder->refusalHeaders() + self::baseHeaders(),
                 'body' => $e->getMessage(),
             ];
         }

@@ -7627,7 +7627,12 @@ class App
 
         if ($rootLookup) {
             $candidate = $templateDir . $tpl . '.php';
-        } else if (!empty($currentFile) && is_dir("$templateDir/" . $currentFile)) {
+        } else if (!empty($currentFile) && is_file("$templateDir/" . $currentFile . '/' . $tpl . '.php')) {
+            // Namespaced by the current public file (template/users/header.php
+            // for public/users.php). Fall back to template/header.php when that
+            // file is missing — checking only the directory broke every page
+            // whose name matches a template folder (public/components.php vs
+            // template/components/).
             $candidate = "$templateDir/" . $currentFile . '/' . $tpl . '.php';
         } else {
             $candidate = "$templateDir/" . $tpl . '.php';
@@ -7841,31 +7846,45 @@ class App
     }
 
     /**
-     * Render a registered component for the page. Returns markup, never echoes:
-     * use `<?= App::component(…) ?>` in a template.
+     * Render a component. Returns markup, never echoes: use
+     * `<?= App::component(…) ?>` in a template.
      *
-     * `$props` sets initial public properties before `mount()` runs. `$key`
-     * names this instance (default: a per-request counter); give a stable key
-     * when the same component appears more than once or must keep its state
-     * across a no-JS form round trip.
+     * One API for both kinds of component:
      *
-     * @param string               $component a registered class or name
+     * - **Reactive** — a class registered with `App::components()` (by class or
+     *   name). `$props` sets its initial public properties before `mount()`;
+     *   it gets state, actions and input binding.
+     * - **Stateless** — any other name renders a template from
+     *   `template/components/`: `'card'` → `components/card.php`, else
+     *   `components/_card.php`; `'ui/button'` → `components/ui/button.php`.
+     *   `$props` become template variables (plus `$props` itself). Pass child
+     *   markup as the `slot` prop. Stateless components may be used anywhere,
+     *   including inside reactive ones.
+     *
+     * `$key` names a reactive instance (default: a per-request counter); give a
+     * stable key when the same component appears more than once or must keep
+     * its state across a no-JS form round trip. Stateless components ignore it.
+     *
+     * @param string               $component a registered class or name, or a stateless template name
      * @param array<string, mixed> $props
      */
     public static function component(string $component, array $props = [], ?string $key = null): SafeHtml
     {
+        $meta = Component\Registry::byName($component);
+        if ($meta === null && str_contains($component, '\\') && class_exists($component)) {
+            /** @var class-string<Component\Component> $component */
+            $meta = Component\Registry::byClass($component);
+            if ($meta === null) {
+                throw new \LogicException("Component {$component} is not registered; add it with App::components()");
+            }
+        }
+        if ($meta === null) {
+            return self::statelessComponent($component, $props);
+        }
         $depth = RequestContext::instance()->memo['_zc_depth'] ?? 0;
         if (is_int($depth) && $depth > 0) {
             // A parent's requests would carry the child's snapshot too.
-            throw new \LogicException('Components cannot be nested yet: render ' . $component . ' outside other components');
-        }
-        $meta = Component\Registry::byName($component);
-        if ($meta === null && class_exists($component)) {
-            /** @var class-string<Component\Component> $component */
-            $meta = Component\Registry::byClass($component);
-        }
-        if ($meta === null) {
-            throw new \LogicException("Component {$component} is not registered; add it with App::components()");
+            throw new \LogicException('Reactive components cannot be nested yet: render ' . $component . ' outside other reactive components');
         }
         if ($key === null) {
             $g = RequestContext::instance();
@@ -7898,10 +7917,38 @@ class App
     }
 
     /**
+     * Render a stateless component template from `template/components/`.
+     *
+     * @param array<string, mixed> $props
+     */
+    private static function statelessComponent(string $name, array $props): SafeHtml
+    {
+        if (preg_match('#^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*$#', $name) !== 1) {
+            throw new \LogicException(
+                "Component {$name} is not registered and isn't a valid template name "
+                . '(lowercase letters, digits, - and _, with / for folders)'
+            );
+        }
+        $dir = self::$cwd . '/template/components/';
+        $base = basename($name);
+        $sub = dirname($name) === '.' ? '' : dirname($name) . '/';
+        foreach ([$sub . $base, $sub . '_' . $base] as $candidate) {
+            if (is_file($dir . $candidate . '.php')) {
+                unset($props['fragment']); // a prop, never a fragment selector
+                return new SafeHtml(self::renderToString('/components/' . $candidate, $props + ['props' => $props]));
+            }
+        }
+        throw new \LogicException(
+            "Component {$name} is neither registered with App::components() nor a template at "
+            . "template/components/{$sub}{$base}.php"
+        );
+    }
+
+    /**
      * How long a component snapshot stays valid, in seconds (default 24 hours;
      * 0 = no limit). Older snapshots are refused like ones from another build,
      * so the page refreshes. This bounds how long an old snapshot can be
-     * replayed; see docs/live-components.md#security.
+     * replayed; see docs/components.md#security.
      */
     public static function componentMaxAge(?int $seconds = null): int
     {

@@ -9,7 +9,7 @@ namespace ZealPHP\Component;
  * and how endpoint side effects (events, redirects, reloads) are signalled.
  *
  * The component endpoint itself speaks a plain-HTTP protocol (see
- * `docs/live-components.md#protocol`); a binder adapts the markup and response
+ * `docs/components.md#protocol`); a binder adapts the markup and response
  * headers to one client: htmx ({@see HtmxBinder}, the default), no JavaScript
  * ({@see FormBinder}), or a custom one.
  *
@@ -59,6 +59,14 @@ interface ComponentBinder
      * @param array<string, mixed> $server
      */
     public function triggerField(array $server): ?string;
+
+    /**
+     * Extra headers for a refused request (400/403/404), e.g. telling the
+     * client not to swap the error text into the page.
+     *
+     * @return array<string, string>
+     */
+    public function refusalHeaders(): array;
 
     /**
      * Status and headers for an endpoint outcome.

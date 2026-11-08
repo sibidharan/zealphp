@@ -1,18 +1,49 @@
-# Live Components
+# Components
 
-Live Components let you build interactive UI from a PHP class and a plain PHP template. The server owns the state and renders HTML; the browser swaps it in. There's no client-side framework, no JSON API to keep in sync, and pages still work with JavaScript turned off.
+ZealPHP builds pages from components, and one call renders both kinds:
 
-- Public properties are the component's **state**.
-- `#[Action]` methods are what buttons can **call**.
-- `#[Model]` properties **bind** to form inputs, with validation.
+```php
+<?= App::component('card', ['title' => 'Hello']) ?>      // stateless: a template with props
+<?= App::component(Counter::class, ['count' => 5]) ?>     // reactive: state, actions, input binding
+```
 
-State travels in the page as a signed snapshot. Each request builds a fresh component from it, so workers keep nothing between requests — no per-user memory, nothing to leak between users, nothing lost when a worker restarts.
+- A **stateless component** is a PHP template in `template/components/`. Same props in, same HTML out — like a React function component without hooks.
+- A **reactive component** is a PHP class. Public properties are its **state**, `#[Action]` methods are what buttons **call**, and `#[Model]` properties **bind** to form inputs, with validation. The server owns the state and renders HTML; the browser swaps it in. There's no client-side framework and no JSON API to keep in sync, and pages still work with JavaScript turned off.
 
-Live demo: [`/live-components`](/live-components).
+Start stateless; make a component reactive when it needs to respond to the user. Live demo: [`/components`](/components). For `App::render()`, streaming and fragments, see [Templates and Rendering](templates-and-rendering.md).
+
+## Stateless components
+
+Put a template in `template/components/` and render it by name:
+
+```php
+<?php /* template/components/card.php */ use function ZealPHP\e; ?>
+<article class="card">
+  <h3><?= e($title) ?></h3>
+  <?= $slot ?? '' ?>
+</article>
+```
+
+```php
+<?= App::component('card', [
+    'title' => 'Invoices',
+    'slot'  => App::component('ui/button', ['text' => 'New invoice']),
+]) ?>
+```
+
+- **Lookup:** `'card'` renders `components/card.php`, else `components/_card.php` (so existing underscore partials work as they are). `'ui/button'` looks in `components/ui/`. Names are lowercase letters, digits, `-` and `_`, with `/` for folders.
+- **Props** become template variables; `$props` holds them all. Pass child markup as `slot` — an `App::component()` result or `Escape::raw()` is printed as-is, anything else should go through `e()`.
+- **Returns markup, never echoes**, so `<?= ?>` is correct (unlike `App::render()`; see the echo side effect described in [Templates and Rendering](templates-and-rendering.md)).
+- **Registered names win.** If a reactive component is registered as `card`, `App::component('card')` renders that.
+- Stateless components can be used anywhere, including inside reactive components. They have no state, so they need no key and no `ZEALPHP_APP_KEY`.
+
+## Reactive components
+
+State travels in the page as a signed snapshot. Each request builds a fresh component from it, so workers keep nothing between requests — no per-user memory, nothing to leak between users, nothing lost when a worker restarts. The rest of this guide is about reactive components.
 
 ## Setup
 
-Components sign their state with `ZEALPHP_APP_KEY`. Generate one and export it:
+Reactive components sign their state with `ZEALPHP_APP_KEY`. Generate one and export it:
 
 ```bash
 php app.php key:generate
@@ -30,7 +61,7 @@ App::components([Counter::class, SignupForm::class]);
 
 The name defaults to the kebab-case class name (`SignupForm` → `signup-form`). To choose it, pass `'name' => Class::class`. Only registered components can be reached from the browser.
 
-If components are registered and there's no key, `php app.php` refuses to start. In dev mode (`php app.php --dev` or `ZEALPHP_DEV=1`) it uses a random key for that boot instead, and open pages need a reload after a restart.
+If reactive components are registered and there's no key, `php app.php` refuses to start. In dev mode (`php app.php --dev` or `ZEALPHP_DEV=1`) it uses a random key for that boot instead, and open pages need a reload after a restart.
 
 The component templates use htmx attributes by default, so the page needs htmx 2 loaded. See [Clients](#clients) to use something else.
 
@@ -253,7 +284,7 @@ With `HtmxBinder`:
 
 - **An action always goes out.** If a live update is still in flight on the same component, the action replaces it (the action carries every field anyway).
 - **The clicked button is disabled until its response arrives**, so a double-click can't re-send the state the first click started from. Clicking a *different* action while one is in flight replaces the first one's response: the result is computed from the state the page showed.
-- **Live updates queue** behind one another, and the field that triggered the update is preserved across the swap. If you type in field B while field A's update is in flight, B is re-rendered from the server's copy when A's response lands; its next keystroke sends it again.
+- **Live updates queue** behind one another, and the field being typed in is kept across the swap (htmx 2: `hx-preserve`; htmx 4: morphing). If you type in field B while field A's update is in flight, B is re-rendered from the server's copy when A's response lands; its next keystroke sends it again.
 
 Elements inside a `$tag = 'form'` component inherit its `hx-target` and `hx-sync`. If you add your own `hx-get` inside a component, set `hx-target` on it explicitly, or its response replaces the whole component.
 
@@ -311,11 +342,35 @@ The endpoint speaks plain HTTP. A **binder** decides which attributes `action()`
 | `FormBinder` | Plain-form attributes only | Pages with no JavaScript |
 | your own | anything — implement `ZealPHP\Component\ComponentBinder` | Alpine, Datastar, a custom `fetch()` client |
 
+### htmx 2 and htmx 4
+
+`HtmxBinder` supports both. htmx 2 is the default (it's still npm's `latest`); pass `htmx: 4` for htmx 4:
+
 ```php
-App::componentBinder(new HtmxBinder(morph: true));   // idiomorph swaps; load the htmx idiomorph extension
+App::componentBinder(new HtmxBinder());            // htmx 2.x
+App::componentBinder(new HtmxBinder(htmx: 4));     // htmx 4.x
+App::componentBinder(new HtmxBinder(morph: true)); // htmx 2 + the idiomorph extension
 ```
 
-`HtmxBinder` answers validation errors with 200 (htmx doesn't swap 4xx responses by default), maps events to `HX-Trigger`, redirects to `HX-Redirect`, and stale snapshots to `HX-Refresh`.
+| | htmx 2 | htmx 4 |
+|---|---|---|
+| Swap | `outerHTML` (`morph:outerHTML` with `morph: true`) | built-in `outerMorph`, always |
+| Keeping the field being typed in | the response marks it `hx-preserve` | morphing never overwrites the focused input's value |
+| Disabling the clicked button | `hx-disabled-elt="this"` | `hx-disable="this"` |
+| Refused requests (400/403/404) | not swapped (htmx 2 default) | `HX-Reswap: none` stops htmx 4 swapping the error text |
+
+Every attribute is set on the element that needs it, so htmx 4's explicit attribute inheritance doesn't affect components. The two dialects differ in attribute names (`hx-disable` means "ignore this element" in htmx 2), so pick the one matching the htmx on your pages. `HtmxBinder` answers validation errors with 200, maps events to `HX-Trigger`, redirects to `HX-Redirect`, and stale snapshots to `HX-Refresh`.
+
+### Client-only state: hx-live, Alpine
+
+Some state never needs the server: a dropdown being open, a character counter, a tab. Keep that in the browser with htmx 4's `hx-live` (or Alpine.js) inside a component's template:
+
+```html
+<textarea <?= $c->model('bio', false) ?>><?= $c->value('bio') ?></textarea>
+<small :text="q('previous textarea').value.length + ' / 280'"></small>
+```
+
+Client-side state lives on DOM nodes, so it survives a re-render only where the swap keeps those nodes — always the case with htmx 4's morphing; with htmx 2's `outerHTML` it resets on each update. Anything the server must know belongs in a `#[Model]` property.
 
 ### Protocol
 
@@ -329,7 +384,7 @@ For writing a binder or a client.
 | `_zc_args` | action arguments as a JSON object (`{"by": 2}`); omit for none |
 | `#[Model]` fields | as a form would send them (`tags[]` for arrays) — send **every** bound control in the component, not just the changed one: a missing `bool` means unchecked and a missing `array` means empty, so a partial post clears them |
 
-`{action}` is an `#[Action]` method name, `_update` (apply input and validate changed fields), or `_refresh` (apply input, re-render). Scripted clients send `Zeal-Request: 1` and, for `_update`, `Zeal-Trigger: <field name>`.
+`{action}` is an `#[Action]` method name, `_update` (apply input and validate changed fields), or `_refresh` (apply input, re-render). For `_update`, name the field that changed in a `_zc_trigger` form field (the htmx binder does this); a `Zeal-Trigger` or `HX-Trigger-Name` header also works. Scripted clients send `Zeal-Request: 1`.
 
 **Response:**
 
@@ -351,7 +406,7 @@ Headers: `Zeal-Events` (JSON object of event → detail), `Zeal-Redirect` (a pat
 
 ## Limits in this version
 
-- **No nesting.** `App::component()` inside a component's render throws: a parent's requests would carry the child's snapshot too. Render components side by side.
+- **No reactive nesting.** A reactive component inside another reactive component's render throws: the parent's requests would carry the child's snapshot too. Stateless components nest freely.
 - **Dev hot-reload** (`--dev`) re-registers components from `route/*.php`, but the endpoint route and the key check are set up at boot: if a reload adds the *first* component, restart. Removed components stay registered until restart.
 - **Behind a proxy that rewrites `Host`**, the `Origin` fallback and the no-JS back-link compare against the rewritten host. Modern browsers send `Sec-Fetch-Site`, which isn't affected; the back-link falls back to `/`.
 
