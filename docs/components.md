@@ -345,7 +345,7 @@ The endpoint speaks plain HTTP. A **binder** decides which attributes `action()`
 
 ### htmx 2 and htmx 4
 
-`HtmxBinder` supports both. htmx 2 is the default (it's still npm's `latest`); pass `htmx: 4` for htmx 4:
+`HtmxBinder` supports both. The setting decides the attributes of the first page render; after that, every component request says which htmx sent it (htmx 4 adds `HX-Request-Type`), and the response uses that version's dialect. htmx 2 is the default setting (it's still npm's `latest`); pass `htmx: 4` if your pages load htmx 4:
 
 ```php
 App::componentBinder(new HtmxBinder());            // htmx 2.x

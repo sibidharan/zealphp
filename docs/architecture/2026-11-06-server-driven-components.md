@@ -197,9 +197,9 @@ The htmx helpers are first-class in the sense that they're tested and documented
 
 The WebSocket push message (`{"refresh": [ids]}`) is likewise library-neutral: the htmx binder turns it into `htmx.trigger(el, 'zeal:refresh')`, and the vanilla client calls its own refetch.
 
-## Push: invalidation, not HTML
+## Push: SSE and WebSockets, one model (phase 3, revised 2026-11-09)
 
-A component declares what data it depends on:
+Both transports carry the same thing, so an app picks the transport per deployment, not per component. A component declares what data it depends on:
 
 ```php
 final class ContactList extends Component
@@ -211,25 +211,49 @@ final class ContactList extends Component
 Component::invalidate('contacts');
 ```
 
-1. When a page with components loads, a ~1–2 KB script opens one WebSocket per tab and sends the **signed snapshots** of the components on the page. The server derives topics from those — the client never names a topic itself, so it can't subscribe to `contacts:42` without having been shown a component that depends on it. `WSRouter::roomAuthorizer()` is the hook for extra checks.
-2. `invalidate('contacts')` pushes a tiny message: `{"refresh":["contactlist-main"]}`. **No HTML, no data.**
-3. The client fires `htmx.trigger(el, 'zeal:refresh')`; the component refetches through the normal HTTP endpoint with that user's own session and auth.
+### What travels
 
-Pushing invalidation rather than rendered HTML costs one extra round trip per update. In exchange, a broadcast can never carry one user's view to another user, and auth, CSRF and middleware aren't duplicated on the WS path. Later, a component explicitly marked `#[Shared]` (renders the same for everyone, e.g. a public stock ticker) may broadcast its rendered HTML once to all subscribers.
+| Mode | Message | Who renders | When to use |
+|---|---|---|---|
+| **Refresh signal** (default, both transports) | the ids of stale components | the tab, by re-requesting `_refresh` with its current snapshot, session and auth | always correct: the tab's own snapshot is the latest state |
+| **Rendered HTML** (SSE only, opt-in per component) | `<hx-partial hx-target="#id">…</hx-partial>` per stale component | the server, inside the tab's own SSE request | components whose state the browser can't change (no `#[Model]`, no actions that mutate props): notification lists, dashboards, feeds |
 
-**Transport per deployment:**
+Neither mode ever sends one user's view to another user. The signal carries ids only. Rendered HTML is produced inside the subscriber's own request, which has that visitor's session and auth, never in the request that called `invalidate()`. A component that renders the same for everyone (`#[Shared]`) may later render once per topic and fan the same HTML out.
 
-| Deployment | Fan-out |
+### Transports
+
+| | SSE | WebSocket |
+|---|---|---|
+| Connection | one `/_zeal/c/stream` request per tab, opened by a push root the layout renders: `<?= App::componentPush() ?>` | one `/_zeal/c/ws` socket per tab |
+| Client | htmx 4: the `hx-sse` extension, `hx-sse:connect` (fetch, so the subscription can be a POST body; automatic reconnect 500 ms → 60 s with jitter). htmx 2: `htmx-ext-sse` (EventSource, GET, so subscribe first and connect with a short token) | a ~1 KB script (both htmx versions) |
+| Auth | the request's own session cookie, normal middleware | the upgrade request's session; re-checked on subscribe |
+| Rendered-HTML mode | yes: the stream runs in the visitor's request context | no: the socket runs outside a request; signal only |
+| Best for | push-only updates, simplest deploy, works through every proxy that passes streaming responses | two-way traffic (presence, typing indicators, collaborative edits), very many tabs per server |
+
+`App::componentPush('sse' | 'ws')` picks the transport (default `sse`); the push root renders the matching attributes or script.
+
+### Subscription
+
+1. The push root opens the connection and sends the **signed snapshots** of the components on the page (htmx 4: in the POST body; htmx 2 and WebSockets: `POST /_zeal/c/subscribe` first, which answers a short-lived subscription token).
+2. The server verifies each snapshot, as the endpoint does, and derives the topics from the components' `topics()`. The client never names a topic, so it can't subscribe to `contacts:42` without having been shown a component that depends on it. `WSRouter::roomAuthorizer()` is the extra hook for WebSockets; an `authorizeTopic()` hook covers both.
+3. When the user acts on a component, its new snapshot replaces the subscribed one (the endpoint's response carries it, and the push root re-sends it), so rendered-HTML mode renders from the latest state.
+
+### Fan-out
+
+`invalidate($topic)` has to reach every connection subscribed to the topic, wherever it lives:
+
+| Scope | Mechanism |
 |---|---|
-| Single node, Table backend | A `Store` table `topic → fd` + `$server->push($fd)` — OpenSwoole lets any worker push to any WS fd on the same server, so no Redis is needed. `WSRouter::room()` requires Redis today, so this is a new local path |
-| Multi-node, Redis backend | `WSRouter::room('zc:' . $topic)` — federated rooms already exist |
+| Same worker | per-worker registry `topic → [connection]` (each SSE stream is a coroutine; each socket an fd) |
+| Other workers, same node | OpenSwoole `sendMessage()` to every worker (`onPipeMessage`); WebSockets can also `$server->push()` to any fd directly. No Redis needed |
+| Other nodes | `Store::publish('zc:' . $topic)` with one `App::subscribe('zc:*')` per worker (Redis backend); WebSockets can use the existing federated `WSRouter::room()` |
 
-**Ordering, bursts and backpressure:**
+### Ordering, bursts and backpressure
 
-- Invalidation is idempotent, so coalesce: at most one push per topic per tick (~50 ms) per connection.
-- If a connection's output buffer is over a limit, drop its pending messages and mark it stale; it refetches everything on its next message or reconnect.
-- Concurrent actions on one component: `hx-sync="this:queue all"` serializes them in the client. Across users the database is the source of truth; snapshot props are a view, not authority.
-- Reconnect: the client refetches every mounted component. Simple and correct; optimize with per-component version stamps only if it measures as a problem.
+- Invalidation is idempotent, so coalesce: at most one message per topic per tick (~50 ms) per connection.
+- SSE: a stream whose output buffer is over a limit drops its pending messages and sends one "refresh everything" signal; WebSockets do the same with the socket buffer.
+- Reconnect: the client re-subscribes with its current snapshots and refreshes every mounted component. Correct and simple; add version stamps only if measurements say so.
+- A held SSE connection costs one coroutine and its buffers, not a worker; cap connections per worker (`App::componentPush(maxConnections: …)`) so streams can't starve request handling.
 
 ## Isolation in long-running workers
 
@@ -245,7 +269,7 @@ Pushing invalidation rather than rendered HTML costs one extra round trip per up
 |---|---|---|
 | **1. Core** | Wire protocol, `ComponentBinder` + `HtmxBinder` + `FormBinder`, `Component` base, `#[Action]`, `#[Model]` input binding with validation, registry (`App::components()`), `App::component()`, `/_zeal/c` endpoint, signed snapshots, `ZEALPHP_APP_KEY` + `key:generate` + rotation, morph swaps, no-JS form fallback | Counter, todo-list and signup-form examples work with and without JS; focus survives live updates; tests for tampering, cross-session replay, version skew, unknown component/action/prop, writes to non-`#[Model]` props, type coercion, CSRF, concurrent cross-user isolation; PHPStan 10 |
 | **2. Vanilla client + benchmark** | `ZealJsBinder` and its ~2 KB client; compare a component action against `renderHtmx()` on a page with expensive pre-fragment work (#509 item 3) | The signup example works identically with `HtmxBinder` and `ZealJsBinder`; published numbers: latency p50/p99, snapshot size, CPU per request |
-| **3. Push** | WS client script, snapshot-derived subscriptions, `Component::invalidate()`, local Table fan-out, Redis room fan-out, coalescing, backpressure, reconnect | Live list example updating across tabs and users; tests for subscription authorization, fd reuse, reconnect; fan-out benchmark for 1k / 10k subscribers, memory per connection |
+| **3. Push** | `Component::invalidate()`, topics, snapshot-derived subscriptions, SSE transport (htmx 4 `hx-sse` extension, htmx 2 `htmx-ext-sse`) and WebSocket transport, refresh-signal and rendered-HTML modes, worker/node fan-out, coalescing, backpressure, reconnect | Live list example updating across tabs and users; tests for subscription authorization, fd reuse, reconnect; fan-out benchmark for 1k / 10k subscribers, memory per connection |
 | **4. Composition** | Child components, out-of-band updates of other components from one action, component events | Nested list/row example; tests that a parent re-render keeps child identity and child input state |
 | **5. Maybe** | `#[Shared]` HTML broadcast; stateful connection mode (design B) | Only if phase 2–3 benchmarks justify it |
 

@@ -125,6 +125,7 @@ class HtmxResponse
 
     /**
      * HX-Trigger-After-Swap — same as trigger() but fires after the swap step.
+     * htmx 2 only: htmx 4 ignores this header (use trigger()).
      */
     public function triggerAfterSwap(string $events): static
     {
@@ -134,6 +135,7 @@ class HtmxResponse
 
     /**
      * HX-Trigger-After-Settle — same as trigger() but fires after the settle step.
+     * htmx 2 only: htmx 4 ignores this header (use trigger()).
      */
     public function triggerAfterSettle(string $events): static
     {
@@ -177,6 +179,37 @@ class HtmxResponse
         $swap = htmlspecialchars($swap, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $tag  = preg_replace('/[^a-zA-Z0-9]/', '', $tag) ?: 'div';
         return "<{$tag} id=\"{$id}\" hx-swap-oob=\"{$swap}\">{$html}</{$tag}>";
+    }
+
+    /**
+     * Wrap $html so it swaps into another element on the page, in addition to
+     * the response's main target — e.g. one action updating several
+     * components.
+     *
+     * htmx 4 gets `<hx-partial hx-target="…" hx-swap="…">`; htmx 2 gets the
+     * equivalent `<div hx-swap-oob="swap:selector">`, whose children htmx 2
+     * swaps into the target. `$htmx` defaults to the version that sent the
+     * current request (2 when there is none).
+     *
+     * @param string $target CSS selector of the element to update, e.g. `#cart`
+     * @param string|\Stringable $html markup to swap in (not escaped)
+     * @param string $swap   swap style: innerHTML, outerHTML, beforeend, …
+     */
+    public static function partial(string $target, string|\Stringable $html, string $swap = 'innerHTML', ?int $htmx = null): string
+    {
+        if ($htmx === null) {
+            $req = \ZealPHP\RequestContext::instance()->zealphp_request;
+            $htmx = $req instanceof Request ? ($req->htmxVersion() ?? 2) : 2;
+        }
+        if ($htmx !== 2 && $htmx !== 4) {
+            throw new \InvalidArgumentException('HtmxResponse::partial() supports htmx 2 and 4');
+        }
+        $t = htmlspecialchars($target, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $s = htmlspecialchars($swap, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        if ($htmx === 4) {
+            return "<hx-partial hx-target=\"{$t}\" hx-swap=\"{$s}\">{$html}</hx-partial>";
+        }
+        return "<div hx-swap-oob=\"{$s}:{$t}\">{$html}</div>";
     }
 
     // ---- Builder exit ------------------------------------------------------

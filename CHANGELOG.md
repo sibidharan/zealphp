@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added — htmx 4 request/response surface
+- **Request accessors for htmx 4.** `htmxTarget()` and `htmxTrigger()` return the element id for both versions (htmx 4 sends `tag#id`; `HX-Trigger` became `HX-Source`). New: `htmxSource()`, `htmxRequestType()` and `htmxVersion()` (4 when `HX-Request-Type` is present, 2 for other htmx requests).
+- **`render(…, htmx: true)` works on htmx 4.** It derived the fragment from the raw `HX-Target`, so htmx 4's `div#main` selected no region and answered 404.
+- **`HtmxResponse::partial($target, $html, $swap)`** updates extra elements from one response: `<hx-partial>` on htmx 4, an `hx-swap-oob` wrapper on htmx 2, chosen by the request's version.
+- **`HtmxBinder` answers in the requesting version's dialect**; the `htmx:` setting only decides the first page render.
+- `triggerAfterSwap()` / `triggerAfterSettle()` are documented as htmx 2 only (htmx 4 ignores those headers).
+
 ### Changed — one rendering API
 - **Two verbs.** `App::component()` produces markup (a component, or any template with a leading `/`); `App::render()` produces a page or response, now with options: `fragment:`, `htmx:` (+ `fullPage:`), `stream:` and `echo:`.
 - **Deprecated (still work until 1.0):** `App::renderToString()` → `App::component('/path', $args)`; `App::renderStream()` → `App::render(…, stream: true)`; `App::renderHtmx()` → `App::render(…, htmx: true)`. The site, docs and Learn lessons now use the new API.
