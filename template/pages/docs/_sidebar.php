@@ -20,6 +20,7 @@ $groups = [
         ['error-handling',           'Error Handling'],
         ['templates-and-rendering',  'Templates & Rendering'],
         ['htmx',                     'HTMX'],
+        ['components',               'Components'],
     ],
     'Surfaces' => [
         ['streaming',                     'Streaming'],

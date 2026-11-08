@@ -1,6 +1,6 @@
 # Server-driven components — design plan (#509, phase 5)
 
-Status: **proposal**. Nothing here is implemented yet. Phases 0–1 of #509 (the `renderHtmx()` fix, `e()`/`Escape`, documented `render()` echo semantics) are landed separately.
+Status: **phase 1 implemented** (`src/Component/`, guide: `docs/components.md`). Phases 2–5 are proposals. The #509 render fixes (`renderHtmx()` precedence, `e()`/`Escape`, `render()` echo semantics) landed separately in #510.
 
 ## Goal
 
@@ -95,7 +95,8 @@ signed as `base64url(json) . "." . hmac_sha256(json, ZEALPHP_APP_KEY)`.
 | Threat | Defence |
 |---|---|
 | Tampered props (`count: 999999`) | HMAC over the whole snapshot; reject on mismatch with 400 |
-| Replaying another user's snapshot | Snapshot binds a hash of the session id; mismatch → 403 |
+| Replaying another user's snapshot | Snapshot binds a hash of the session id; mismatch → page reload (409 / `HX-Refresh`), never another user's state |
+| Replaying your own older snapshot | Accepted until `App::componentMaxAge()` (default 24 h). Authoritative state belongs in the DB/session, not props |
 | Old snapshot after a deploy changes the class | `v` (build/class-shape hash) mismatch → 409, client refetches the component fresh |
 | Instantiating arbitrary classes | Name → class only via the registry built at boot from explicit `App::components([...])` |
 | Calling non-action methods (`__destruct`, `render`, setters) | Only public methods with `#[Action]` declared on the component class |

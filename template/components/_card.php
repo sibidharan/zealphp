@@ -7,7 +7,7 @@ $body  ??= '';
 $href  ??= '#';
 $badge ??= '';
 ?>
-<a href="<?= $href ?>" class="card card-link-reset">
+<a href="<?= htmlspecialchars($href, ENT_QUOTES) ?>" class="card card-link-reset">
   <div class="card-icon"><?= $icon ?></div>
   <?php if ($badge): ?><span class="badge badge-feature card-badge"><?= htmlspecialchars($badge) ?></span><?php endif; ?>
   <h3><?= htmlspecialchars($title) ?></h3>

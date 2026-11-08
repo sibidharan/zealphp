@@ -19,7 +19,7 @@ $page = function () {
     // rewriter are each separately gated).
     $allowed = [
         'getting-started', 'directory-structure', 'runtime-architecture',
-        'routing', 'api-layer', 'error-handling', 'templates-and-rendering', 'htmx',
+        'routing', 'api-layer', 'error-handling', 'templates-and-rendering', 'htmx', 'components',
         'streaming', 'websocket', 'WSROUTER-PRODUCTION', 'tasks-and-concurrency', 'middleware-and-authentication',
         'deployment', 'cli', 'hot-reload', 'fuzzing', 'coroutine-isolation-security-research',
         'fastcgi-backends', 'environment-variables',

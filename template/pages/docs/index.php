@@ -19,6 +19,7 @@ $groups = [
         ['error-handling',           'Error Handling',           'setErrorHandler, ext-zealphp overrides, recursion guard, content-negotiated 5xx.'],
         ['templates-and-rendering',  'Templates & Rendering',    'render / renderToString / renderStream / include / fragment.'],
         ['htmx',                     'HTMX',                     'isHtmx() + HtmxResponse, App::renderHtmx(), fragments, hx-boost — the full hypermedia surface.'],
+        ['components',               'Components',               'Stateless templates with props, and reactive components: signed state, #[Action] methods, #[Model] input binding.'],
     ],
     'Surfaces' => [
         ['streaming',                     'Streaming',             'yield-based SSR, stream(), sse(), renderStream.'],

@@ -20,6 +20,7 @@ server in the foreground on the configured port (8080 by default).
 | `restart` | Stop then start. If the instance was running daemonized, the restart stays daemonized unless you pass `-d`. |
 | `status` | Report whether the instance is running (prints pid + port). |
 | `logs` | Tail the log files (Ctrl+C to stop). Combine with the log filters below to tail specific logs. |
+| `key:generate` | Print a new `ZEALPHP_APP_KEY=base64:…` line and exit, without starting a server. The key signs [reactive component](components.md) state; see [environment variables](environment-variables.md). |
 
 ## Options
 

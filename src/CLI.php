@@ -33,6 +33,22 @@ class CLI
     }
 
     /**
+     * Commands that must run before the app boots. Currently `key:generate`:
+     * prints a new ZEALPHP_APP_KEY and exits. Called from `App::init()`.
+     */
+    public static function handleEarlyCommands(): void
+    {
+        if (PHP_SAPI !== 'cli') {
+            return;
+        }
+        $argv = $_SERVER['argv'] ?? $GLOBALS['argv'] ?? [];
+        if (is_array($argv) && in_array('key:generate', array_slice($argv, 1), true)) {
+            echo 'ZEALPHP_APP_KEY=' . \ZealPHP\AppKey::generate() . "\n";
+            exit(0);
+        }
+    }
+
+    /**
      * Parse `$argv`, execute any lifecycle sub-command, and return server-config overrides.
      *
      * Sub-commands (`stop`, `status`, `logs`, `restart`) are handled in-process and
@@ -720,6 +736,7 @@ Commands:
   restart  Stop and restart the server
   status   Check if server is running
   logs     Tail log files (Ctrl+C to stop)
+  key:generate  Print a new ZEALPHP_APP_KEY (signs component state)
 
 Options:
   -p, --port N         Listen port (default: from App::init)

@@ -106,6 +106,8 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 
 | Variable | Default | Scope | Description |
 |----------|---------|-------|-------------|
+| `ZEALPHP_APP_KEY` | unset → no key: boot refuses when components are registered, except in dev mode (`--dev` / `ZEALPHP_DEV=1`), which uses a random per-boot key | user | The application secret, read by `ZealPHP\AppKey`. `base64:` + base64 of ≥32 random bytes (`php app.php key:generate`), or a raw string of ≥32 bytes. Signs [reactive component](components.md) snapshots; each use derives its own key with HKDF. |
+| `ZEALPHP_APP_KEY_PREVIOUS` | unset → none | user | Comma-separated old app keys, same format. Accepted for **verifying** only, so rotating `ZEALPHP_APP_KEY` doesn't break pages already open. |
 | `ZEALPHP_CORS_ORIGINS` | unset → `["*"]` (wildcard) with a one-time `elog()` warning | user | Comma-separated CORS origin allowlist read by `CorsMiddleware::resolveOriginsList()` when no explicit origins are passed to the constructor; empty/unset → wildcard `*`. |
 | `ZEALPHP_SESSION_DIR` | `<log dir>/sessions` (0700) | user | Directory for ZealPHP's file session store when the app doesn't call `App::sessionSavePath()`. Keep it ZealPHP-only: PHP's `session.save_path` (e.g. `/var/lib/php/sessions`) is shared with every mod_php/FPM app on the host. |
 | `ZEALPHP_TRUSTED_PROXIES` | unset (trust no proxy) | user | Comma-separated proxy IPs/CIDRs for `App::trustedProxies()` when the app doesn't set them (e.g. `127.0.0.1` behind a same-host Apache/nginx). Only these peers' `X-Forwarded-For` / `X-Forwarded-Proto` are honoured, which drives `clientIp()` (rate limits, IP access) and the session cookie's Secure flag. |
