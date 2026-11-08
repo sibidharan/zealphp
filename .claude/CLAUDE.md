@@ -750,6 +750,18 @@ The PHPStan badge at `.github/badges/phpstan.json` must match `phpstan.neon`'s l
 - `streamFor()` and other vendor helpers without declared return types — PSR-7 wrappers under `OpenSwoole\Core\Psr\*` sometimes return `Stream|void`. Construct the target type directly instead of going through the helper.
 - `is_int($result) ? ... : (string)$result` — the false branch still sees mixed; narrow with `is_scalar` or `is_null` before the cast.
 
+### API design — elegance over helper sprawl (the render lesson)
+
+The rendering API grew one helper per need — `render()`, `renderToString()`, `renderStream()`, `renderHtmx()`, plus `include()` and `fragment()` — each a separate entry point with its own slightly different rules (echoes vs returns, how paths resolve, a magic `'fragment'` key hidden in `$args`). Every difference became a pitfall: `<?= App::render('child') ?>` prints twice, and the `$args['fragment']` key silently beat the explicit `$fragmentName` argument (#509). Don't repeat that. Rules for every public API:
+
+- **One verb per job.** `App::component($name, $props)` *composes* (returns markup, never echoes; stateless template or reactive class). `App::render($template, $args)` *responds* (a page for a route or public file, the universal return contract). Pages call `render()`; anything inside a page calls `component()`.
+- **A new capability is an option on the existing verb, not a new function.** Add a named parameter (`render(…, stream: true)`), never a `renderX()` sibling. The consolidation is planned in a follow-up PR: `renderStream()` → `render(…, stream: true)`, `renderHtmx()` → `render(…, htmx: true)`, `renderToString()` → `(string) App::component()` / `render(…, echo: false)`; the old helpers stay as `@deprecated` aliases until 1.0.
+- **No magic keys in data arrays.** Behaviour is selected by named parameters, never by a reserved key inside user data (`$args['fragment']` was both a template variable and a selector).
+- **Return values over side effects.** A function that produces markup returns it; echoing is the caller's choice. Never both.
+- **One name per concept** across code, docs, site nav and URLs (the Components merge: stateless + reactive under one `App::component()`, one page, one guide).
+- **One resolution rule.** The same input resolves the same way from every entry point (component templates are always absolute from `template/`; the namespaced-by-public-file lookup falls back to the top level, as documented).
+- **Extend a seam, don't copy a path.** If a new feature needs most of an existing code path, add the option to that path.
+
 ### PHP Style
 - Follow **PSR-2** (https://www.php-fig.org/psr/psr-2/) for all PHP code.
 - Use `declare(strict_types=1)` in new `src/` classes.
