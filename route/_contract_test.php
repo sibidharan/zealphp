@@ -155,3 +155,8 @@ $app->route('/_contract/component/safehtml', fn() =>
 $app->route('/_contract/render/stream', fn() =>
     App::render('/components/_card', ['title' => 'Streamed', 'body' => 'b', 'href' => '/s'], stream: true)
 );
+// Same through a raw route (no output buffering), which has its own branch.
+$app->route('/_contract/component/safehtml-raw', fn() =>
+    App::component('card', ['title' => 'Raw', 'body' => 'b', 'href' => '/r']),
+    raw: true
+);

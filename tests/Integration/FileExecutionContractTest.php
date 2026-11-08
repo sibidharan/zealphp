@@ -287,4 +287,20 @@ class FileExecutionContractTest extends TestCase
         $this->assertSame(200, $r['status']);
         $this->assertStringContainsString('<h3>Streamed</h3>', $r['body']);
     }
+
+    public function testRawRouteReturningAComponentSendsHtml(): void
+    {
+        $r = $this->get('/_contract/component/safehtml-raw');
+        $this->assertSame(200, $r['status']);
+        $this->assertStringNotContainsString('application/json', $r['headers']['content-type'] ?? '');
+        $this->assertStringContainsString('<h3>Raw</h3>', $r['body']);
+    }
+
+    public function testDemoViewPagesRenderThroughTheDemoShellComponent(): void
+    {
+        $r = $this->get('/demo/view/inject/url/42');
+        $this->assertSame(200, $r['status']);
+        $this->assertStringContainsString('42', $r['body']);
+        $this->assertStringContainsString('<html', $r['body']);
+    }
 }
