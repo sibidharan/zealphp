@@ -116,7 +116,7 @@ $g = \ZealPHP\G::instance();
 
     <?php App::render('/components/_tryit', ['title' => 'Click the counter', 'body' =>
       '<div class="lhx-center">' .
-      App::renderToString('/components/_counter_button', ['n' => (int)($g->session['demo_counter'] ?? 0)]) .
+      App::component('counter_button', ['n' => (int)($g->session['demo_counter'] ?? 0)]) .
       '</div>' .
       '<p>Open DevTools → Network tab and watch each click: a POST goes out, an HTML fragment comes back, the button is replaced. No page reload. No JSON parsing. No client-side state management.</p>'
     ]); ?>
@@ -300,7 +300,7 @@ $g = \ZealPHP\G::instance();
 // template/contacts/list.php — full page
 <ul>
 <?php foreach ($contacts as $c): ?>
-  <?= App::renderToString('/partials/contact-row', ['c' => $c]) ?>
+  <?= App::component('/partials/contact-row', ['c' => $c]) ?>
 <?php endforeach; ?>
 </ul>
 
@@ -317,10 +317,9 @@ PHP,
 
     <p>
       That works (and ZealPHP does it natively — <code>App::render()</code>,
-      <code>App::renderToString()</code>, <code>App::renderStream()</code>, and
-      <code>App::include()</code> all let one template call another;
-      see <a href="/learn/components">Layouts &amp; Components</a> for the full
-      family). But it forces the row markup to live in a separate file from the
+      <code>App::component()</code> and <code>App::include()</code> all let one
+      template call another; see <a href="/learn/components">Layouts &amp; Components</a>
+      for how they fit together). But it forces the row markup to live in a separate file from the
       list it's used in, and the route handler now has two near-identical entries
       that drift apart over time.
     </p>
@@ -362,12 +361,10 @@ PHP,
       'code'  => <<<'PHP'
 $app->route('/contacts', function() {
     $g = \ZealPHP\G::instance();
-    return App::render('contacts/list', [
-        'contacts' => Contact::all(),
-        // No fragment → full page renders normally.
-        // ?fragment=contact-2 → only that row's <li> comes back, no <ul>, no siblings.
-        'fragment' => is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null,
-    ]);
+    // No fragment → full page renders normally.
+    // ?fragment=contact-2 → only that row's <li> comes back, no <ul>, no siblings.
+    $fragment = is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null;
+    return App::render('contacts/list', ['contacts' => Contact::all()], fragment: $fragment);
 });
 PHP,
     ]); ?>
@@ -465,10 +462,8 @@ $app->route('/notes/{id}', function ($request, $response, $id) {
 
     if ($request->isHtmx()) {
         // htmx swap — return just the card fragment
-        return App::renderToString('pages/notes', [
-            'note'     => $note,
-            'fragment' => 'note-card',   // App::fragment('note-card', ...) inside the template
-        ]);
+        // App::fragment('note-card', ...) inside the template
+        return App::render('/pages/notes', ['note' => $note], fragment: 'note-card');
     }
 
     // Plain navigation / bookmark / search-engine — full page
@@ -496,7 +491,7 @@ $app->route('/notes/{id}', function ($request, $response, $id) {
         ->pushUrl("/notes/{$note->id}")           // HX-Push-Url: browser history
         ->reswap('beforeend');                    // HX-Reswap: override target swap
 
-    return App::renderToString('partials/note_card', ['note' => $note]);
+    return App::component('/partials/note_card', ['note' => $note]);
 });</code></pre>
 
     <p class="lhx-note">
@@ -514,7 +509,7 @@ $app->route('/notes/{id}', function ($request, $response, $id) {
     </p>
     <pre><code class="language-php">use ZealPHP\HTTP\HtmxResponse;
 
-$body = App::renderToString('partials/note_card', ['note' => $note])         // primary swap (hx-target)
+$body = App::component('/partials/note_card', ['note' => $note])             // primary swap (hx-target)
       . HtmxResponse::oob('unread-badge', '&lt;span&gt;' . $unread . '&lt;/span&gt;')         // OOB: replace #unread-badge
       . HtmxResponse::oob('toast', '&lt;div&gt;Saved!&lt;/div&gt;', swap: 'beforeend'); // OOB: append to #toast
 
@@ -547,22 +542,18 @@ $app->route('/notes', function ($request, $response) {
         Notes::create($g->post);
         // After save, return just the updated list AND fire the toast event.
         $response->htmx()->trigger('note-saved');
-        return App::renderToString('pages/notes', [
-            'notes'    => Notes::all(),
-            'fragment' => 'note-list',
-        ]);
+        return App::render('/pages/notes', ['notes' => Notes::all()], fragment: 'note-list');
     }
     // GET — full page on plain nav, just #note-list on htmx swap.
     return App::render('_master', [
-        'page'     => 'notes',
-        'notes'   => Notes::all(),
-        'fragment' => $request->isHtmx() ? 'note-list' : null,
-    ]);
+        'page'  => 'notes',
+        'notes' => Notes::all(),
+    ], htmx: true, fragment: 'note-list');
 });</code></pre>
 
     <p class="lhx-note">
-      <strong>Why this design:</strong> body and metadata are orthogonal concerns. <code>App::render*()</code> /
-      <code>App::include()</code> / <code>App::fragment()</code> own the body (the
+      <strong>Why this design:</strong> body and metadata are orthogonal concerns. <code>App::render()</code> /
+      <code>App::component()</code> / <code>App::include()</code> / <code>App::fragment()</code> own the body (the
       <a href="/responses#return-contract">universal return contract</a> covers every shape). Response
       headers are not body content; pushing them into the rendering API would conflate two unrelated axes and break
       the contract that "what the file/template returns is the body." The builder lives on <code>Response</code>

@@ -370,7 +370,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
           <li>PSR-15 middleware stack &mdash; 28 built-ins covering common Apache/nginx behaviors</li>
           <li><code>ext-zealphp</code> overrides so <code>session_start()</code>, <code>header()</code>, <code>setcookie()</code>, <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, <code>echo</code> all just work</li>
           <li>Coroutine-safe superglobals &mdash; <code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code> are per-coroutine with ext-zealphp. Legacy code + coroutine concurrency in one process (per-coroutine request-state isolation; classic pure-<code>require_once</code> apps with no autoloader run on <code>legacy-cgi</code>).</li>
-          <li>Templating (<code>App::render</code> / <code>renderStream</code> / <code>fragment</code>) with streaming-Generator output</li>
+          <li>Templating (<code>App::render</code> / <code>component</code> / <code>fragment</code>) with streaming-Generator output</li>
           <li>Universal return contract (int = status, array = JSON, Generator = SSE/SSR stream)</li>
           <li>ZealAPI &mdash; file-based REST (drop <code>api/device/list.php</code> &rarr; <code>/api/device/list</code> auto-route)</li>
           <li>CGI worker bridge for unmodified WordPress / Drupal compatibility</li>
@@ -426,7 +426,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
         ['🗃️', 'Store',      'Cross-worker shared state on one node via OpenSwoole\\Table; flip to Redis/Valkey for cross-node + persistence. One API.',  '/store',      'pluggable backend'],
         ['⏱️', 'Timers',     'Schedule recurring AI tasks. Polling, cleanup, model warmup, health checks.',                           '/timers',     'tick() · after()'],
         ['🌐', 'HTTP',        'Full HTTP/1.1 compliance. HEAD, OPTIONS, Range, redirects, CORS, ETag, gzip — all built-in.',           '/http',       'HTTP/1.1'],
-        ['📝', 'Components',  'SSR streaming components. Compose views with yield from. renderStream() for progressive HTML.',         '/templates',  'renderStream()'],
+        ['📝', 'Components',  'SSR streaming components. Compose views with yield from. render(stream: true) for progressive HTML.',  '/templates',  'App::component()'],
         ['🔗', 'REST API',    'Drop a PHP file in api/. It becomes a route. File-based REST — the simplest API pattern.',             '/api',        'file-based'],
         ['🏗️', 'Legacy Apps','50-app compatibility sweep: WordPress, Joomla, Kanboard, Roundcube, OpenCart, Adminer + 44 more. 5 apps pass ALL 4 modes unmodified.', '/legacy-apps#50-app-sweep','50-app sweep'],
       ];
@@ -476,7 +476,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
 <section class="section home-section-return">
   <div class="container">
     <h2 class="section-title">Return anything, get the right response</h2>
-    <p class="section-desc">ZealPHP inspects your return type and does the right thing — no boilerplate. One contract for every entry point (route handler, public file, API closure, fallback, error handler, <code>App::render() / renderToString() / renderStream() / include()</code>).</p>
+    <p class="section-desc">ZealPHP inspects your return type and does the right thing — no boilerplate. One contract for every entry point (route handler, public file, API closure, fallback, error handler, <code>App::render() / component() / include()</code>).</p>
     <table class="ztable home-return-table">
       <tr><th class="home-return-col-return">Return</th><th class="home-return-col-result">Result</th><th>Example</th></tr>
       <tr><td><code>int</code></td><td>HTTP status code</td><td><code>return 404;</code> <code>return 201;</code></td></tr>

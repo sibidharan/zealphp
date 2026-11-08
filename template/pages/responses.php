@@ -6,7 +6,7 @@
 
 <h2 id="return-contract">Universal return contract</h2>
 <div class="callout info resp-callout">
-  <p class="resp-m-0"><strong>One contract, every entry point.</strong> Any function that produces a response — route handler, fallback, error handler, <code>App::render()</code>, <code>App::renderToString()</code>, <code>App::renderStream()</code>, <code>App::include()</code>, public file, API closure, streaming template Closure — uses the same return contract. The framework translates the return value into an HTTP response identically regardless of where it came from. Other pages link here rather than restating it.</p>
+  <p class="resp-m-0"><strong>One contract, every entry point.</strong> Any function that produces a response — route handler, fallback, error handler, <code>App::render()</code>, <code>App::component()</code>, <code>App::include()</code>, public file, API closure, streaming template Closure — uses the same return contract. The framework translates the return value into an HTTP response identically regardless of where it came from. Other pages link here rather than restating it.</p>
 </div>
 
 <table class="ztable resp-mb-2">
@@ -56,7 +56,7 @@ $app->route('/echo', function() {
 $app->route('/article/{id}', fn($id) => App::include('/article.php'));
 PHP]); ?>
 
-<p class="resp-mt-1">The same contract applies inside any file invoked by <a href="/templates"><code>App::render() / renderToString() / renderStream() / include()</code></a> — and inside any region declared by <a href="/templates#fragments"><code>App::fragment()</code></a> when extracted. See <a href="/templates#file-execution-family">the file-execution family</a> for the full method table.</p>
+<p class="resp-mt-1">The same contract applies inside any file invoked by <a href="/templates"><code>App::render() / component() / include()</code></a> — and inside any region declared by <a href="/templates#fragments"><code>App::fragment()</code></a> when extracted. See <a href="/templates#file-execution-family">the rendering methods</a> for the full method table.</p>
 
 <h3 id="status-range" class="resp-mt-2">Valid HTTP status codes</h3>
 
@@ -67,7 +67,7 @@ PHP]); ?>
 <table class="ztable resp-mb-1">
   <tr><th>You return</th><th>What happens</th></tr>
   <tr><td><code>return 0;</code> / <code>return -1;</code> / <code>return 42;</code> / <code>return 999;</code></td><td>Coerced to <strong>500 Internal Server Error</strong> with a warning logged via <code>elog()</code>. Matches Apache HTTP server behaviour (Apache silently coerces out-of-range codes to 500). The log entry surfaces the bug instead of letting it silently fail in production.</td></tr>
-  <tr><td><code>return 1;</code> <em>(special case)</em></td><td>That's what PHP's <code>include</code> returns by default when a file has no explicit <code>return</code> statement. Inside <code>App::include()</code> / <code>App::render()</code> / <code>App::renderToString()</code> / <code>App::renderStream()</code>, a <code>1</code> return is treated as "no explicit return" — the framework surfaces the buffered echo as the response body instead of trying to set HTTP status 1. The same return value from a plain route handler (a closure) IS treated as an int status — and since <code>1</code> is outside the valid 100–599 range, it's coerced to <strong>500</strong> (identical to the row above). The "no explicit return" special-case applies only inside the file-execution family (<code>include()</code>/<code>render()</code>/…), not to closure return values. If you ever explicitly mean "return 1 as a status," return <code>100</code> or another in-range code instead.</td></tr>
+  <tr><td><code>return 1;</code> <em>(special case)</em></td><td>That's what PHP's <code>include</code> returns by default when a file has no explicit <code>return</code> statement. Inside <code>App::include()</code> / <code>App::render()</code> / <code>App::component()</code>, a <code>1</code> return is treated as "no explicit return" — the framework surfaces the buffered echo as the response body instead of trying to set HTTP status 1. The same return value from a plain route handler (a closure) IS treated as an int status — and since <code>1</code> is outside the valid 100–599 range, it's coerced to <strong>500</strong> (identical to the row above). The "no explicit return" special-case applies only inside these file-running methods (<code>include()</code>/<code>render()</code>/<code>component()</code>), not to closure return values. If you ever explicitly mean "return 1 as a status," return <code>100</code> or another in-range code instead.</td></tr>
   <tr><td><code>return null;</code></td><td>"No status override, no body override" — the response defaults to <code>200</code> with whatever body the framework computed (usually empty).</td></tr>
 </table>
 
@@ -215,7 +215,7 @@ $app = App::instance();
 
 // Status-specific
 $app->setErrorHandler(404, function($status) {
-    return App::renderToString('error/404', ['status' => $status]);
+    return App::render('error/404', ['status' => $status]);
 });
 
 $app->setErrorHandler(500, function($exception) {

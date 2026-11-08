@@ -30,7 +30,7 @@ $page = function () {
     // article, identical to what public/docs/index.php produces, but extract
     // only the <article>.
     if ($slug === '' || $slug === '__index__') {
-        $html = App::renderToString('/pages/docs/index', [
+        $html = (string) App::component('/pages/docs/index', [
             'title'  => 'Documentation',
             'page'   => 'docs/index',
             'active' => 'docs',
@@ -64,7 +64,7 @@ $page = function () {
     $body  = \ZealPHP\Docs\MarkdownRenderer::render((string) file_get_contents($realMd));
     $title = ucwords(str_replace(['-', '_'], ' ', $slug));
 
-    $html = App::renderToString('/pages/docs/guide', [
+    $html = (string) App::component('/pages/docs/guide', [
         'title'   => $title . ' · ZealPHP Docs',
         'page'    => 'docs/guide',
         'active'  => 'docs',

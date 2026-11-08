@@ -445,19 +445,13 @@ $app->route('/demo/fragments/contacts', ['methods' => ['GET']], function() {
         // htmx swap response — bare fragment HTML, no shell, so htmx replaces
         // just the matched row. The framework returns 404 automatically if
         // the fragment selector doesn't match any App::fragment() block.
-        return App::render('/demos/contacts-list', [
-            'contacts' => $contacts,
-            'fragment' => $fragment,
-        ]);
+        return App::render('/demos/contacts-list', ['contacts' => $contacts], fragment: $fragment);
     }
 
     // Full page render — wrap in the standard _demo_shell so the page has
     // the same breadcrumb + theme as every other /demo/view/ page on the
     // site, with a back-link to the htmx lesson where this is taught.
-    $body = App::renderToString('/demos/contacts-list', [
-        'contacts' => $contacts,
-        'fragment' => null,
-    ]);
+    $body = (string) App::component('/demos/contacts-list', ['contacts' => $contacts]);
     return DemoHelpers::demo_render(
         'Template fragments — contacts list',
         'One template file, two responses. Click <strong>Show details</strong> on any row — htmx requests <code class="demo-inline">?fragment=contact-{id}</code> and the server returns only that row\'s markup, not the whole page. Open DevTools → Network → XHR to confirm each swap is a single 200 response with just one <code class="demo-inline">&lt;li&gt;</code> in the body. Try <a href="/demo/fragments/contacts?fragment=does-not-exist" target="_blank" rel="noopener">/demo/fragments/contacts?fragment=does-not-exist</a> for the HTTP 404 case — fragment selector with no matching region, no fallback to the full page.',
@@ -843,7 +837,7 @@ $app->route('/demo/view/notes/widget', ['methods' => ['GET']], function () {
             'Personal Notes',
             'Log in below to use the standalone notes widget. You\'ll stay on this page after sign-in.',
             [['heading' => '',
-              'body'    => App::renderToString('/components/_demo_login_card', [
+              'body'    => (string) App::component('demo_login_card', [
                   'intro' => 'This demo needs an account. Sign in or create one — no redirects, the widget loads in place.',
               ])]],
             'learn/notes', 'Personal Notes'
@@ -854,7 +848,7 @@ $app->route('/demo/view/notes/widget', ['methods' => ['GET']], function () {
         'Same <code class="demo-inline">_notes_widget</code> partial that renders inline in the <a href="/learn/notes">Personal Notes lesson</a> — here in its own shell so you can open multiple windows for cross-tab WebSocket sync testing.',
         [
             ['heading' => 'Live widget',
-             'body'    => App::renderToString('/components/_notes_widget', ['user' => $u])],
+             'body'    => (string) App::component('notes_widget', ['user' => $u])],
         ],
         'learn/notes', 'Personal Notes'
     );
@@ -867,7 +861,7 @@ $app->route('/demo/view/chat/widget', ['methods' => ['GET']], function () {
             'AI Chat',
             'Log in below to use the standalone chat widget.',
             [['heading' => '',
-              'body'    => App::renderToString('/components/_demo_login_card', [
+              'body'    => (string) App::component('demo_login_card', [
                   'intro' => 'The chat needs an account so it can read and modify your notes. Sign in or create one — the chat loads in place.',
               ])]],
             'learn/ai-chat', 'AI Chat'
@@ -878,7 +872,7 @@ $app->route('/demo/view/chat/widget', ['methods' => ['GET']], function () {
         'Same <code class="demo-inline">_chat_widget</code> partial that renders inline in the <a href="/learn/ai-chat">AI Chat lesson</a>. Try a prompt like <em>"create a note titled shopping list"</em> and watch the Event Log below the chat for live <span class="proto-badge sse">SSE</span> + <span class="proto-badge ws">WS</span> events.',
         [
             ['heading' => 'Live widget',
-             'body'    => App::renderToString('/components/_chat_widget', ['user' => $u])],
+             'body'    => (string) App::component('chat_widget', ['user' => $u])],
         ],
         'learn/ai-chat', 'AI Chat'
     );
@@ -893,7 +887,7 @@ $app->route('/demo/view/websocket/counter', ['methods' => ['GET']], function () 
         'Click <strong>+1</strong>. Open this URL in a second window — both update live via a WebSocket broadcast to every connected client. <a href="/learn/websocket">Read the build</a>.',
         [
             ['heading' => '',
-             'body'    => App::renderToString('/components/_ws_counter_widget', ['as_demo' => true])],
+             'body'    => (string) App::component('ws_counter_widget', ['as_demo' => true])],
         ],
         'learn/websocket', 'Real-Time Sync'
     );
@@ -906,7 +900,7 @@ $app->route('/demo/view/tictactoe/play', ['methods' => ['GET']], function () {
             'Multiplayer Tic-Tac-Toe',
             'Sign in to play. Display name = your username so opponents see who they\'re playing.',
             [['heading' => '',
-              'body'    => App::renderToString('/components/_demo_login_card', [
+              'body'    => (string) App::component('demo_login_card', [
                   'intro' => 'Tic-tac-toe needs an account so other players see your name. Sign in or create one — the game loads in place.',
               ])]],
             'learn/tictactoe', 'Tic-Tac-Toe'
@@ -919,7 +913,7 @@ $app->route('/demo/view/tictactoe/play', ['methods' => ['GET']], function () {
         'Same room ID = same game. First two players take X and O; rest are viewers. <code class="demo-inline">?view=1</code> forces viewer. <a href="/learn/tictactoe">Read the build</a>.',
         [
             ['heading' => '',  // empty heading; demo-shell-h:empty hides it via CSS
-             'body'    => App::renderToString('/components/_tictactoe_widget', ['user' => $u])],
+             'body'    => (string) App::component('tictactoe_widget', ['user' => $u])],
         ],
         'learn/tictactoe', 'Tic-Tac-Toe'
     );
@@ -932,7 +926,7 @@ $app->route('/demo/view/chatroom/widget', ['methods' => ['GET']], function () {
             'Multi-Room Group Chat',
             'Log in below to chat. Same auth as Notes / Tic-Tac-Toe — one account, all the demos.',
             [['heading' => '',
-              'body'    => App::renderToString('/components/_demo_login_card', [
+              'body'    => (string) App::component('demo_login_card', [
                   'intro' => 'The chat tags each message with your username so the other tabs know who said it. Sign in or create one — the widget loads in place.',
               ])]],
             'learn/chatroom', 'Multi-Room Group Chat'
@@ -943,7 +937,7 @@ $app->route('/demo/view/chatroom/widget', ['methods' => ['GET']], function () {
         'Same <code class="demo-inline">_chatroom_widget</code> partial that renders inline in the <a href="/learn/chatroom">lesson</a>. SQLite-backed history persists across reloads; open in two tabs to chat with yourself. <a href="/learn/chatroom">Read the build</a>.',
         [
             ['heading' => '',
-             'body'    => App::renderToString('/components/_chatroom_widget', ['user' => $u])],
+             'body'    => (string) App::component('chatroom_widget', ['user' => $u])],
         ],
         'learn/chatroom', 'Multi-Room Group Chat'
     );

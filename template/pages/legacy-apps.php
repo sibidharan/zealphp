@@ -1061,7 +1061,7 @@ $app->setErrorHandler(500, function ($exception) {
     if (str_contains($g->server['HTTP_ACCEPT'] ?? '', 'application/json')) {
         return ['error' => 'Internal Server Error', 'trace_id' => uniqid()];
     }
-    return App::renderToString('error/500', ['exception' => $exception]);
+    return App::render('error/500', ['exception' => $exception]);
 });
 PHP]); ?>
 

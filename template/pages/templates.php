@@ -70,13 +70,13 @@ PHP]); ?>
 <html>
 <head><title><?= htmlspecialchars($title) ?></title></head>
 <body>
-  <?php App::render('_nav', ['active' => $page]) ?>
+  <?= App::component('/_nav', ['active' => $page]) ?>
 
   <main>
-    <?php App::render("/pages/$page") ?>
+    <?= App::component("/pages/$page") ?>
   </main>
 
-  <?php App::render('_footer') ?>
+  <?= App::component('/_footer') ?>
 </body>
 </html>
 PHP]); ?>
@@ -105,7 +105,7 @@ PHP]); ?>
     'label' => 'Using the component in any template',
     'code'  => <<<'PHP'
 <?php foreach ($features as $f): ?>
-  <?php App::render('/components/_card', [
+  <?= App::component('card', [
       'icon'  => $f['icon'],
       'title' => $f['name'],
       'body'  => $f['desc'],
@@ -121,30 +121,26 @@ PHP]); ?>
 <tr><td><code>App::render('/components/_card')</code></td><td><code>template/components/_card.php</code></td><td>Leading <code>/</code> = absolute from <code>template/</code></td></tr>
 <tr><td><code>App::render('header')</code> from <code>public/users.php</code></td><td><code>template/users/header.php</code></td><td>Auto-namespaces by current public file</td></tr>
 <tr><td><code>App::render('header')</code> (fallback)</td><td><code>template/header.php</code></td><td>If namespaced path doesn't exist</td></tr>
+<tr><td><code>App::component('card')</code></td><td><code>template/components/card.php</code>, else <code>template/components/_card.php</code></td><td>A component name</td></tr>
+<tr><td><code>App::component('/emails/welcome')</code></td><td><code>template/emails/welcome.php</code></td><td>Leading <code>/</code> = any template, absolute from <code>template/</code></td></tr>
 </table>
 
-<h2 id="file-execution-family">The file-execution family — five ways to run a PHP file through the framework</h2>
-<p>The first four share a single private core (<code>App::executeFile()</code>) that runs the file, captures output, and applies the <a href="/responses#return-contract">universal return contract</a>. They differ only on (a) where the path is resolved from and (b) what the wrapper does with the result. The fifth — <code>App::fragment()</code> — runs <em>inside</em> a template and marks a named region the framework can extract by name. See the <a href="#fragments">fragments section</a> below.</p>
+<h2 id="file-execution-family">The rendering methods — <code>render()</code> and <code>component()</code></h2>
+<p>Rendering comes down to two methods. <code>App::render()</code> renders a page or a response; its options select a fragment, make the render htmx-aware, or return a stream. <code>App::component()</code> returns markup as a value and never echoes; use it to compose. Both run the template through one private core (<code>App::executeFile()</code>) and apply the <a href="/responses#return-contract">universal return contract</a>. <code>App::include()</code> runs a file from <code>public/</code> the same way, and <code>App::fragment()</code> runs <em>inside</em> a template to mark a named region the framework can extract by name. See the <a href="#fragments">fragments section</a> below.</p>
 
 <table class="ztable tpl-mb">
 <tr><th>Method</th><th>Path resolved from</th><th>Returns</th><th>Use when</th></tr>
 <tr>
-  <td><code>App::render($tpl, $args)</code></td>
+  <td><code>App::render($tpl, $args, …options)</code></td>
   <td><code>template/</code> (with <code>.php</code> suffix)</td>
-  <td><code>mixed</code> — full <a href="/responses#return-contract">return contract</a>. <strong>BC:</strong> if the template only echoes (no explicit <code>return</code>), the captured output is echoed back — keeps every <code>App::render('_master', …)</code> call site working unchanged.</td>
-  <td>Direct output in a route handler or inside another template; the bread-and-butter render call</td>
+  <td><code>mixed</code> — full <a href="/responses#return-contract">return contract</a>. A string result is also echoed (<code>echo: true</code>, the default), so every <code>App::render('_master', …)</code> statement in <code>public/*.php</code> keeps working.</td>
+  <td>A page, or a route's response. Options: <code>fragment:</code>, <code>htmx:</code>, <code>fullPage:</code>, <code>stream:</code>, <code>echo:</code></td>
 </tr>
 <tr>
-  <td><code>App::renderToString($tpl, $args)</code></td>
-  <td><code>template/</code></td>
-  <td><code>string</code> — coerces every shape (Generator consumed, Closure invoked, scalar cast)</td>
-  <td>Need the HTML as a value: email body, cache entry, or to pass into another renderer</td>
-</tr>
-<tr>
-  <td><code>App::renderStream($tpl, $args)</code></td>
-  <td><code>template/</code></td>
-  <td><code>\Generator</code> — yields whatever the template returned, chunk-by-chunk</td>
-  <td>SSR streaming. Works with regular echo templates AND streaming-Closure templates uniformly</td>
+  <td><code>App::component($name, $props)</code></td>
+  <td><code>template/components/</code> for a name (<code>'card'</code>); <code>template/</code> for a leading <code>/</code> (<code>'/emails/welcome'</code>)</td>
+  <td><code>ZealPHP\SafeHtml</code> — markup, never echoed. Cast with <code>(string)</code> where a plain string is required (<code>json_encode()</code>, <code>strlen()</code>, a <code>string</code> parameter).</td>
+  <td>Markup inside a page (<code>&lt;?= App::component(…) ?&gt;</code>), an htmx partial, an email body</td>
 </tr>
 <tr>
   <td><code>App::include($publicPath, $args = [])</code></td>
@@ -156,15 +152,46 @@ PHP]); ?>
   <td><code>App::fragment($name, $fn)</code> <span class="badge tpl-version-badge">v0.2.24</span></td>
   <td>N/A — called <em>inside</em> a template, not on a path</td>
   <td><code>void</code>. The closure's return rides the full return contract when the fragment is extracted (the parent <code>App::render()</code> propagates it back through <code>ResponseMiddleware</code>).</td>
-  <td>Mark a named region inside a template so the same <code>App::render('page', $args)</code> call can serve either the full page (no selector) or just that one region (<code>$args['fragment'] = 'name'</code>). The htmx-essay <a href="/learn/htmx#fragments">"one file, two responses"</a> pattern.</td>
+  <td>Mark a named region inside a template so the same template can serve either the full page (no selector) or just that one region (<code>App::render('page', $args, fragment: 'name')</code>). The htmx-essay <a href="/learn/htmx#fragments">"one file, two responses"</a> pattern.</td>
 </tr>
+</table>
+
+<h3 id="render-options" class="tpl-mt"><code>App::render()</code> options</h3>
+<table class="ztable tpl-mb">
+<tr><th>Option</th><th>What it does</th></tr>
+<tr><td><code>fragment: 'name'</code></td><td>Renders only that <code>App::fragment()</code> region. A name with no matching region is a 404.</td></tr>
+<tr><td><code>htmx: true</code></td><td>Renders a fragment for htmx requests and the full page otherwise. The region is <code>fragment:</code>, else derived from <code>HX-Target</code> / <code>HX-Trigger-Name</code>. See <a href="/htmx#render-htmx">htmx</a>.</td></tr>
+<tr><td><code>fullPage: 'tpl'</code></td><td>With <code>htmx: true</code> only: the first template is a bare partial for htmx requests, and <code>fullPage:</code> is the page for normal requests.</td></tr>
+<tr><td><code>stream: true</code></td><td>Returns a <code>\Generator</code> and never echoes. Compose several with <code>yield from</code>; see <a href="#streaming">SSR streaming</a> below.</td></tr>
+<tr><td><code>echo: false</code></td><td>Returns the result without echoing it.</td></tr>
+</table>
+
+<?php App::render('/components/_code', [
+    'label' => 'One method, every kind of render',
+    'code'  => <<<'PHP'
+App::render('_master', ['page' => 'home']);              // echo the page (public/*.php)
+return App::render('users/show', ['user' => $u]);         // a route's response
+return App::render('search', $args, htmx: true);          // fragment for htmx, page otherwise
+return App::render('contacts', $args, fragment: 'row-7'); // one App::fragment() region
+return App::render('feed', $args, stream: true);          // a Generator, flushed chunk by chunk
+
+$html = App::component('card', ['title' => 'Hi']);        // markup as a value, never echoed
+PHP]); ?>
+
+<h3 id="deprecated-helpers" class="tpl-mt">Deprecated helpers</h3>
+<p>Earlier releases had a separate method for each way of rendering. They still work until 1.0, but new code should use the two methods above.</p>
+<table class="ztable tpl-mb">
+<tr><th>Deprecated</th><th>Use instead</th></tr>
+<tr><td><code>App::renderToString($tpl, $args)</code></td><td><code>App::component('/tpl', $args)</code> — write the path absolute from <code>template/</code>, and add <code>(string)</code> where a plain string is required</td></tr>
+<tr><td><code>App::renderStream($tpl, $args)</code></td><td><code>App::render($tpl, $args, stream: true)</code></td></tr>
+<tr><td><code>App::renderHtmx($tpl, $args, $fragmentName, $fullPageTemplate)</code></td><td><code>App::render($tpl, $args, htmx: true, fragment: $fragmentName, fullPage: $fullPageTemplate)</code></td></tr>
 </table>
 
 <p class="tpl-note"><code>App::includeFile()</code> is the deprecated alias for <code>App::include()</code> — kept for backward compatibility (the WordPress showcase and existing scaffolds still call it). New code should use <code>App::include()</code>.</p>
 
 <h3 id="fragments" class="tpl-mt">Template fragments — one file, two responses</h3>
 <p>
-  <code>App::fragment($name, $fn)</code> turns any template into a dual-mode file: the same <code>App::render('page', $args)</code> call serves <strong>either</strong> the complete page (no fragment selector → every <code>App::fragment()</code> block runs inline) <strong>or</strong> just one named region (<code>$args['fragment'] = 'name'</code> → that region's buffer is cleared, only its closure runs, the rest of the template short-circuits via <code>HaltException</code>). Same template, same route handler, two different responses on the same URL — the <a href="https://htmx.org/essays/template-fragments/" target="_blank" rel="noopener">htmx-essay template-fragment</a> pattern without separate partial files.
+  <code>App::fragment($name, $fn)</code> turns any template into a dual-mode file: the same template serves <strong>either</strong> the complete page (<code>App::render('page', $args)</code>, no fragment selector → every <code>App::fragment()</code> block runs inline) <strong>or</strong> just one named region (<code>App::render('page', $args, fragment: 'name')</code> → that region's buffer is cleared, only its closure runs, the rest of the template short-circuits via <code>HaltException</code>). Same template, same route handler, two different responses on the same URL — the <a href="https://htmx.org/essays/template-fragments/" target="_blank" rel="noopener">htmx-essay template-fragment</a> pattern without separate partial files.
 </p>
 
 <?php App::render('/components/_code', [
@@ -184,12 +211,10 @@ PHP,
   'label' => 'route handler — ONE entry, both modes',
   'code'  => <<<'PHP'
 $app->route('/contacts', function($g) {
-    return App::render('contacts/list', [
-        'contacts' => Contact::all(),
-        // No selector → full <ul> with every row inline.
-        // ?fragment=contact-2 → just that one <li> on the wire.
-        'fragment' => is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null,
-    ]);
+    // No selector → full <ul> with every row inline.
+    // ?fragment=contact-2 → just that one <li> on the wire.
+    $fragment = is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null;
+    return App::render('contacts/list', ['contacts' => Contact::all()], fragment: $fragment);
 });
 PHP,
 ]); ?>
@@ -210,8 +235,8 @@ PHP,
           .  '<p class="tpl-tryit-note">Full walk-through: <a href="/learn/htmx#fragments" class="tpl-tryit-link">Forms &amp; htmx — Template fragments</a>.</p>',
 ]); ?>
 
-<h2>SSR Streaming — yield from templates</h2>
-<p><code>App::renderStream()</code> returns a Generator. If the template file returns a Generator (via IIFE), it delegates with <code>yield from</code>. If the template echoes normally, the output is captured and yielded as one chunk. <strong>Both patterns compose in the same streaming pipeline.</strong></p>
+<h2 id="streaming">SSR Streaming — yield from templates</h2>
+<p><code>App::render($tpl, $args, stream: true)</code> returns a Generator and never echoes. If the template file returns a Generator (via IIFE), it delegates with <code>yield from</code>. If the template echoes normally, the output is captured and yielded as one chunk. <strong>Both patterns compose in the same streaming pipeline.</strong></p>
 
 <div class="tpl-split">
 <div>
@@ -239,17 +264,19 @@ PHP]); ?>
 $app->route('/users', function() {
     return (function() {
         // Regular template → single chunk
-        yield from App::renderStream(
-            'shell-open', ['title' => 'Users']
+        yield from App::render(
+            'shell-open', ['title' => 'Users'],
+            stream: true
         );
 
         // Streaming template → per-user chunks
-        yield from App::renderStream(
+        yield from App::render(
             'users/stream',
-            ['users' => User::all()]
+            ['users' => User::all()],
+            stream: true
         );
 
-        yield from App::renderStream('shell-close');
+        yield from App::render('shell-close', stream: true);
     })();
 });
 PHP]); ?>
@@ -277,7 +304,7 @@ PHP]); ?>
   <td>Non-streaming templates — output captured as one chunk</td>
 </tr>
 </table>
-<p>All three compose in the same <code>yield from App::renderStream(...)</code> pipeline.</p>
+<p>All three compose in the same <code>yield from App::render(..., stream: true)</code> pipeline.</p>
 
 <h2>Yield from everywhere</h2>
 <p>Generators work in route handlers, public/ files, API handlers, and template files:</p>
@@ -301,7 +328,7 @@ PHP]); ?>
 </tr>
 <tr>
   <td>Template</td>
-  <td>Return a Closure via <code>renderStream()</code></td>
+  <td>Return a Closure, render it with <code>stream: true</code></td>
   <td><code>return function($items) { yield ...; };</code></td>
 </tr>
 </table>
@@ -315,14 +342,14 @@ PHP]); ?>
 use ZealPHP\App;
 
 return (function() {
-    yield App::renderToString('shell-open', ['title' => 'Live Feed']);
+    yield from App::render('shell-open', ['title' => 'Live Feed'], stream: true);
     yield "<h1>Feed</h1>";
 
     foreach (fetchFeedItems() as $item) {
         yield "<article>{$item->title}</article>\n";
     }
 
-    yield App::renderToString('shell-close');
+    yield from App::render('shell-close', stream: true);
 })();
 PHP]); ?>
 
@@ -352,7 +379,7 @@ PHP]); ?>
 <tr><td>Escape HTML</td><td><code>&lt;?= htmlspecialchars($input) ?&gt;</code></td></tr>
 <tr><td>Conditional</td><td><code>&lt;?php if ($cond): ?&gt; ... &lt;?php endif; ?&gt;</code></td></tr>
 <tr><td>Loop</td><td><code>&lt;?php foreach ($items as $i): ?&gt; ... &lt;?php endforeach; ?&gt;</code></td></tr>
-<tr><td>Include component</td><td><code>&lt;?php App::render('/components/_card', $args) ?&gt;</code></td></tr>
+<tr><td>Include component</td><td><code>&lt;?= App::component('card', $args) ?&gt;</code></td></tr>
 <tr><td>Ternary default</td><td><code>&lt;?= $subtitle ?? 'Default' ?&gt;</code></td></tr>
 <tr><td>Format number</td><td><code>&lt;?= number_format($price, 2) ?&gt;</code></td></tr>
 <tr><td>Date format</td><td><code>&lt;?= date('M j, Y', strtotime($created)) ?&gt;</code></td></tr>

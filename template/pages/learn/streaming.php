@@ -50,8 +50,8 @@
           <td>Server-Sent Events — JS <code>EventSource</code> for real-time push</td>
         </tr>
         <tr>
-          <td><code>App::renderStream()</code></td>
-          <td><code>yield from App::renderStream('feed', ['posts' =&gt; $p]);</code></td>
+          <td><code>App::render(..., stream: true)</code></td>
+          <td><code>yield from App::render('feed', ['posts' =&gt; $p], stream: true);</code></td>
           <td>Stream from a template file — compose with other streams</td>
         </tr>
       </tbody>
@@ -115,7 +115,7 @@
       hooks in. See <a href="/learn/ai-chat">lesson 20 (AI Chat)</a> for the full setup with a real chat UI.
     </p>
 
-    <h2>Pattern 4: App::renderStream() — compose templates</h2>
+    <h2>Pattern 4: App::render(stream: true) — compose templates</h2>
     <p>
       Streaming templates let you split a long page into chunks that each yield independently:
     </p>
@@ -131,9 +131,9 @@
 // route handler — compose multiple streaming templates
 $app-&gt;route('/feed', function () {
     return (function () {
-        yield from App::renderStream('shell-open', ['title' =&gt; 'Feed']);
-        yield from App::renderStream('feed/stream', ['posts' =&gt; Post::recent()]);
-        yield from App::renderStream('shell-close');
+        yield from App::render('shell-open', ['title' =&gt; 'Feed'], stream: true);
+        yield from App::render('feed/stream', ['posts' =&gt; Post::recent()], stream: true);
+        yield from App::render('shell-close', stream: true);
     })();
 });</code></pre>
     <p>
@@ -205,7 +205,7 @@ $response-&gt;sse(function ($emit) {
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'Don\'t mix streaming with output buffering',
-      'body'    => '<p>If you <code>yield</code> from a handler, don’t also <code>echo</code> — the framework flushes headers when it sees a Generator return, but <code>echo</code> output would arrive after the streamed chunks. Same goes for <code>App::render()</code> mid-handler: use <code>renderToString()</code> if you want a string, or <code>renderStream()</code> if you want to yield template output. Mixing modes is the only way streaming bites you.</p>',
+      'body'    => '<p>If you <code>yield</code> from a handler, don’t also <code>echo</code> — the framework flushes headers when it sees a Generator return, but <code>echo</code> output would arrive after the streamed chunks. Same goes for <code>App::render()</code> mid-handler, which echoes: use <code>App::component()</code> if you want the markup as a value, or <code>App::render(..., stream: true)</code> if you want to yield template output. Mixing modes is the only way streaming bites you.</p>',
     ]); ?>
 
     <h2>Try it live</h2>
@@ -230,7 +230,7 @@ $response-&gt;sse(function ($emit) {
 
     <?php App::render('/components/_keytakeaways', ['items' => [
       'Coroutine mode makes streaming cheap — one stream doesn’t monopolize a worker.',
-      'Four patterns: Generator yield (HTML SSR), <code>stream()</code> (manual flush), <code>sse()</code> (Server-Sent Events), <code>renderStream()</code> (template composition).',
+      'Four patterns: Generator yield (HTML SSR), <code>stream()</code> (manual flush), <code>sse()</code> (Server-Sent Events), <code>render(stream: true)</code> (template composition).',
       'Generator return is the simplest path — works for any HTML-on-the-fly use case.',
       'Use SSE for push-only, WebSocket only when client → server is also needed.',
       'Don’t mix <code>yield</code> with <code>echo</code> in the same handler — pick one mode.',

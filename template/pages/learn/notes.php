@@ -14,7 +14,7 @@ $active = $active ?? 'learn/notes';
 
     <?php App::render('/components/_youwilllearn', ['items' => [
       'Build a full CRUD app with SQLite and htmx',
-      'Return HTML fragments from API endpoints with App::renderToString()',
+      'Return HTML fragments from API endpoints with App::component()',
       'Wire htmx to add, list, and delete notes without page reloads',
       'Reuse components across different contexts (list, create, chat history)',
     ]]); ?>
@@ -184,12 +184,13 @@ class Notes
 
     <p class="callout-note"><strong>Note:</strong> The abbreviated <code>Notes::create</code> above always returns an int when it reaches <code>lastInsertId()</code>. The real implementation in <code>vendor/</code> also returns <code>null</code> on validation failure — empty or oversized title, body exceeding 4096 characters, or a per-user quota breach — which is why the endpoint checks <code>if ($id === null)</code> and responds 422.</p>
 
-    <h3>Introducing <code>App::renderToString()</code></h3>
+    <h3>Introducing <code>App::component()</code></h3>
     <p>
       In Lesson 13 (<a href="/learn/components">Layouts &amp; Components</a>), you learned
       <code>App::render()</code> which echoes HTML. But htmx sent a POST and expects HTML back as the
-      <em>response body</em>. You need the HTML as a string, not echoed to the page. That's
-      <code>App::renderToString()</code>:
+      <em>response body</em>. You need the HTML as a value, not echoed to the page. That's
+      <code>App::component()</code>: it renders a component from <code>template/components/</code>
+      and returns the markup without echoing it.
     </p>
     <p><strong>Create <code>api/learn/notes.php</code></strong> &mdash; this is the endpoint htmx talks to:</p>
     <pre><code class="language-php">&lt;?php
@@ -217,7 +218,7 @@ ${basename(__FILE__, '.php')} = function () {
         WS::broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'create', 'id' => $id]);
         $note = Notes::read($db, $u['user_id'], $id);
         header('Content-Type: text/html; charset=utf-8');
-        $this->response(App::renderToString('/components/_note_card', $note), 200);
+        $this->response((string) App::component('note_card', $note), 200);
         return;
     }
 
@@ -230,11 +231,11 @@ ${basename(__FILE__, '.php')} = function () {
     }
     $html = '';
     foreach ($notesList as $n) {
-        $html .= App::renderToString('/components/_note_card', $n);
+        $html .= App::component('note_card', $n);
     }
     $this->response($html, 200);
 };</code></pre>
-    <p>The key line: <code>App::renderToString('/components/_note_card', $note)</code> renders the card you created above and returns it as a string &mdash; exactly what htmx expects as the response body.</p>
+    <p>The key line: <code>App::component('note_card', $note)</code> renders the card you created above (<code>template/components/_note_card.php</code>) and returns its markup &mdash; exactly what htmx expects as the response body. <code>$this-&gt;response()</code> takes a string, so the POST branch casts it with <code>(string)</code>; the <code>.=</code> in the list branch converts it on its own.</p>
 
     <?php App::render('/components/_callout', [
       'variant' => 'info',
@@ -338,7 +339,7 @@ if (msg.type === 'note_changed') {
 
     <?php App::render('/components/_keytakeaways', ['items' => [
       'CRUD is four verbs: Create, Read, Update, Delete — every data app follows this pattern',
-      '<code>App::renderToString()</code> returns HTML as a string for htmx fragment responses',
+      '<code>App::component()</code> returns markup as a value for htmx fragment responses',
       'Four htmx attributes replace 30+ lines of JavaScript for form submission',
       'User-scoped queries (<code>WHERE user_id = ?</code>) ensure data isolation',
     ]]); ?>

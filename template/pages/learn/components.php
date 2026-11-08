@@ -12,8 +12,8 @@
 
     <?php App::render('/components/_youwilllearn', ['items' => [
       'Why copy-pasting layouts across pages is a maintenance nightmare',
-      'Use App::render() to compose pages from reusable templates',
-      'Build your own components — cards, callouts, anything',
+      'Use App::render() to render a page inside a shared layout',
+      'Build your own components — cards, callouts, anything — and compose them with App::component()',
       'How template variables flow from handler to view',
     ]]); ?>
 
@@ -37,7 +37,7 @@
 &lt;body&gt;
   &lt;nav&gt;...your nav here...&lt;/nav&gt;
   &lt;main&gt;
-    &lt;?php App::render('/pages/' . $page); ?&gt;
+    &lt;?= App::component('/pages/' . $page) ?&gt;
   &lt;/main&gt;
   &lt;footer&gt;...&lt;/footer&gt;
 &lt;/body&gt;
@@ -50,7 +50,10 @@ App::render('/_master', ['title' =&gt; 'About', 'page' =&gt; 'about']);</code></
     <p>
       <code>App::render()</code> loads <code>template/_master.php</code>, extracts the variables
       (<code>$title</code> and <code>$page</code>) into scope, and executes it. The master template
-      then renders the page content with a nested <code>App::render('/pages/about')</code>.
+      then renders the page content with a nested <code>App::component('/pages/about')</code>, which
+      returns the page's markup for <code>&lt;?= ?&gt;</code> to print. <code>App::render()</code> is for the
+      page itself; <code>App::component()</code> is for markup you put inside it. A leading <code>/</code>
+      means the path is absolute from <code>template/</code>.
     </p>
     <p>
       Change the nav once in <code>_master.php</code> — every page picks it up. That's the
@@ -69,13 +72,18 @@ App::render('/_master', ['title' =&gt; 'About', 'page' =&gt; 'about']);</code></
   &lt;h3&gt;&lt;?= htmlspecialchars($title) ?&gt;&lt;/h3&gt;
   &lt;p&gt;&lt;?= $body ?&gt;&lt;/p&gt;
 &lt;/article&gt;</code></pre>
-    <p>Use it anywhere:</p>
-    <pre><code class="language-php">App::render('/components/_card', [
+    <p>Use it in any template:</p>
+    <pre><code class="language-php-template">&lt;?= App::component('card', [
     'title'   =&gt; 'Fast',
     'body'    =&gt; '117k requests per second',
     'variant' =&gt; 'highlight',
-]);</code></pre>
-    <p>No class, no JSX, no bundler. A component is just a PHP file that echoes HTML with variables.</p>
+]) ?&gt;</code></pre>
+    <p>
+      <code>App::component('card')</code> looks in <code>template/components/</code> for <code>card.php</code>,
+      then <code>_card.php</code>. It returns the markup and never echoes it, so you print it with
+      <code>&lt;?= ?&gt;</code>, concatenate it, or return it from a route.
+      No class, no JSX, no bundler. A component is just a PHP file that echoes HTML with variables.
+    </p>
 
     <?php App::render('/components/_before_after', [
       'id' => 'react-php',
@@ -112,19 +120,19 @@ App::render('/_master', ['title' =&gt; 'About', 'page' =&gt; 'about']);</code></
       when the caller doesn't pass <code>variant</code>.</p>
 
     <?php App::render('/components/_tryit', ['title' => 'Live demo: render in action', 'body' => <<<HTML
-      <p>This page you're reading is built with nested <code>App::render()</code> calls. The "You will learn" box, this "Try it" block, the nav, the sidebar — each is a separate component template being rendered with <code>App::render()</code>.</p>
-      <p>See the render method in action: <a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open render demo →</a></p>
+      <p>This page you're reading is a layout rendered with <code>App::render()</code>. The "You will learn" box, this "Try it" block, the nav, the sidebar — each is a separate component template rendered inside it.</p>
+      <p>See both methods in action: <a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open render demo →</a> <a class="lesson-chip" href="/api/learn/demo/render-to-string" target="_blank">Open component demo →</a></p>
 HTML]); ?>
 
     <?php App::render('/components/_deepdive', [
-      'title' => 'Preview: two more render methods',
-      'body'  => '<p>You\'ll learn these in later lessons, but you can preview them now:</p>
+      'title' => 'Preview: the rest of the rendering API',
+      'body'  => '<p>You\'ll use these in later lessons, but you can preview them now:</p>
 <table class="preview-table">
   <thead><tr><th>Method</th><th>Returns</th><th>Use when</th><th></th></tr></thead>
   <tbody>
-    <tr><td><code>render()</code></td><td>void (echoes)</td><td>Direct output — this lesson</td><td><a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open →</a></td></tr>
-    <tr><td><code>renderToString()</code></td><td>string</td><td>htmx fragments — <a href="/learn/notes">Lesson 18</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-to-string" target="_blank">Open →</a></td></tr>
-    <tr><td><code>renderStream()</code></td><td>Generator</td><td>SSR streaming — <a href="/learn/ai-chat">Lesson 20</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-stream" target="_blank">Open →</a></td></tr>
+    <tr><td><code>render()</code></td><td>the result (echoed too)</td><td>A page or a response — this lesson</td><td><a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open →</a></td></tr>
+    <tr><td><code>component()</code></td><td>markup, never echoed</td><td>Composing pieces; htmx fragments — <a href="/learn/notes">Lesson 18</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-to-string" target="_blank">Open →</a></td></tr>
+    <tr><td><code>render(..., stream: true)</code></td><td>Generator</td><td>SSR streaming — <a href="/learn/ai-chat">Lesson 20</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-stream" target="_blank">Open →</a></td></tr>
   </tbody>
 </table>
 <p>The streaming demo is the most visual — watch 12 rows arrive one by one over ~2 seconds. Each <code>yield</code> flushes a chunk to the browser immediately.</p>',
@@ -132,11 +140,11 @@ HTML]); ?>
 
     <?php App::render('/components/_concept_check', [
       'id'       => 'comp1',
-      'question' => 'What does App::render(\'/components/_card\', [\'title\' => \'Hi\']) do?',
-      'correct'  => 'b',
-      'explain'  => 'App::render() loads the template file, extracts the array as local variables, executes the template, and echoes the output.',
+      'question' => 'What does App::component(\'card\', [\'title\' => \'Hi\']) do?',
+      'correct'  => 'a',
+      'explain'  => 'App::component() loads template/components/_card.php, extracts the array as local variables, executes the template, and returns the markup without echoing it. Print it with &lt;?= ?&gt;. App::render() is the one that echoes.',
       'options'  => [
-        'a' => 'Returns the HTML as a string',
+        'a' => 'Returns the rendered markup without echoing it',
         'b' => 'Echoes the rendered HTML to the response',
         'c' => 'Creates a new Card class instance',
       ],
@@ -144,9 +152,9 @@ HTML]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
       '<code>App::render(\'/_master\', [...])</code> wraps pages in a shared layout',
+      '<code>&lt;?= App::component(\'card\', [...]) ?&gt;</code> composes pieces — it returns markup and never echoes',
       'Components are PHP files that echo HTML with variables — no framework overhead',
       'Variables are extracted from the render array into the template\'s scope',
-      'For now you only need <code>render()</code> — two more methods come in later lessons',
     ]]); ?>
 
     <div class="lesson-chips">

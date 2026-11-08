@@ -1,30 +1,47 @@
 # Templates and Rendering
 
-ZealPHP renders HTML on the server with plain PHP — no Blade, no Twig, no compile step. Templates live under `template/`, public-served files live under `public/`, and the framework exposes a small **file-execution family** of methods that runs PHP files through a single private core (`App::executeFile()`) and applies the [universal return contract](#universal-return-contract).
+ZealPHP renders HTML on the server with plain PHP — no Blade, no Twig, no compile step. Templates live under `template/`, public-served files live under `public/`, and rendering comes down to two methods:
 
-This guide covers every member of that family, the htmx-style fragment pattern, and SSR streaming from templates.
+- **`App::render()`** renders a page or a response. Options select a fragment, make the render htmx-aware, or return a stream.
+- **`App::component()`** returns markup as a value and never echoes. Use it to compose: a card inside a page, an htmx partial, an email body.
 
-## The file-execution family — five ways to run a PHP file
+Both run the template through one private core (`App::executeFile()`) and apply the [universal return contract](#universal-return-contract). Two more methods complete the set: `App::include()` runs a file from `public/`, and `App::fragment()` marks a named region inside a template.
 
-The first four methods share a single private core (`App::executeFile()`) that runs the file, captures output, and applies the universal return contract. They differ only in (a) where the path is resolved from and (b) what the wrapper does with the result. The fifth — `App::fragment()` — runs *inside* a template and marks a named region the framework can extract by name.
+This guide covers each of them, the htmx-style fragment pattern, and SSR streaming from templates.
+
+## The rendering methods
 
 | Method | Path resolved from | Returns | Use when |
 |--------|--------------------|---------|----------|
-| `App::render($tpl, $args)` | `template/` (with `.php` suffix) | `mixed` — full return contract. **BC:** templates with no explicit `return` have their captured output echoed back. | Direct output in a route handler or inside another template |
-| `App::renderToString($tpl, $args)` | `template/` | `string` — coerces every shape (Generator consumed, Closure invoked, scalar cast) | Need HTML as a value: email body, cache entry, pass into another renderer |
-| `App::renderStream($tpl, $args)` | `template/` | `\Generator` — yields whatever the template returned, chunk-by-chunk | SSR streaming; works with echo templates AND streaming-Closure templates uniformly |
+| `App::render($tpl, $args, …options)` | `template/` (with `.php` suffix) | `mixed` — full return contract. A string result is also echoed (`echo: true`, the default), so `App::render('_master', …)` statements in `public/*.php` keep working. | A page, or a route's response. Options: `fragment:`, `htmx:`, `fullPage:`, `stream:`, `echo:` |
+| `App::component($name, $props)` | `template/components/` for a name (`'card'`); `template/` for a leading `/` (`'/emails/welcome'`) | `ZealPHP\SafeHtml` — markup, never echoed. Cast with `(string)` where a plain string is required. | Markup inside a page, an htmx partial, an email body, anything you compose |
 | `App::include($publicPath, $args = [])` | `public/` (Apache document-root convention — leading `/` optional) | `mixed` — full return contract, never echoed. Auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, `SCRIPT_FILENAME`. | Apache-style rewrites — serve `public/new.php` from a different route URL in-process |
 | `App::fragment($name, $fn)` *(v0.2.24)* | N/A — called *inside* a template | `void`. The closure's return rides the full return contract when extracted. | htmx-style template-fragment pattern — one file, two responses |
 
 `App::includeFile($path)` is a **deprecated** alias for `App::include()` retained for the WordPress showcase and existing scaffolds. New code should use `App::include()`.
 
-## `App::render()` — render a template
+### Deprecated helpers
+
+Earlier releases had a separate method for each way of rendering. They still work until 1.0, but new code should use the two methods above.
+
+| Deprecated | Use instead |
+|------------|-------------|
+| `App::renderToString($tpl, $args)` | `App::component('/tpl', $args)` — write the path absolute from `template/`, and add `(string)` where a plain string is required |
+| `App::renderStream($tpl, $args)` | `App::render($tpl, $args, stream: true)` |
+| `App::renderHtmx($tpl, $args, $fragmentName, $fullPageTemplate)` | `App::render($tpl, $args, htmx: true, fragment: $fragmentName, fullPage: $fullPageTemplate)` |
+
+## `App::render()` — render a page or a response
 
 ```php
 public static function render(
     string $__template_file = 'index',
     array $__args = [],
-    string $__default_template_dir = 'template'
+    string $__default_template_dir = 'template',
+    ?string $fragment = null,
+    bool $htmx = false,
+    ?string $fullPage = null,
+    bool $stream = false,
+    bool $echo = true,
 ): mixed
 ```
 
@@ -45,6 +62,24 @@ $app->route('/users/{id}', function($id) {
 });
 ```
 
+### Options
+
+| Option | What it does |
+|--------|--------------|
+| `fragment: 'name'` | Renders only that `App::fragment()` region (see below). A name with no matching region is a 404. |
+| `htmx: true` | Renders a fragment for htmx requests and the full page otherwise. The region is `fragment:`, else derived from `HX-Target` / `HX-Trigger-Name`. Sends `Vary: HX-Request, HX-Target, HX-Trigger-Name`. See the [htmx guide](htmx.md). |
+| `fullPage: 'tpl'` | With `htmx: true` only: the first template is a bare partial for htmx requests, and `fullPage:` is the page for normal requests. |
+| `stream: true` | Returns a `\Generator` and never echoes. Compose several with `yield from`; see [Rendering as a stream](#rendering-as-a-stream--stream-true). |
+| `echo: false` | Returns the result without echoing it. |
+
+```php
+App::render('_master', ['page' => 'home']);              // echo the page (public/*.php)
+return App::render('users/show', ['user' => $u]);         // a route's response
+return App::render('search', $args, htmx: true);          // fragment for htmx, page otherwise
+return App::render('contacts', $args, fragment: 'row-7'); // one App::fragment() region
+return App::render('feed', $args, stream: true);          // a Generator, flushed chunk by chunk
+```
+
 **Echo side effect.** When a template's result is a string — it only echoed, or it returned a string — `App::render()` both **echoes** that string and **returns** it. That keeps every `App::render('_master', ...)` statement in `public/*.php` working. Non-string results (an int status, an array, a Generator, a `ResponseInterface`) are returned without being echoed.
 
 What that means in practice:
@@ -55,9 +90,9 @@ What that means in practice:
 | `App::render('page');` as a statement (in `public/*.php` or a template) | The output is echoed once, where the call sits. |
 | `<?= App::render('child') ?>` inside a template | **The child appears twice** — once from `render()`'s echo, once from `<?=`. |
 | `$html = App::render('child');` inside a template | **The child is echoed immediately**, and again wherever you echo `$html`. |
-| `<?= App::renderToString('child') ?>` or `$html = App::renderToString('child');` | The child appears once. `renderToString()` never echoes. |
+| `<?= App::component('/child') ?>` or `$html = App::component('/child');` | The child appears once. `component()` never echoes. |
 
-To compose templates, call `App::render()` as a statement, or use `App::renderToString()` when you need the HTML as a value. `App::renderStream()` with `yield from` is the streaming equivalent. This behaviour is kept for backward compatibility; `tests/Unit/RenderEchoSemanticsTest.php` pins each row.
+To compose templates, use `<?= App::component(...) ?>`, or call `App::render()` as a statement. `App::render(..., stream: true)` with `yield from` is the streaming equivalent. The echo is kept for backward compatibility; `tests/Unit/RenderEchoSemanticsTest.php` pins each row.
 
 ### Path resolution
 
@@ -67,21 +102,28 @@ To compose templates, call `App::render()` as a statement, or use `App::renderTo
 | `App::render('/components/_card')` | `template/components/_card.php` | Leading `/` = absolute from `template/` |
 | `App::render('header')` from `public/users.php` | `template/users/header.php` | Auto-namespaces by current public file |
 | `App::render('header')` (fallback) | `template/header.php` | If the namespaced path does not exist |
+| `App::component('card')` | `template/components/card.php`, else `template/components/_card.php` | A component name |
+| `App::component('/emails/welcome')` | `template/emails/welcome.php` | Leading `/` = any template, absolute from `template/` |
 
-## `App::renderToString()` — render to a string
+## `App::component()` — markup as a value
 
 ```php
-public static function renderToString(
-    string $__template_file = 'index',
-    array $__args = [],
-    string $__default_template_dir = 'template'
-): string
+public static function component(string $component, array $props = [], ?string $key = null): SafeHtml
 ```
 
-Same path resolution as `App::render()`, but the result is coerced to a string regardless of what the template returned: Generators are consumed and concatenated, Closures are invoked with parameter injection, arrays/objects are JSON-encoded, scalars are cast.
+`App::component()` returns the rendered markup and never echoes it. A name without a leading `/` is a component under `template/components/` (or a reactive component registered with `App::components()`); a leading `/` renders any template, absolute from `template/`. The props become template variables. Whatever the template returns is turned into markup: Generators are consumed and concatenated, Closures are invoked with parameter injection, arrays/objects are JSON-encoded, scalars are cast.
 
 ```php
-$body = App::renderToString('emails/welcome', [
+<!-- in a template -->
+<?php foreach ($features as $f): ?>
+  <?= App::component('card', ['title' => $f['name'], 'body' => $f['desc']]) ?>
+<?php endforeach; ?>
+```
+
+The result is a `ZealPHP\SafeHtml`. It works anywhere a string is concatenated or echoed, and a route can `return` it (the response is the HTML). Cast it with `(string)` where a plain string is required — `json_encode()`, `strlen()`, `preg_match()`, a `string` parameter:
+
+```php
+$body = (string) App::component('/emails/welcome', [
     'user' => $user,
     'url'  => $verifyUrl,
 ]);
@@ -89,31 +131,25 @@ $body = App::renderToString('emails/welcome', [
 mail($user->email, 'Welcome', $body);
 ```
 
-## `App::renderStream()` — render as a Generator
+Props, slots, folders and reactive components are covered in [Components](components.md).
 
-```php
-public static function renderStream(
-    string $__template_file = 'index',
-    array $__args = [],
-    string $__default_template_dir = 'template'
-): \Generator
-```
+## Rendering as a stream — `stream: true`
 
-Returns a Generator that yields whatever the template returned, chunk by chunk. Compose multiple template streams in a route handler with `yield from`:
+`App::render($tpl, $args, stream: true)` returns a Generator that yields whatever the template returned, chunk by chunk. It never echoes. Compose several template streams in a route handler with `yield from`:
 
 ```php
 $app->route('/users', function() {
     return (function() {
-        yield from App::renderStream('shell-open', ['title' => 'Users']);
-        yield from App::renderStream('users/stream', ['users' => User::all()]);
-        yield from App::renderStream('shell-close');
+        yield from App::render('shell-open', ['title' => 'Users'], stream: true);
+        yield from App::render('users/stream', ['users' => User::all()], stream: true);
+        yield from App::render('shell-close', stream: true);
     })();
 });
 ```
 
 ### Three streaming template styles
 
-`renderStream()` accepts three template shapes — all three compose in the same `yield from` pipeline.
+`stream: true` accepts three template shapes — all three compose in the same `yield from` pipeline.
 
 | Style | Template code | Best for |
 |-------|---------------|----------|
@@ -174,7 +210,7 @@ Kept for backward compatibility with the WordPress showcase and existing user sc
 public static function fragment(string $name, callable $fn): void
 ```
 
-`App::fragment()` turns any template into a dual-mode file: the same `App::render('page', $args)` call serves **either** the complete page (no fragment selector → every `App::fragment()` block runs inline) **or** just one named region (`$args['fragment'] = 'name'` → that region's buffer is cleared, only its closure runs, and the rest of the template short-circuits via `HaltException`). Same template, same route handler, two different responses on the same URL — the [htmx-essay template-fragment](https://htmx.org/essays/template-fragments/) pattern without separate partial files.
+`App::fragment()` turns any template into a dual-mode file: the same `App::render('page', $args)` call serves **either** the complete page (no fragment selector → every `App::fragment()` block runs inline) **or** just one named region (`App::render('page', $args, fragment: 'name')` → that region's buffer is cleared, only its closure runs, and the rest of the template short-circuits via `HaltException`). Same template, same route handler, two different responses on the same URL — the [htmx-essay template-fragment](https://htmx.org/essays/template-fragments/) pattern without separate partial files.
 
 ```php
 // template/contacts/list.php — one template, both responses
@@ -190,14 +226,14 @@ public static function fragment(string $name, callable $fn): void
 ```php
 // Route handler — ONE entry, both modes
 $app->route('/contacts', function($g) {
-    return App::render('contacts/list', [
-        'contacts' => Contact::all(),
-        // No selector → full <ul> with every row inline.
-        // ?fragment=contact-2 → just that one <li> on the wire.
-        'fragment' => is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null,
-    ]);
+    // No selector → full <ul> with every row inline.
+    // ?fragment=contact-2 → just that one <li> on the wire.
+    $fragment = is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null;
+    return App::render('contacts/list', ['contacts' => Contact::all()], fragment: $fragment);
 });
 ```
+
+Older code passes the selector as a `fragment` key in `$args`; that still works, but `fragment:` is the documented form.
 
 Inside the closure, the universal contract applies — `return 404;` for auth, `return ['id' => 1];` for JSON, `return (fn() => yield ...)();` for streaming.
 
@@ -209,7 +245,7 @@ Inside the closure, the universal contract applies — `return 404;` for auth, `
 
 ## Universal return contract
 
-One contract, every entry point. Route handler, fallback, error handler, `App::render() / renderToString() / renderStream() / include()`, public file, API closure, streaming-template closure — every one rides the same return-shape mapping, implemented by the shared private core `App::executeFile()`.
+One contract, every entry point. Route handler, fallback, error handler, `App::render() / component() / include()`, public file, API closure, streaming-template closure — every one rides the same return-shape mapping, implemented by the shared private core `App::executeFile()`.
 
 **One exception:** *combining* `echo` with an explicit non-null `return` concatenates only on the `executeFile`-backed entry points, **not** a top-level route handler, which `ResponseMiddleware` invokes directly. The two affected rows are marked `[1]`; see the note below the table.
 
@@ -225,9 +261,9 @@ One contract, every entry point. Route handler, fallback, error handler, `App::r
 | `echo "header"; return (function() { yield ...; })();` `[1]` | `\Generator` wrapping `"header"` + delegated yields | Streamed in source order |
 | `return new Response($body, 200);` | `ResponseInterface` | PSR-7 response used directly (output buffer ignored) |
 
-**`[1]` `echo` + explicit non-null `return` — `executeFile` entry points only.** The `"shellbody"` concatenation and the `echo`-then-`Generator` prepend are implemented inside `App::executeFile()`, so they hold for the `executeFile`-backed entry points: `App::render() / renderToString() / renderStream() / include()`, public files, API closures, and CGI-dispatched files. A **top-level route handler**, by contrast, is invoked directly by `ResponseMiddleware`, which discards the buffered output once the handler returns a non-null value — so a pre-`return` `echo` is **dropped** and only the returned value reaches the wire. In a route handler use **echo-only** *or* **return-only** (a returned non-null value replaces any buffered echo); to concatenate buffered output with an explicit body, route through `App::include()` / `App::render()`.
+**`[1]` `echo` + explicit non-null `return` — `executeFile` entry points only.** The `"shellbody"` concatenation and the `echo`-then-`Generator` prepend are implemented inside `App::executeFile()`, so they hold for the `executeFile`-backed entry points: `App::render() / component() / include()`, public files, API closures, and CGI-dispatched files. A **top-level route handler**, by contrast, is invoked directly by `ResponseMiddleware`, which discards the buffered output once the handler returns a non-null value — so a pre-`return` `echo` is **dropped** and only the returned value reaches the wire. In a route handler use **echo-only** *or* **return-only** (a returned non-null value replaces any buffered echo); to concatenate buffered output with an explicit body, route through `App::include()` / `App::render()`.
 
-**Valid HTTP status codes.** When the contract says `int = HTTP status`, the int must be in the range **100–599** (RFC 7230). Codes outside that range are coerced to 500 with a warning logged via `elog()`. `return 1;` is the one special case — PHP's `include` returns `1` when a file has no explicit `return`, so the framework treats it as "no explicit return" inside `App::include() / render() / renderToString() / renderStream()` and surfaces the buffered echo as the response body. If you want HTTP 1 specifically, return `100` instead.
+**Valid HTTP status codes.** When the contract says `int = HTTP status`, the int must be in the range **100–599** (RFC 7230). Codes outside that range are coerced to 500 with a warning logged via `elog()`. `return 1;` is the one special case — PHP's `include` returns `1` when a file has no explicit `return`, so the framework treats it as "no explicit return" inside `App::include() / render() / component()` and surfaces the buffered echo as the response body. If you want HTTP 1 specifically, return `100` instead.
 
 ## Yield from everywhere
 
@@ -238,7 +274,7 @@ Generators work in route handlers, public files, API handlers, and template file
 | Route handler | Return a Generator directly | `return (function() { yield "chunk"; })();` |
 | Public file | Return a Generator from the file | `public/feed.php` → `<?php return (function() { yield "..."; })();` |
 | API handler | Return a Generator from `$get`/`$post` | `$get = function() { return (function() { yield ...; })(); };` |
-| Template (via `renderStream()`) | Return a Closure or Generator | `return function($items) { yield ...; };` |
+| Template (via `App::render(..., stream: true)`) | Return a Closure or Generator | `return function($items) { yield ...; };` |
 | File dispatched via `App::include()` | Same — file's `return` flows through the contract | `return (function() { yield ...; })();` |
 
 ```php
@@ -247,12 +283,12 @@ Generators work in route handlers, public files, API handlers, and template file
 use ZealPHP\App;
 
 return (function() {
-    yield App::renderToString('shell-open', ['title' => 'Live Feed']);
+    yield from App::render('shell-open', ['title' => 'Live Feed'], stream: true);
     yield "<h1>Feed</h1>";
     foreach (fetchFeedItems() as $item) {
         yield "<article>{$item->title}</article>\n";
     }
-    yield App::renderToString('shell-close');
+    yield from App::render('shell-close', stream: true);
 })();
 ```
 
@@ -274,11 +310,11 @@ App::render('_master', ['title' => 'About Us', 'page' => 'about']);
 <html>
 <head><title><?= htmlspecialchars($title) ?></title></head>
 <body>
-  <?php App::render('_nav', ['active' => $page]) ?>
+  <?= App::component('/_nav', ['active' => $page]) ?>
   <main>
-    <?php App::render("/pages/$page") ?>
+    <?= App::component("/pages/$page") ?>
   </main>
-  <?php App::render('_footer') ?>
+  <?= App::component('/_footer') ?>
 </body>
 </html>
 ```
@@ -346,4 +382,4 @@ Other contexts have their own method on `ZealPHP\Escape`:
 - Keep templates free of business logic. Transform data in route handlers or service classes and pass simple view models to `App::render()`.
 - Use the route-handler / public-file / API-closure layers for logic; templates are view-only.
 - Pair templates with CSS/JS assets in `public/` — ZealPHP does not prescribe an asset pipeline.
-- For coroutine-enabled deployments (`App::superglobals(false)`), prefer `App::renderStream()` over blocking renders when the data source is itself async.
+- For coroutine-enabled deployments (`App::superglobals(false)`), prefer `App::render(..., stream: true)` over blocking renders when the data source is itself async.

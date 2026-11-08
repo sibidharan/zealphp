@@ -177,15 +177,17 @@ class FileExecutionFamilyTest extends TestCase
         // public/nspage.php renders: template/nspage/where.php wins when it exists,
         // and a template the folder doesn't have falls back to the top level
         // (previously a TemplateUnavailableException whenever the folder existed).
+        // Assign the whole array: an element write through the superglobals
+        // proxy doesn't stick once another test switched modes.
         $g = RequestContext::instance();
-        $prev = $g->server['PHP_SELF'] ?? null;
-        $g->server['PHP_SELF'] = '/nspage.php';
+        $prev = $g->server;
+        $g->server = ['PHP_SELF' => '/nspage.php'] + $prev;
         try {
             $this->assertSame('[namespaced]', App::renderToString('where', [], self::DIR));
             $this->assertSame('[top-only]', App::renderToString('toponly', [], self::DIR));
             $this->assertSame('[top-where]', App::renderToString('/where', [], self::DIR));
         } finally {
-            $g->server['PHP_SELF'] = $prev;
+            $g->server = $prev;
         }
     }
 

@@ -28,7 +28,7 @@ ${basename(__FILE__, '.php')} = function () {
 
     $tplPath = $slug === 'learn' ? '/pages/learn' : '/pages/' . $slug;
     header('Content-Type: text/html; charset=utf-8');
-    $html = App::renderToString($tplPath, ['active' => $slug, 'page' => $slug]);
+    $html = (string) App::component($tplPath, ['active' => $slug, 'page' => $slug]);
 
     // Extract just the <article class="lesson-content">…</article> so the
     // htmx swap target receives the article alone — no nested layout/sidebar.

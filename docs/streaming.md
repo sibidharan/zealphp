@@ -9,7 +9,7 @@ ZealPHP supports four streaming patterns. They share the same underlying mechani
 | Generator `yield` from a route handler | `\Generator` | SSR — stream HTML as coroutines resolve |
 | `$response->stream($fn)` | `void` (`$fn` receives a `$write` closure) | Fine-grained chunk control |
 | `$response->sse($fn)` | `void` (`$fn` receives an `$emit` closure) | Server-Sent Events to a browser `EventSource` |
-| `App::renderStream($tpl, $args)` | `\Generator` | Compose streaming output across template files |
+| `App::render($tpl, $args, stream: true)` | `\Generator` | Compose streaming output across template files |
 
 All four set `$g->_streaming = true` so `ResponseMiddleware` skips its output-buffer capture and forwards bytes to the wire immediately.
 
@@ -90,9 +90,9 @@ es.addEventListener('done', () => es.close());
 </script>
 ```
 
-## Pattern 4: `App::renderStream($tpl, $args)`
+## Pattern 4: `App::render($tpl, $args, stream: true)`
 
-`renderStream()` reads a template file and returns a `\Generator`, letting you compose streaming output across multiple files with `yield from`. The template may use any of three styles:
+With `stream: true`, `App::render()` reads a template file and returns a `\Generator` (it never echoes), letting you compose streaming output across multiple files with `yield from`. The template may use any of three styles:
 
 1. **Closure with named parameters** (cleanest — the framework injects args by name, same as route handlers):
 
@@ -123,9 +123,9 @@ Compose streams across templates with `yield from`:
 ```php
 $app->route('/users', function() {
     return (function() {
-        yield from App::renderStream('shell-open', ['title' => 'Users']);
-        yield from App::renderStream('users/stream', ['users' => User::all()]);
-        yield from App::renderStream('shell-close');
+        yield from App::render('shell-open', ['title' => 'Users'], stream: true);
+        yield from App::render('users/stream', ['users' => User::all()], stream: true);
+        yield from App::render('shell-close', stream: true);
     })();
 });
 ```
@@ -184,4 +184,4 @@ $response->sse(function($emit) {
 - **Default, cleanest** → Generator `yield`. Return a `\Generator`, write business logic top-down, parallelise with `go()` and `Channel`.
 - **You need direct `write()` control** → `$response->stream()`. Useful when the bytes don't fit naturally into `yield` (binary streams, pumping from an external iterator, interleaving non-yieldable work).
 - **You're streaming to a browser `EventSource`** → `$response->sse()`. The wire-format handling is already done for you.
-- **You're composing fragments across multiple template files** → `App::renderStream()` with `yield from`. Each template can declare its own named parameters and stream independently.
+- **You're composing fragments across multiple template files** → `App::render(..., stream: true)` with `yield from`. Each template can declare its own named parameters and stream independently.

@@ -144,7 +144,7 @@ $app->route('/api/learn/notes/{id}', ['methods' => ['POST']], function ($request
     $note = Notes::read($db, $u['user_id'], (int) $id);
     if ($wantsJson) return $note;
     header('Content-Type: text/html; charset=utf-8');
-    return App::renderToString('/components/_note_card', $note);
+    return App::component('note_card', $note);
 });
 
 $app->route('/api/learn/notes/{id}', ['methods' => ['DELETE']], function ($request, $response, $id) {
@@ -178,7 +178,7 @@ $app->route('/api/learn/demo/check', ['methods' => ['POST']], function () {
     // are inert — no attributes worth abusing — so they're safe to allow.
     $safe = strip_tags($explain, '<code><em><strong><br>');
     header('Content-Type: text/html; charset=utf-8');
-    return App::renderToString('/components/_callout', [
+    return App::component('callout', [
         'variant' => $isRight ? 'success' : 'warn',
         'title'   => $isRight ? 'Correct!' : 'Not quite',
         'body'    => '<p>' . $safe . '</p>',
@@ -210,7 +210,7 @@ $app->ws('/ws/session-counter',
 $app->route('/api/learn/demo/session-bump', ['methods' => ['POST']], function () {
     $g = G::instance();
     $g->session['lesson_counter'] = (int) ($g->session['lesson_counter'] ?? 0) + 1;
-    $html = App::renderToString('/components/_session_counter', [
+    $html = (string) App::component('session_counter', [
         'n' => (int) $g->session['lesson_counter'],
     ]);
     $sid = $g->cookie['PHPSESSID'] ?? '';
@@ -229,7 +229,7 @@ $app->route('/demo/view/sessions/counter', ['methods' => ['GET']], function () {
         [
             ['heading' => 'Live counter', 'body' =>
                 '<div style="text-align:center;padding:1.25rem 0">' .
-                App::renderToString('/components/_session_counter', ['n' => $n]) .
+                App::component('session_counter', ['n' => $n]) .
                 '<div data-session-counter-status class="ws-counter-status" style="margin-top:.85rem">starting…</div>' .
                 '</div>'
             ],
@@ -243,7 +243,7 @@ ws.onmessage = e =&gt; document.getElementById(\'session-counter-btn\')
 use ZealPHP\\Learn\\Demo;   // broadcast helper lives in a src/ class
 
 $app-&gt;route(\'/api/learn/demo/session-bump\', ...
-    $html = App::renderToString(\'/components/_session_counter\', [\'n\' =&gt; $n]);
+    $html = (string) App::component(\'session_counter\', [\'n\' =&gt; $n]);
     Demo::ws_session_counter_broadcast($sid, $html);
     return $html;   // for the clicking tab&rsquo;s htmx swap
 );</pre>'],
@@ -540,7 +540,7 @@ $app->route('/api/learn/demo/incr', ['methods' => ['POST', 'GET']], function () 
     $g = G::instance();
     $g->session['demo_counter'] = (int) ($g->session['demo_counter'] ?? 0) + 1;
     header('Content-Type: text/html; charset=utf-8');
-    return App::renderToString('/components/_counter_button', ['n' => $g->session['demo_counter']]);
+    return App::component('counter_button', ['n' => $g->session['demo_counter']]);
 });
 
 $app->route('/api/learn/demo/timing', ['methods' => ['GET']], function () {
@@ -567,23 +567,33 @@ $app->route('/api/learn/demo/timing', ['methods' => ['GET']], function () {
 $app->route('/api/learn/demo/render', ['methods' => ['GET']], function () {
     header('Content-Type: text/html; charset=utf-8');
     header('X-Render-Method: App::render');
-    $card = App::renderToString('/components/_demo_clock', ['label' => 'render() — echoed', 'now' => microtime(true)]);
-    return Demo::learn_demo_shell('App::render() demo', '<section class="render-demo"><h4>One-shot echo</h4>' . $card . '</section>');
+    // render() renders the page the route returns; component() renders the
+    // clock card that goes inside it.
+    return App::render('/components/_demo_shell', [
+        'title'       => 'App::render() demo',
+        'description' => 'The route returns <code>App::render()</code>, so the rendered template is the response.',
+        'sections'    => [[
+            'heading' => 'One-shot render',
+            'body'    => (string) App::component('demo_clock', ['label' => 'render() — the response', 'now' => microtime(true)]),
+        ]],
+        'back_slug'   => 'learn/components',
+        'back_label'  => 'Components',
+    ]);
 });
 
 $app->route('/api/learn/demo/render-to-string', ['methods' => ['GET']], function () {
     header('Content-Type: text/html; charset=utf-8');
-    header('X-Render-Method: App::renderToString');
-    $card = App::renderToString('/components/_demo_clock', [
-        'label' => 'renderToString() — composed',
+    header('X-Render-Method: App::component');
+    $card = App::component('demo_clock', [
+        'label' => 'component() — composed',
         'now'   => microtime(true),
     ]);
-    return Demo::learn_demo_shell('App::renderToString() demo', '<section class="render-demo"><h4>Composed wrapper</h4>' . $card . '</section>');
+    return Demo::learn_demo_shell('App::component() demo', '<section class="render-demo"><h4>Composed wrapper</h4>' . $card . '</section>');
 });
 
 $app->route('/api/learn/demo/render-stream', ['methods' => ['GET']], function () {
     header('Content-Type: text/html; charset=utf-8');
-    header('X-Render-Method: App::renderStream');
+    header('X-Render-Method: App::render(stream: true)');
     return (function () {
         yield <<<HTML
 <!doctype html>
@@ -591,20 +601,20 @@ $app->route('/api/learn/demo/render-stream', ['methods' => ['GET']], function ()
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>App::renderStream() demo · ZealPHP Learn</title>
+  <title>App::render(stream: true) demo · ZealPHP Learn</title>
   <link rel="stylesheet" href="/css/learn.css">
   <style>body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1c1917; } nav { margin-bottom: 1rem; font-size: .85rem; } nav a { color: #f59e0b; text-decoration: none; margin-right: 1rem; }</style>
 </head>
 <body>
-  <nav><a href="/learn/components">← Back to Lesson 4</a> · <strong>App::renderStream() demo</strong> · streaming 12 rows over ~1.8s</nav>
+  <nav><a href="/learn/components">← Back to Lesson 4</a> · <strong>App::render(stream: true) demo</strong> · streaming 12 rows over ~1.8s</nav>
   <section class="render-demo"><h4>Streamed rows</h4>
 HTML;
         for ($i = 1; $i <= 12; $i++) {
             usleep(150000);
-            yield from App::renderStream('/components/_demo_clock', [
-                'label' => "renderStream() — row {$i}/12",
+            yield from App::render('/components/_demo_clock', [
+                'label' => "render(stream: true) — row {$i}/12",
                 'now'   => microtime(true),
-            ]);
+            ], stream: true);
         }
         yield "</section></body></html>";
     })();

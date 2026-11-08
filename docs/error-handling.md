@@ -26,7 +26,7 @@ Both rely on per-coroutine state in `G` plus a single process-level native handl
 ```php
 // Status-specific
 $app->setErrorHandler(404, function($status) {
-    return App::renderToString('error/404', ['status' => $status]);
+    return App::render('error/404', ['status' => $status]);
 });
 
 $app->setErrorHandler(500, function($exception) {

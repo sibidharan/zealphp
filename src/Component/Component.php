@@ -127,7 +127,7 @@ abstract class Component
         // Absolute from template/: a relative name would be namespaced by the
         // current public file, so the page and the endpoint could pick
         // different templates.
-        return new SafeHtml(App::renderToString('/' . ltrim($template, '/'), $args));
+        return App::component('/' . ltrim($template, '/'), $args);
     }
 
     /** The instance id, also the outer element's DOM id (e.g. `counter-main`). */

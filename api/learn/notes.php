@@ -31,7 +31,7 @@ ${basename(__FILE__, '.php')} = function () {
             $this->response($this->json($note), 200);
         } else {
             header('Content-Type: text/html; charset=utf-8');
-            $this->response(App::renderToString('/components/_note_card', $note), 200);
+            $this->response((string) App::component('note_card', $note), 200);
         }
         return;
     }
@@ -49,7 +49,7 @@ ${basename(__FILE__, '.php')} = function () {
     }
     $html = '';
     foreach ($notesList as $n) {
-        $html .= App::renderToString('/components/_note_card', $n);
+        $html .= App::component('note_card', $n);
     }
     $this->response($html, 200);
 };

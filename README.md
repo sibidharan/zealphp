@@ -45,7 +45,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Shared memory** | `Store` (OpenSwoole\Table) + `Counter` (OpenSwoole\Atomic) — cross-worker state |
 | **Timers** | `App::tick()`, `App::after()`, `App::onWorkerStart()` — per-worker recurring tasks |
 | **ZealAPI** | File-based REST: drop `api/device/list.php` → `/api/device/list` works automatically |
-| **Templating** | Nested `App::render()` / `App::renderToString()` — single `_master.php`, component-based |
+| **Templating** | `App::render()` for pages, `App::component()` for stateless and reactive components — single `_master.php` |
 | **Sessions** | All `session_*()` functions overridden via ext-zealphp — coroutine-safe, per-request isolation |
 | **Unit tests** | PHPUnit 11 — extensive unit and integration test suites, all green |
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
@@ -220,7 +220,7 @@ $app->setFallback(fn() => App::include('/index.php'));
 $app->run();
 ```
 
-Now your WordPress, Drupal, or custom PHP app runs on OpenSwoole — persistent connections, no cold starts, WebSocket and streaming available when you're ready. ZealPHP's **file-execution family** — `App::render()` / `App::renderToString()` / `App::renderStream()` / `App::include()` — share a single core that runs the file, captures its output, and applies the [universal return contract](https://php.zeal.ninja/responses#return-contract). Need htmx-style swap targets without separate partial files? `App::fragment()` (v0.2.24) marks named regions inline so the same `App::render()` call serves either the full page or just one region — see [Template fragments](https://php.zeal.ninja/templates#fragments). `App::includeFile()` is the deprecated alias for `App::include()` and still works. See the [legacy apps page](https://php.zeal.ninja/legacy-apps) for the Apache rewrite recipes and the full `.htaccess` / `nginx.conf` coverage matrices.
+Now your WordPress, Drupal, or custom PHP app runs on OpenSwoole — persistent connections, no cold starts, WebSocket and streaming available when you're ready. ZealPHP's **file-execution family** — `App::render()` (pages, with `stream:` / `htmx:` / `fragment:` options), `App::component()` (markup) and `App::include()` — share a single core that runs the file, captures its output, and applies the [universal return contract](https://php.zeal.ninja/responses#return-contract). Need htmx-style swap targets without separate partial files? `App::fragment()` (v0.2.24) marks named regions inline so the same `App::render()` call serves either the full page or just one region — see [Template fragments](https://php.zeal.ninja/templates#fragments). `App::includeFile()` is the deprecated alias for `App::include()` and still works. See the [legacy apps page](https://php.zeal.ninja/legacy-apps) for the Apache rewrite recipes and the full `.htaccess` / `nginx.conf` coverage matrices.
 
 ---
 

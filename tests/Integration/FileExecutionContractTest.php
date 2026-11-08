@@ -269,4 +269,38 @@ class FileExecutionContractTest extends TestCase
         $r = $this->get('/_contract/status/_1');
         $this->assertSame(500, $r['status']);
     }
+
+    public function testRouteReturningAComponentSendsHtmlNotJson(): void
+    {
+        // App::component() returns SafeHtml (an object); the contract must send
+        // it as HTML, not json_encode() it to "{}".
+        $r = $this->get('/_contract/component/safehtml');
+        $this->assertSame(200, $r['status']);
+        $this->assertStringNotContainsString('application/json', $r['headers']['content-type'] ?? '');
+        $this->assertStringContainsString('<h3>Contract</h3>', $r['body']);
+        $this->assertStringContainsString('href="/x"', $r['body']);
+    }
+
+    public function testRenderStreamOptionStreamsTheTemplate(): void
+    {
+        $r = $this->get('/_contract/render/stream');
+        $this->assertSame(200, $r['status']);
+        $this->assertStringContainsString('<h3>Streamed</h3>', $r['body']);
+    }
+
+    public function testRawRouteReturningAComponentSendsHtml(): void
+    {
+        $r = $this->get('/_contract/component/safehtml-raw');
+        $this->assertSame(200, $r['status']);
+        $this->assertStringNotContainsString('application/json', $r['headers']['content-type'] ?? '');
+        $this->assertStringContainsString('<h3>Raw</h3>', $r['body']);
+    }
+
+    public function testDemoViewPagesRenderThroughTheDemoShellComponent(): void
+    {
+        $r = $this->get('/demo/view/inject/url/42');
+        $this->assertSame(200, $r['status']);
+        $this->assertStringContainsString('42', $r['body']);
+        $this->assertStringContainsString('<html', $r['body']);
+    }
 }
