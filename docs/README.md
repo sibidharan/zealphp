@@ -13,8 +13,8 @@ Welcome to the official documentation set for ZealPHP, a coroutine-aware PHP fra
 - [routing.md](./routing.md) — `App::route()`, `nsRoute`, `nsPathRoute`, `patternRoute`, parameter injection, and the universal return contract.
 - [api-layer.md](./api-layer.md) — file-based ZealAPI dispatcher, REST helpers, and the `App::authChecker()` / `adminChecker()` / `usernameProvider()` hooks.
 - [error-handling.md](./error-handling.md) — `ErrorDocument`-style fallbacks, `set_error_handler`/`register_shutdown_function` per-request semantics, content negotiation for error payloads.
-- [templates-and-rendering.md](./templates-and-rendering.md) — `App::render()`, `renderToString()`, `renderStream()`, `App::include()`, and the `App::fragment()` template-fragment pattern.
-- [htmx.md](./htmx.md) — the full htmx surface: the eight `$request->` HX-* accessors, the `$response->htmx()` builder, `App::renderHtmx()` fragment selection, OOB swaps, hx-boost, and CSRF.
+- [templates-and-rendering.md](./templates-and-rendering.md) — `App::render()` and its options (`fragment:`, `htmx:`, `stream:`), `App::component()` for markup, `App::include()`, and the `App::fragment()` template-fragment pattern.
+- [htmx.md](./htmx.md) — the full htmx surface: the eight `$request->` HX-* accessors, the `$response->htmx()` builder, `App::render(htmx: true)` fragment selection, OOB swaps, hx-boost, and CSRF.
 
 ### Surfaces
 - [streaming.md](./streaming.md) — generator-based SSR, `$response->stream()`, and Server-Sent Events via `$response->sse()`.

@@ -79,14 +79,14 @@ $app->route('/search', function ($request) {
 
     if ($request->isHtmx()) {
         // htmx asked for just the results — return the partial.
-        return App::renderToString('search/results', ['hits' => $hits]);
+        return App::component('/search/results', ['hits' => $hits]);
     }
     // Direct navigation — return the whole page.
     return App::render('search/page', ['hits' => $hits]);
 }, methods: ['GET']);
 PHP]); ?>
 
-<p>That branch is common enough that ZealPHP ships <a href="#render-htmx"><code>App::renderHtmx()</code></a> to collapse it to one line.</p>
+<p>That branch is common enough that <code>App::render()</code> takes an <a href="#render-htmx-helper"><code>htmx: true</code></a> option to collapse it to one line.</p>
 
 <h2 id="driving-the-client" class="htmx-mt-2">Driving the client</h2>
 <p><code>$response-&gt;htmx()</code> returns a fluent <code>ZealPHP\HTTP\HtmxResponse</code> builder that queues <code>HX-*</code> <strong>response</strong> headers — instructions the htmx client follows <em>after</em> it receives the body. Each setter returns the builder so calls chain; every value is CRLF/NUL-injection-guarded before it's queued.</p>
@@ -147,7 +147,7 @@ $res->htmx()
     ->status(422);
 PHP]); ?>
 
-<h2 id="render-htmx" class="htmx-mt-2">Fragments &amp; <code>App::renderHtmx()</code></h2>
+<h2 id="render-htmx" class="htmx-mt-2">Fragments &amp; <code>App::render(htmx: true)</code></h2>
 <p>The htmx "one URL, two responses" pattern: a direct hit returns the full page; an htmx request returns just the piece that swaps in. ZealPHP supports this two ways.</p>
 
 <h3 class="htmx-mt-1"><code>App::fragment()</code> — two responses, one template file</h3>
@@ -169,30 +169,32 @@ PHP]); ?>
 <?php App::render('/components/_code', [
     'code'  => <<<'PHP'
 // Full page:     App::render('contacts/list', ['contacts' => $all])
-// One row (htmx): App::render('contacts/list', ['contacts' => $all, 'fragment' => "contact-{$id}"])
+// One row (htmx): App::render('contacts/list', ['contacts' => $all], fragment: "contact-{$id}")
 PHP]); ?>
 
 <p>When extracted, the fragment closure's return value rides the <a href="/responses#return-contract">universal return contract</a> — it can <code>return 404;</code>, <code>return ['k' =&gt; 'v'];</code>, or yield a Generator. A selector that matches no region is a <code>404</code>. See <a href="/templates#fragments">Components &amp; templates</a> for full fragment semantics.</p>
 
-<h3 id="render-htmx-helper" class="htmx-mt-1"><code>App::renderHtmx()</code> — the selector</h3>
-<p><code>App::renderHtmx()</code> is a thin, htmx-aware selector over <code>App::render()</code>: an htmx request gets a fragment (partial), a normal request gets the full page.</p>
+<h3 id="render-htmx-helper" class="htmx-mt-1">htmx-aware rendering — <code>htmx: true</code></h3>
+<p>With <code>htmx: true</code>, <code>App::render()</code> reads the current request: an htmx request gets a fragment (partial), a normal request gets the full page.</p>
 
 <?php App::render('/components/_code', [
     'code'  => <<<'PHP'
-public static function renderHtmx(
+App::render(
     string  $template,
     array   $args = [],
-    ?string $fragmentName = null,
-    ?string $fullPageTemplate = null
+    ?string $fragment = null,   // the region for htmx requests
+    bool    $htmx = false,
+    ?string $fullPage = null,   // the page for normal requests
+    // ...
 ): mixed
 PHP]); ?>
 
 <p>Fragment selection for an htmx request:</p>
 <ol class="htmx-list">
-  <li>If <code>$fragmentName</code> is passed, that region is rendered.</li>
+  <li>If <code>fragment:</code> is passed, that region is rendered.</li>
   <li>Otherwise the framework derives it from the request — the <code>HX-Target</code> id (a leading <code>#</code> is stripped), falling back to <code>HX-Trigger-Name</code>. If neither is present, the template renders with no <code>fragment</code> key (its bare partial output).</li>
 </ol>
-<p>Called outside a request (a CLI render, a warmup) it falls back to the full-page path. It does <strong>not</strong> touch <code>executeFile()</code> — it only chooses <em>what</em> to render, so the return contract and streaming are preserved.</p>
+<p>The response carries <code>Vary: HX-Request, HX-Target, HX-Trigger-Name</code>, so a shared cache keeps the page and the fragment apart. Called outside a request (a CLI render, a warmup) it falls back to the full-page path. It only chooses <em>what</em> to render, so the return contract and streaming are preserved.</p>
 
 <div class="htmx-beforeafter">
   <div class="htmx-ba-col">
@@ -204,7 +206,7 @@ $app->route('/search', function ($request) {
     if ($request->isHtmx()) {
         $target = ltrim($request->htmxTarget() ?? '', '#');
         if ($target !== '') {
-            return App::render('search', ['hits' => $hits, 'fragment' => $target]);
+            return App::render('search', ['hits' => $hits], fragment: $target);
         }
         return App::render('search', ['hits' => $hits]);
     }
@@ -217,19 +219,19 @@ PHP]); ?>
 <?php App::render('/components/_code', [
     'code'  => <<<'PHP'
 $app->route('/search', fn($request) =>
-    App::renderHtmx('search', [
+    App::render('search', [
         'hits' => Search::run($request->get['q'] ?? ''),
-    ]), methods: ['GET']);
+    ], htmx: true), methods: ['GET']);
 PHP]); ?>
   </div>
 </div>
 
-<p>Same shell — the <code>App::fragment('results', …)</code> region inside <code>search.php</code> is what an htmx <code>hx-target="#results"</code> request gets back; a direct hit gets the whole page. For a bare partial plus a distinct full-page shell, pass <code>fullPageTemplate</code>:</p>
+<p>Same shell — the <code>App::fragment('results', …)</code> region inside <code>search.php</code> is what an htmx <code>hx-target="#results"</code> request gets back; a direct hit gets the whole page. For a bare partial plus a distinct full-page shell, pass <code>fullPage:</code>:</p>
 
 <?php App::render('/components/_code', [
     'code'  => <<<'PHP'
 $app->route('/widget', fn() =>
-    App::renderHtmx('widget/partial', ['w' => $w], fullPageTemplate: 'widget/page'), methods: ['GET']);
+    App::render('widget/partial', ['w' => $w], htmx: true, fullPage: 'widget/page'), methods: ['GET']);
 PHP]); ?>
 
 <h2 id="oob" class="htmx-mt-2">Out-of-band swaps</h2>
@@ -316,13 +318,14 @@ PHP]); ?>
   <tr><td><code>oob($id, $html, $swap, $tag)</code></td><td>builds an <code>hx-swap-oob</code> element (static)</td></tr>
   <tr><td><code>response()</code></td><td>returns the parent <code>Response</code> (chain back)</td></tr>
   <tr><td colspan="2"><strong>Rendering — <code>App::</code></strong></td></tr>
-  <tr><td><code>renderHtmx($tpl, $args, $fragmentName, $fullPageTemplate)</code></td><td>htmx → fragment, else full page; derives from <code>HX-Target</code> / <code>HX-Trigger-Name</code></td></tr>
+  <tr><td><code>render($tpl, $args, htmx: true, fragment: …, fullPage: …)</code></td><td>htmx → fragment, else full page; derives from <code>HX-Target</code> / <code>HX-Trigger-Name</code></td></tr>
+  <tr><td><code>component($name, $props)</code></td><td>returns markup for a partial; never echoes</td></tr>
   <tr><td><code>fragment($name, $fn)</code></td><td>marks a named region for one-file-two-responses extraction</td></tr>
 </table>
 
 <div class="callout info">
   <strong>See also:</strong>
-  <a href="/templates">Components &amp; templates</a> (the file-execution family, <code>App::fragment()</code>),
+  <a href="/templates">Components &amp; templates</a> (<code>App::render()</code>, <code>App::component()</code>, <code>App::fragment()</code>),
   <a href="/streaming">Streaming</a> (Generator SSR, SSE),
   <a href="/ws">WebSocket</a>, and the <a href="/learn/htmx">/learn/htmx lesson</a>.
 </div>

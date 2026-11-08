@@ -871,7 +871,7 @@ Both rely on per-coroutine state in `G` plus a single process-level native handl
 ```php
 // Status-specific
 $app->setErrorHandler(404, function($status) {
-    return App::renderToString('error/404', ['status' => $status]);
+    return App::render('error/404', ['status' => $status]);
 });
 
 $app->setErrorHandler(500, function($exception) {
@@ -1204,31 +1204,48 @@ curl http://localhost:8080/__error_test/shutdown-status                       # 
 
 ## Templates and Rendering
 
-ZealPHP renders HTML on the server with plain PHP — no Blade, no Twig, no compile step. Templates live under `template/`, public-served files live under `public/`, and the framework exposes a small **file-execution family** of methods that runs PHP files through a single private core (`App::executeFile()`) and applies the [universal return contract](#universal-return-contract).
+ZealPHP renders HTML on the server with plain PHP — no Blade, no Twig, no compile step. Templates live under `template/`, public-served files live under `public/`, and rendering comes down to two methods:
 
-This guide covers every member of that family, the htmx-style fragment pattern, and SSR streaming from templates.
+- **`App::render()`** renders a page or a response. Options select a fragment, make the render htmx-aware, or return a stream.
+- **`App::component()`** returns markup as a value and never echoes. Use it to compose: a card inside a page, an htmx partial, an email body.
 
-## Templates and Rendering — The file-execution family — five ways to run a PHP file
+Both run the template through one private core (`App::executeFile()`) and apply the [universal return contract](#universal-return-contract). Two more methods complete the set: `App::include()` runs a file from `public/`, and `App::fragment()` marks a named region inside a template.
 
-The first four methods share a single private core (`App::executeFile()`) that runs the file, captures output, and applies the universal return contract. They differ only in (a) where the path is resolved from and (b) what the wrapper does with the result. The fifth — `App::fragment()` — runs *inside* a template and marks a named region the framework can extract by name.
+This guide covers each of them, the htmx-style fragment pattern, and SSR streaming from templates.
+
+## Templates and Rendering — The rendering methods
 
 | Method | Path resolved from | Returns | Use when |
 |--------|--------------------|---------|----------|
-| `App::render($tpl, $args)` | `template/` (with `.php` suffix) | `mixed` — full return contract. **BC:** templates with no explicit `return` have their captured output echoed back. | Direct output in a route handler or inside another template |
-| `App::renderToString($tpl, $args)` | `template/` | `string` — coerces every shape (Generator consumed, Closure invoked, scalar cast) | Need HTML as a value: email body, cache entry, pass into another renderer |
-| `App::renderStream($tpl, $args)` | `template/` | `\Generator` — yields whatever the template returned, chunk-by-chunk | SSR streaming; works with echo templates AND streaming-Closure templates uniformly |
+| `App::render($tpl, $args, …options)` | `template/` (with `.php` suffix) | `mixed` — full return contract. A string result is also echoed (`echo: true`, the default), so `App::render('_master', …)` statements in `public/*.php` keep working. | A page, or a route's response. Options: `fragment:`, `htmx:`, `fullPage:`, `stream:`, `echo:` |
+| `App::component($name, $props)` | `template/components/` for a name (`'card'`); `template/` for a leading `/` (`'/emails/welcome'`) | `ZealPHP\SafeHtml` — markup, never echoed. Cast with `(string)` where a plain string is required. | Markup inside a page, an htmx partial, an email body, anything you compose |
 | `App::include($publicPath, $args = [])` | `public/` (Apache document-root convention — leading `/` optional) | `mixed` — full return contract, never echoed. Auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, `SCRIPT_FILENAME`. | Apache-style rewrites — serve `public/new.php` from a different route URL in-process |
 | `App::fragment($name, $fn)` *(v0.2.24)* | N/A — called *inside* a template | `void`. The closure's return rides the full return contract when extracted. | htmx-style template-fragment pattern — one file, two responses |
 
 `App::includeFile($path)` is a **deprecated** alias for `App::include()` retained for the WordPress showcase and existing scaffolds. New code should use `App::include()`.
 
-## Templates and Rendering — `App::render()` — render a template
+### Deprecated helpers
+
+Earlier releases had a separate method for each way of rendering. They still work until 1.0, but new code should use the two methods above.
+
+| Deprecated | Use instead |
+|------------|-------------|
+| `App::renderToString($tpl, $args)` | `App::component('/tpl', $args)` — write the path absolute from `template/`, and add `(string)` where a plain string is required |
+| `App::renderStream($tpl, $args)` | `App::render($tpl, $args, stream: true)` |
+| `App::renderHtmx($tpl, $args, $fragmentName, $fullPageTemplate)` | `App::render($tpl, $args, htmx: true, fragment: $fragmentName, fullPage: $fullPageTemplate)` |
+
+## Templates and Rendering — `App::render()` — render a page or a response
 
 ```php
 public static function render(
     string $__template_file = 'index',
     array $__args = [],
-    string $__default_template_dir = 'template'
+    string $__default_template_dir = 'template',
+    ?string $fragment = null,
+    bool $htmx = false,
+    ?string $fullPage = null,
+    bool $stream = false,
+    bool $echo = true,
 ): mixed
 ```
 
@@ -1249,7 +1266,37 @@ $app->route('/users/{id}', function($id) {
 });
 ```
 
-**Backwards-compatibility behaviour.** Templates that only echo (no explicit `return`) have their captured output echoed back from `App::render()` — this keeps every existing `App::render('_master', ...)` call site in `public/*.php` working unchanged. Explicit non-string returns flow through to the caller so a route handler can `return App::render(...)` and have the universal contract apply at the response boundary.
+### Options
+
+| Option | What it does |
+|--------|--------------|
+| `fragment: 'name'` | Renders only that `App::fragment()` region (see below). A name with no matching region is a 404. |
+| `htmx: true` | Renders a fragment for htmx requests and the full page otherwise. The region is `fragment:`, else derived from `HX-Target` / `HX-Trigger-Name`. Sends `Vary: HX-Request, HX-Target, HX-Trigger-Name`. See the [htmx guide](htmx.md). |
+| `fullPage: 'tpl'` | With `htmx: true` only: the first template is a bare partial for htmx requests, and `fullPage:` is the page for normal requests. |
+| `stream: true` | Returns a `\Generator` and never echoes. Compose several with `yield from`; see [Rendering as a stream](#rendering-as-a-stream--stream-true). |
+| `echo: false` | Returns the result without echoing it. |
+
+```php
+App::render('_master', ['page' => 'home']);              // echo the page (public/*.php)
+return App::render('users/show', ['user' => $u]);         // a route's response
+return App::render('search', $args, htmx: true);          // fragment for htmx, page otherwise
+return App::render('contacts', $args, fragment: 'row-7'); // one App::fragment() region
+return App::render('feed', $args, stream: true);          // a Generator, flushed chunk by chunk
+```
+
+**Echo side effect.** When a template's result is a string — it only echoed, or it returned a string — `App::render()` both **echoes** that string and **returns** it. That keeps every `App::render('_master', ...)` statement in `public/*.php` working. Non-string results (an int status, an array, a Generator, a `ResponseInterface`) are returned without being echoed.
+
+What that means in practice:
+
+| Where you call it | What happens |
+|---|---|
+| `return App::render('page');` in a route handler | The body is sent once. A string return replaces anything echoed during the handler. |
+| `App::render('page');` as a statement (in `public/*.php` or a template) | The output is echoed once, where the call sits. |
+| `<?= App::render('child') ?>` inside a template | **The child appears twice** — once from `render()`'s echo, once from `<?=`. |
+| `$html = App::render('child');` inside a template | **The child is echoed immediately**, and again wherever you echo `$html`. |
+| `<?= App::component('/child') ?>` or `$html = App::component('/child');` | The child appears once. `component()` never echoes. |
+
+To compose templates, use `<?= App::component(...) ?>`, or call `App::render()` as a statement. `App::render(..., stream: true)` with `yield from` is the streaming equivalent. The echo is kept for backward compatibility; `tests/Unit/RenderEchoSemanticsTest.php` pins each row.
 
 ### Path resolution
 
@@ -1259,21 +1306,28 @@ $app->route('/users/{id}', function($id) {
 | `App::render('/components/_card')` | `template/components/_card.php` | Leading `/` = absolute from `template/` |
 | `App::render('header')` from `public/users.php` | `template/users/header.php` | Auto-namespaces by current public file |
 | `App::render('header')` (fallback) | `template/header.php` | If the namespaced path does not exist |
+| `App::component('card')` | `template/components/card.php`, else `template/components/_card.php` | A component name |
+| `App::component('/emails/welcome')` | `template/emails/welcome.php` | Leading `/` = any template, absolute from `template/` |
 
-## Templates and Rendering — `App::renderToString()` — render to a string
+## Templates and Rendering — `App::component()` — markup as a value
 
 ```php
-public static function renderToString(
-    string $__template_file = 'index',
-    array $__args = [],
-    string $__default_template_dir = 'template'
-): string
+public static function component(string $component, array $props = [], ?string $key = null): SafeHtml
 ```
 
-Same path resolution as `App::render()`, but the result is coerced to a string regardless of what the template returned: Generators are consumed and concatenated, Closures are invoked with parameter injection, arrays/objects are JSON-encoded, scalars are cast.
+`App::component()` returns the rendered markup and never echoes it. A name without a leading `/` is a component under `template/components/` (or a reactive component registered with `App::components()`); a leading `/` renders any template, absolute from `template/`. The props become template variables. Whatever the template returns is turned into markup: Generators are consumed and concatenated, Closures are invoked with parameter injection, arrays/objects are JSON-encoded, scalars are cast.
 
 ```php
-$body = App::renderToString('emails/welcome', [
+<!-- in a template -->
+<?php foreach ($features as $f): ?>
+  <?= App::component('card', ['title' => $f['name'], 'body' => $f['desc']]) ?>
+<?php endforeach; ?>
+```
+
+The result is a `ZealPHP\SafeHtml`. It works anywhere a string is concatenated or echoed, and a route can `return` it (the response is the HTML). Cast it with `(string)` where a plain string is required — `json_encode()`, `strlen()`, `preg_match()`, a `string` parameter:
+
+```php
+$body = (string) App::component('/emails/welcome', [
     'user' => $user,
     'url'  => $verifyUrl,
 ]);
@@ -1281,31 +1335,25 @@ $body = App::renderToString('emails/welcome', [
 mail($user->email, 'Welcome', $body);
 ```
 
-## Templates and Rendering — `App::renderStream()` — render as a Generator
+Props, slots, folders and reactive components are covered in [Components](components.md).
 
-```php
-public static function renderStream(
-    string $__template_file = 'index',
-    array $__args = [],
-    string $__default_template_dir = 'template'
-): \Generator
-```
+## Templates and Rendering — Rendering as a stream — `stream: true`
 
-Returns a Generator that yields whatever the template returned, chunk by chunk. Compose multiple template streams in a route handler with `yield from`:
+`App::render($tpl, $args, stream: true)` returns a Generator that yields whatever the template returned, chunk by chunk. It never echoes. Compose several template streams in a route handler with `yield from`:
 
 ```php
 $app->route('/users', function() {
     return (function() {
-        yield from App::renderStream('shell-open', ['title' => 'Users']);
-        yield from App::renderStream('users/stream', ['users' => User::all()]);
-        yield from App::renderStream('shell-close');
+        yield from App::render('shell-open', ['title' => 'Users'], stream: true);
+        yield from App::render('users/stream', ['users' => User::all()], stream: true);
+        yield from App::render('shell-close', stream: true);
     })();
 });
 ```
 
 ### Three streaming template styles
 
-`renderStream()` accepts three template shapes — all three compose in the same `yield from` pipeline.
+`stream: true` accepts three template shapes — all three compose in the same `yield from` pipeline.
 
 | Style | Template code | Best for |
 |-------|---------------|----------|
@@ -1366,7 +1414,7 @@ Kept for backward compatibility with the WordPress showcase and existing user sc
 public static function fragment(string $name, callable $fn): void
 ```
 
-`App::fragment()` turns any template into a dual-mode file: the same `App::render('page', $args)` call serves **either** the complete page (no fragment selector → every `App::fragment()` block runs inline) **or** just one named region (`$args['fragment'] = 'name'` → that region's buffer is cleared, only its closure runs, and the rest of the template short-circuits via `HaltException`). Same template, same route handler, two different responses on the same URL — the [htmx-essay template-fragment](https://htmx.org/essays/template-fragments/) pattern without separate partial files.
+`App::fragment()` turns any template into a dual-mode file: the same `App::render('page', $args)` call serves **either** the complete page (no fragment selector → every `App::fragment()` block runs inline) **or** just one named region (`App::render('page', $args, fragment: 'name')` → that region's buffer is cleared, only its closure runs, and the rest of the template short-circuits via `HaltException`). Same template, same route handler, two different responses on the same URL — the [htmx-essay template-fragment](https://htmx.org/essays/template-fragments/) pattern without separate partial files.
 
 ```php
 // template/contacts/list.php — one template, both responses
@@ -1382,14 +1430,14 @@ public static function fragment(string $name, callable $fn): void
 ```php
 // Route handler — ONE entry, both modes
 $app->route('/contacts', function($g) {
-    return App::render('contacts/list', [
-        'contacts' => Contact::all(),
-        // No selector → full <ul> with every row inline.
-        // ?fragment=contact-2 → just that one <li> on the wire.
-        'fragment' => is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null,
-    ]);
+    // No selector → full <ul> with every row inline.
+    // ?fragment=contact-2 → just that one <li> on the wire.
+    $fragment = is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null;
+    return App::render('contacts/list', ['contacts' => Contact::all()], fragment: $fragment);
 });
 ```
+
+Older code passes the selector as a `fragment` key in `$args`; that still works, but `fragment:` is the documented form.
 
 Inside the closure, the universal contract applies — `return 404;` for auth, `return ['id' => 1];` for JSON, `return (fn() => yield ...)();` for streaming.
 
@@ -1401,7 +1449,7 @@ Inside the closure, the universal contract applies — `return 404;` for auth, `
 
 ## Templates and Rendering — Universal return contract
 
-One contract, every entry point. Route handler, fallback, error handler, `App::render() / renderToString() / renderStream() / include()`, public file, API closure, streaming-template closure — every one rides the same return-shape mapping, implemented by the shared private core `App::executeFile()`.
+One contract, every entry point. Route handler, fallback, error handler, `App::render() / component() / include()`, public file, API closure, streaming-template closure — every one rides the same return-shape mapping, implemented by the shared private core `App::executeFile()`.
 
 **One exception:** *combining* `echo` with an explicit non-null `return` concatenates only on the `executeFile`-backed entry points, **not** a top-level route handler, which `ResponseMiddleware` invokes directly. The two affected rows are marked `[1]`; see the note below the table.
 
@@ -1417,9 +1465,9 @@ One contract, every entry point. Route handler, fallback, error handler, `App::r
 | `echo "header"; return (function() { yield ...; })();` `[1]` | `\Generator` wrapping `"header"` + delegated yields | Streamed in source order |
 | `return new Response($body, 200);` | `ResponseInterface` | PSR-7 response used directly (output buffer ignored) |
 
-**`[1]` `echo` + explicit non-null `return` — `executeFile` entry points only.** The `"shellbody"` concatenation and the `echo`-then-`Generator` prepend are implemented inside `App::executeFile()`, so they hold for the `executeFile`-backed entry points: `App::render() / renderToString() / renderStream() / include()`, public files, API closures, and CGI-dispatched files. A **top-level route handler**, by contrast, is invoked directly by `ResponseMiddleware`, which discards the buffered output once the handler returns a non-null value — so a pre-`return` `echo` is **dropped** and only the returned value reaches the wire. In a route handler use **echo-only** *or* **return-only** (a returned non-null value replaces any buffered echo); to concatenate buffered output with an explicit body, route through `App::include()` / `App::render()`.
+**`[1]` `echo` + explicit non-null `return` — `executeFile` entry points only.** The `"shellbody"` concatenation and the `echo`-then-`Generator` prepend are implemented inside `App::executeFile()`, so they hold for the `executeFile`-backed entry points: `App::render() / component() / include()`, public files, API closures, and CGI-dispatched files. A **top-level route handler**, by contrast, is invoked directly by `ResponseMiddleware`, which discards the buffered output once the handler returns a non-null value — so a pre-`return` `echo` is **dropped** and only the returned value reaches the wire. In a route handler use **echo-only** *or* **return-only** (a returned non-null value replaces any buffered echo); to concatenate buffered output with an explicit body, route through `App::include()` / `App::render()`.
 
-**Valid HTTP status codes.** When the contract says `int = HTTP status`, the int must be in the range **100–599** (RFC 7230). Codes outside that range are coerced to 500 with a warning logged via `elog()`. `return 1;` is the one special case — PHP's `include` returns `1` when a file has no explicit `return`, so the framework treats it as "no explicit return" inside `App::include() / render() / renderToString() / renderStream()` and surfaces the buffered echo as the response body. If you want HTTP 1 specifically, return `100` instead.
+**Valid HTTP status codes.** When the contract says `int = HTTP status`, the int must be in the range **100–599** (RFC 7230). Codes outside that range are coerced to 500 with a warning logged via `elog()`. `return 1;` is the one special case — PHP's `include` returns `1` when a file has no explicit `return`, so the framework treats it as "no explicit return" inside `App::include() / render() / component()` and surfaces the buffered echo as the response body. If you want HTTP 1 specifically, return `100` instead.
 
 ## Templates and Rendering — Yield from everywhere
 
@@ -1430,7 +1478,7 @@ Generators work in route handlers, public files, API handlers, and template file
 | Route handler | Return a Generator directly | `return (function() { yield "chunk"; })();` |
 | Public file | Return a Generator from the file | `public/feed.php` → `<?php return (function() { yield "..."; })();` |
 | API handler | Return a Generator from `$get`/`$post` | `$get = function() { return (function() { yield ...; })(); };` |
-| Template (via `renderStream()`) | Return a Closure or Generator | `return function($items) { yield ...; };` |
+| Template (via `App::render(..., stream: true)`) | Return a Closure or Generator | `return function($items) { yield ...; };` |
 | File dispatched via `App::include()` | Same — file's `return` flows through the contract | `return (function() { yield ...; })();` |
 
 ```php
@@ -1439,12 +1487,12 @@ Generators work in route handlers, public files, API handlers, and template file
 use ZealPHP\App;
 
 return (function() {
-    yield App::renderToString('shell-open', ['title' => 'Live Feed']);
+    yield from App::render('shell-open', ['title' => 'Live Feed'], stream: true);
     yield "<h1>Feed</h1>";
     foreach (fetchFeedItems() as $item) {
         yield "<article>{$item->title}</article>\n";
     }
-    yield App::renderToString('shell-close');
+    yield from App::render('shell-close', stream: true);
 })();
 ```
 
@@ -1466,11 +1514,11 @@ App::render('_master', ['title' => 'About Us', 'page' => 'about']);
 <html>
 <head><title><?= htmlspecialchars($title) ?></title></head>
 <body>
-  <?php App::render('_nav', ['active' => $page]) ?>
+  <?= App::component('/_nav', ['active' => $page]) ?>
   <main>
-    <?php App::render("/pages/$page") ?>
+    <?= App::component("/pages/$page") ?>
   </main>
-  <?php App::render('_footer') ?>
+  <?= App::component('/_footer') ?>
 </body>
 </html>
 ```
@@ -1509,13 +1557,453 @@ Precise, and it keeps the undefined-variable check working for genuine typos. (T
 
 **Blunt fallback:** `{"intelephense.diagnostics.undefinedVariables": false}` in `.vscode/settings.json` silences it project-wide — but it also hides real undefined-variable bugs, so prefer 1–3. There is no `extract()`-stub trick: a static analyzer fundamentally can't know an arbitrary runtime array's keys, so the fix is always to make the variable *not* come from `extract()` (1, 3) or to *declare* it (2).
 
+## Templates and Rendering — Escaping output
+
+PHP templates have no auto-escaping, so escape every value that came from a user, a database, or a URL. `ZealPHP\e()` is the short form for HTML text and quoted attribute values:
+
+```php
+<?php use function ZealPHP\e; ?>
+<a href="/users/<?= e($user['id']) ?>" title="<?= e($user['bio']) ?>"><?= e($user['name']) ?></a>
+```
+
+`e()` encodes `& < > " '`, turns `null` into an empty string, and replaces invalid UTF-8 with U+FFFD instead of returning an empty string. It's safe inside single- or double-quoted attributes. It is **not** safe in unquoted attributes, inside `<script>` or `<style>`, or in `on*` event-handler attributes.
+
+Other contexts have their own method on `ZealPHP\Escape`:
+
+| Where the value goes | Use | Example |
+|---|---|---|
+| HTML text, quoted attribute | `e($v)` / `Escape::html($v)` | `<p><?= e($bio) ?></p>` |
+| One URL component (path segment, query value) | `Escape::url($v)` | `<a href="/search?q=<?= Escape::url($q) ?>">` |
+| A whole URL from user input in `href` / `src` | `Escape::safeUrl($v)` | `<a href="<?= Escape::safeUrl($site) ?>">` — `javascript:`, `data:` and other schemes become `#` |
+| A value inside `<script>` or a `data-*` attribute | `Escape::js($v)` | `<script>const user = <?= Escape::js($user) ?>;</script>` |
+| Markup you built and trust | `Escape::raw($html)` | `e()` emits a `SafeHtml` value unchanged |
+
+`Escape::js()` emits JSON with `< > & ' "` escaped as `\u` sequences, so the value can't close the `<script>` element or a quoted attribute. Only wrap markup in `Escape::raw()` when every user-supplied part of it was already escaped.
+
 ## Templates and Rendering — Tips for template authors
 
-- **Always escape user data** with `htmlspecialchars()`. PHP templates have no auto-escaping — full control, full responsibility.
+- **Always escape user data** — see [Escaping output](#escaping-output). PHP templates have no auto-escaping — full control, full responsibility.
 - Keep templates free of business logic. Transform data in route handlers or service classes and pass simple view models to `App::render()`.
 - Use the route-handler / public-file / API-closure layers for logic; templates are view-only.
 - Pair templates with CSS/JS assets in `public/` — ZealPHP does not prescribe an asset pipeline.
-- For coroutine-enabled deployments (`App::superglobals(false)`), prefer `App::renderStream()` over blocking renders when the data source is itself async.
+- For coroutine-enabled deployments (`App::superglobals(false)`), prefer `App::render(..., stream: true)` over blocking renders when the data source is itself async.
+
+## Components
+
+ZealPHP builds pages from components, and one call renders both kinds:
+
+```php
+<?= App::component('card', ['title' => 'Hello']) ?>      // stateless: a template with props
+<?= App::component(Counter::class, ['count' => 5]) ?>     // reactive: state, actions, input binding
+```
+
+- A **stateless component** is a PHP template in `template/components/`. Same props in, same HTML out — like a React function component without hooks.
+- A **reactive component** is a PHP class. Public properties are its **state**, `#[Action]` methods are what buttons **call**, and `#[Model]` properties **bind** to form inputs, with validation. The server owns the state and renders HTML; the browser swaps it in. There's no client-side framework and no JSON API to keep in sync, and pages still work with JavaScript turned off.
+
+Start stateless; make a component reactive when it needs to respond to the user. Live demo: [`/components`](/components). For `App::render()`, streaming and fragments, see [Templates and Rendering](templates-and-rendering.md).
+
+## Components — Stateless components
+
+Put a template in `template/components/` and render it by name:
+
+```php
+<?php /* template/components/card.php */ use function ZealPHP\e; ?>
+<article class="card">
+  <h3><?= e($title) ?></h3>
+  <?= $slot ?? '' ?>
+</article>
+```
+
+```php
+<?= App::component('card', [
+    'title' => 'Invoices',
+    'slot'  => App::component('ui/button', ['text' => 'New invoice']),
+]) ?>
+```
+
+- **Lookup:** `'card'` renders `components/card.php`, else `components/_card.php` (so existing underscore partials work as they are). `'ui/button'` looks in `components/ui/`. Names are lowercase letters, digits, `-` and `_`, with `/` for folders.
+- **Any template:** a leading `/` renders any template, absolute from `template/`: `App::component('/emails/welcome', ['user' => $u])`. This is how you get markup from a template that isn't a component; it replaces the deprecated `App::renderToString()`.
+- **Props** become template variables; `$props` holds them all. Pass child markup as `slot` — an `App::component()` result or `Escape::raw()` is printed as-is, anything else should go through `e()`.
+- **Returns markup, never echoes**, so `<?= ?>` is correct. A route can `return App::component(...)` too: the response is the HTML. `App::render()` is for whole pages; see [Templates and Rendering](templates-and-rendering.md).
+- **Registered names win.** If a reactive component is registered as `card`, `App::component('card')` renders that.
+- Stateless components can be used anywhere, including inside reactive components. They have no state, so they need no key and no `ZEALPHP_APP_KEY`.
+
+## Components — Reactive components
+
+State travels in the page as a signed snapshot. Each request builds a fresh component from it, so workers keep nothing between requests — no per-user memory, nothing to leak between users, nothing lost when a worker restarts. The rest of this guide is about reactive components.
+
+## Components — Setup
+
+Reactive components sign their state with `ZEALPHP_APP_KEY`. Generate one and export it:
+
+```bash
+php app.php key:generate
+## Components — ZEALPHP_APP_KEY=base64:3q2+7w...
+export ZEALPHP_APP_KEY=base64:3q2+7w...
+```
+
+Register your components before `App::run()`, in `app.php` or a `route/*.php` file:
+
+```php
+use App\Components\{Counter, SignupForm};
+
+App::components([Counter::class, SignupForm::class]);
+```
+
+The name defaults to the kebab-case class name (`SignupForm` → `signup-form`). To choose it, pass `'name' => Class::class`. Only registered components can be reached from the browser.
+
+If reactive components are registered and there's no key, `php app.php` refuses to start. In dev mode (`php app.php --dev` or `ZEALPHP_DEV=1`) it uses a random key for that boot instead, and open pages need a reload after a restart.
+
+The component templates use htmx attributes by default, so the page needs htmx 2 loaded. See [Clients](#clients) to use something else.
+
+## Components — A first component
+
+```php
+namespace App\Components;
+
+use ZealPHP\Component\{Action, Component};
+
+final class Counter extends Component
+{
+    protected string $tag = 'form';   // the outer element; 'form' also works without JS
+
+    public int $count = 0;
+
+    #[Action]
+    public function add(int $by = 1): void
+    {
+        $this->count += $by;
+    }
+
+    public function render(): mixed
+    {
+        return $this->view('components/counter');
+    }
+}
+```
+
+```php
+<?php /* template/components/counter.php */ use function ZealPHP\e; ?>
+<span><?= e($count) ?></span>
+<button <?= $c->action('add') ?>>+1</button>
+<button <?= $c->action('add', ['by' => 10]) ?>>+10</button>
+```
+
+Put it on a page:
+
+```php
+<?= App::component(Counter::class, ['count' => 5], key: 'main') ?>
+```
+
+The template is only the inside of the component. The framework wraps it in the `$tag` element (with `id="counter-main"` and `data-zc="counter"`) and adds a hidden `_zc` input holding the signed snapshot.
+
+`App::component()` **returns** the markup and never echoes it, so `<?= ?>` is correct. That's unlike `App::render()`; see the echo side effect described in [Templates and Rendering](templates-and-rendering.md).
+
+### What templates receive
+
+`$this->view($template, $extra = [])` renders `template/{$template}.php` with:
+
+| Variable | Value |
+|---|---|
+| each public property | its current value (`$count`) |
+| `$c` | the component, for the helpers below |
+| `$errors` | `field => message` validation errors |
+| anything in `$extra` | as given |
+
+The template path is always absolute from `template/`, so the page and the endpoint render the same file.
+
+### Keys and ids
+
+The instance id is `{name}-{key}`; it's also the outer element's DOM id. Without a key, instances are numbered per request (`counter-1`, `counter-2`). Give a stable `key:` when the same component appears more than once, or when it must keep its state across a no-JS form submission.
+
+## Components — State
+
+Public properties declared on your class are the state. Each must have one declared type:
+
+- `string`, `int`, `float`, `bool`
+- `array` — of scalars and nested arrays (up to 4 levels)
+- a backed enum
+- any of these nullable (`?int`)
+
+Anything else — objects, union types, `mixed`, untyped — is refused when you register the component, so the browser can never cause an object to be constructed. Names `c`, `errors`, and names starting with `_` are reserved.
+
+**State is signed, not encrypted.** Anyone who can see the page can read it. Keep ids in state and load the records in `render()`:
+
+```php
+final class InvoiceRow extends Component
+{
+    public int $invoiceId = 0;
+
+    public function render(): mixed
+    {
+        return $this->view('invoices/row', ['invoice' => Invoice::find($this->invoiceId)]);
+    }
+}
+```
+
+Protected and private properties are not state; they're reset on every request. Use them for configuration (`$tag`, `$submit`, `$attributes`) or per-request caches.
+
+### Lifecycle
+
+| Hook | When |
+|---|---|
+| `mount()` | Once, when `App::component()` first places the component, after initial props are set |
+| `hydrate()` | On every endpoint request, after state is restored, before input is applied |
+| `updated{Prop}($value)` / `updated($prop, $value)` | After a `#[Model]` property changes from input (define them `protected` or `public`) |
+| `authorize(string $action): bool` | Before input is applied; return false to answer 403 |
+| `render()` | Every time the component is displayed |
+
+`authorize()` receives the action name, or `_update` / `_refresh` for input-only requests.
+
+## Components — Actions
+
+Mark a public method `#[Action]` to let the browser call it. `$c->action('name', $args)` prints the attributes for a button:
+
+```php
+#[Action]
+public function move(int $position, Direction $direction = Direction::Up): void { /* ... */ }
+```
+
+```php
+<button <?= $c->action('move', ['position' => $i, 'direction' => 'down']) ?>>Down</button>
+```
+
+Arguments are bound by parameter name and converted to the declared type; a value that doesn't convert, or a missing required argument, is a 400. Parameter types follow the same rules as state. Methods without `#[Action]` — including `render()`, `mount()` and anything inherited from `Component` — answer 404.
+
+Inside an action:
+
+| Call | Effect |
+|---|---|
+| `$this->validate()` | Validate `#[Model]` fields; on failure, stop the action and re-render with errors |
+| `$this->addError($field, $msg)` / `clearErrors()` | Set or clear errors directly |
+| `$this->dispatch('event', $detail)` | Fire a browser event after the swap (htmx: `HX-Trigger`) |
+| `$this->redirect('/path')` | Navigate after the action (same-site paths only) |
+
+`$submit` names the action that runs when the component's form is submitted (Enter key, or a `<button type="submit">` with no `action()`):
+
+```php
+protected string $tag = 'form';
+protected ?string $submit = 'save';
+```
+
+## Components — Input binding
+
+Mark a property `#[Model]` to bind it to a form control, and use `$c->model('prop')` on the control:
+
+```php
+#[Model(rules: 'required|email')]
+public string $email = '';
+
+#[Model(live: true, rules: 'required|min:3')]
+public string $username = '';
+
+#[Model(blur: true)]
+public int $age = 0;
+```
+
+```php
+<input <?= $c->model('email') ?>>
+<?= $c->error('email') ?>
+```
+
+`model()` prints `name`, `id` (`{instance id}-{prop}`), the current `value`, `aria-invalid`/`aria-describedby` when the field has an error, and the client attributes for live or blur fields.
+
+| Option | When the value is sent |
+|---|---|
+| (default) | With the next action |
+| `live: true` | As you type, after `debounce` ms (default 300) |
+| `blur: true` | When the field changes and loses focus |
+
+A live or blur change posts to the component's `_update` endpoint: input is applied, **only the changed fields are validated**, and the component re-renders. Errors stay on fields until they're fixed. The control you're typing in is left untouched by the swap (htmx `hx-preserve`), so focus, cursor and in-flight keystrokes survive.
+
+Only `#[Model]` properties accept input, and only those the last render printed a control for. Everything else in the request is ignored — including values for real properties that have no `#[Model]`.
+
+### Controls other than text inputs
+
+| Control | Template |
+|---|---|
+| `<textarea>` | `<textarea <?= $c->model('bio', false) ?>><?= $c->value('bio') ?></textarea>` |
+| `<select>` | `<select <?= $c->model('plan', false) ?>><option value="pro" <?= $c->selected('plan', 'pro') ?>>Pro</option></select>` |
+| checkbox (`bool`) | `<input type="checkbox" <?= $c->model('terms') ?> <?= $c->checked('terms') ?>>` |
+| checkbox group (`array`) | `<input type="checkbox" <?= $c->model('tags') ?> value="php" <?= $c->checked('tags', 'php') ?>>` |
+| radio | `<input type="radio" <?= $c->model('size', false) ?> value="l" <?= $c->checked('size', 'l') ?>>` |
+
+An unchecked checkbox sends nothing, so a missing `bool` field means `false` and a missing `array` field means `[]`. Checkbox groups get no `id` (it would repeat).
+
+### Conversion errors
+
+A submitted value that can't convert to the property's type (`"old"` for an `int`) becomes a field error ("Age must be a whole number."). The control shows back what the user typed, the property keeps its last valid value, and **no action runs** in that request.
+
+## Components — Validation
+
+Rules come from `#[Model(rules: …)]` and from an optional `rules()` method, which wins for the same field:
+
+```php
+protected function rules(): array
+{
+    return [
+        'terms' => 'accepted',
+        'code'  => ['required', fn($v) => $v === 'zeal' ? null : 'Wrong code.'],
+    ];
+}
+
+protected function messages(): array
+{
+    return ['terms.accepted' => 'Please accept the terms.', 'required' => ':field is needed.'];
+}
+```
+
+| Rule | Passes when |
+|---|---|
+| `required` | not `null`, `''` or `[]` |
+| `accepted` | `true`, `1`, `'1'`, `'on'`, `'yes'` |
+| `email`, `url` | a valid email / an http(s) URL |
+| `min:n`, `max:n`, `between:a,b` | string length, number value, or array count is in range |
+| `in:a,b`, `not_in:a,b` | the value is / isn't one of these |
+| `regex:/pattern/` | matches (put it last, or use the list form if the pattern has `\|`) |
+| `numeric`, `integer` | a number / a whole number |
+| `alpha`, `alpha_num`, `alpha_dash` | letters / plus digits / plus `-` and `_` |
+| closure `fn($value, $field)` | returns `null` (an error message string fails) |
+
+Every rule except `required` and `accepted` skips empty values, so `'email'` allows an empty field and `'required|email'` doesn't. `:field` in a message becomes the field's label (`first_name` → "First name").
+
+`$c->error('field')` prints `<span class="zc-error" role="alert">` with the message, or nothing. `$c->hasError()` and `$c->errors()` are there for custom markup.
+
+## Components — Concurrency in the browser
+
+With `HtmxBinder`:
+
+- **An action always goes out.** If a live update is still in flight on the same component, the action replaces it (the action carries every field anyway).
+- **The clicked button is disabled until its response arrives**, so a double-click can't re-send the state the first click started from. Clicking a *different* action while one is in flight replaces the first one's response: the result is computed from the state the page showed.
+- **Live updates queue** behind one another, and the field being typed in is kept across the swap (htmx 2: `hx-preserve`; htmx 4: morphing). If you type in field B while field A's update is in flight, B is re-rendered from the server's copy when A's response lands; its next keystroke sends it again.
+
+Elements inside a `$tag = 'form'` component inherit its `hx-target` and `hx-sync`. If you add your own `hx-get` inside a component, set `hx-target` on it explicitly, or its response replaces the whole component.
+
+## Components — Without JavaScript
+
+With `$tag = 'form'`, every component is a real form: action buttons are submit buttons with `formaction`, and the form's `action` is the `$submit` action. A plain form post runs the action, stores the resulting snapshot in the session, and answers `303` back to the page (the `Referer`, if it's on the same host). The next `App::component()` with the same key picks the stored state up once.
+
+Use a stable `key:` for components that must work this way; numbered keys can shift between renders. The round trip needs an active session (register `SessionStartMiddleware`): without one the action still runs, but the page after the redirect shows the old state.
+
+**Pressing Enter** submits a form with its *first* submit button. When `$submit` is set, the framework puts a hidden submit button for it first in the form, so an action button earlier in your template doesn't run instead.
+
+With `FormBinder` and the default `$tag = 'div'`, action buttons sit outside any form and do nothing without JavaScript. Set `$tag = 'form'` for components that must work without it — but don't put a form component inside another `<form>` (nested forms aren't valid HTML).
+
+## Components — Security
+
+| The browser tries to… | Result |
+|---|---|
+| Edit state in the snapshot | 400 — the HMAC doesn't match |
+| Use another visitor's snapshot | Refused like a stale snapshot (the page reloads and shows the visitor their own state) — snapshots are bound to the session with an HMAC of the session id, never the id itself |
+| Use a snapshot from before a deploy that changed the class, or older than `App::componentMaxAge()` (default 24 h) | htmx: `HX-Refresh: true` (page reloads); protocol: 409 |
+| Re-send an older snapshot of their own | **Accepted** until it expires — see below |
+| Call a method without `#[Action]` | 404 |
+| Write a property without `#[Model]`, or one the page didn't render | ignored |
+| Send an object or a value of the wrong type | 400 for action arguments; a field error for input |
+| Post from another site | 403 — `Sec-Fetch-Site` must be `same-origin`, or `Origin` must match `Host` |
+| Name a class to instantiate | impossible — only registered names are looked up |
+
+### Replay: signed isn't the same as latest
+
+A snapshot proves that this session was shown that state; it doesn't prove it's the newest one. A visitor can re-send an earlier snapshot of their own (until it expires) and get the earlier state back. That's harmless for UI state — a counter, a form, a selected tab — but **never use component state as the record of something that happened**: votes cast, attempts used, coupons claimed, a wizard step that grants something. Keep those in the database or the session and read them in `render()` or the action. `App::componentMaxAge(seconds)` bounds how long a snapshot can be re-sent (default 86400; 0 = no limit).
+
+### Without a session
+
+Snapshots are bound to the PHP session. When no session is active (no `SessionStartMiddleware` and no `PHPSESSID` cookie yet, or an app that authenticates with tokens instead), snapshots aren't bound to anyone. The endpoint then refuses requests that carry neither `Sec-Fetch-Site` nor `Origin`, so cross-site requests can't use them, but any snapshot works for any sessionless visitor. Start a session (`SessionStartMiddleware`) for anything user-specific. A session that starts or is regenerated after a page was rendered (login) makes that page reload on its next component request.
+
+Things to do yourself:
+
+- **Authorize.** The snapshot proves *this session* rendered *this state*; it doesn't prove the user may act on it. Check permissions in `authorize()` or in the action, and scope queries by the current user. Middleware on the endpoint works too: `App::when('/_zeal/c', ['auth'])`.
+- **No secrets in state.** It's readable in the page source.
+- **Escape in templates.** Use `e()` for values you print (see [Escaping output](templates-and-rendering.md#escaping-output)); the helpers escape everything they print.
+
+### Rotating the key
+
+Move the old key to `ZEALPHP_APP_KEY_PREVIOUS` (comma-separated for several) and set the new one. Snapshots signed with the old key keep working; new ones use the new key. Remove the old key once open pages have had time to expire.
+
+The raw key never signs anything directly: each use derives its own key with HKDF, so a snapshot signature can't be reused for another purpose.
+
+## Components — Clients
+
+The endpoint speaks plain HTTP. A **binder** decides which attributes `action()` and `model()` print and how side effects are signalled:
+
+| Binder | Prints | Use |
+|---|---|---|
+| `HtmxBinder` (default) | `hx-post`, `hx-target`, `hx-include`, `hx-sync`, `hx-preserve`, plus the plain-form attributes | Pages with htmx 2 |
+| `FormBinder` | Plain-form attributes only | Pages with no JavaScript |
+| your own | anything — implement `ZealPHP\Component\ComponentBinder` | Alpine, Datastar, a custom `fetch()` client |
+
+### htmx 2 and htmx 4
+
+`HtmxBinder` supports both. htmx 2 is the default (it's still npm's `latest`); pass `htmx: 4` for htmx 4:
+
+```php
+App::componentBinder(new HtmxBinder());            // htmx 2.x
+App::componentBinder(new HtmxBinder(htmx: 4));     // htmx 4.x
+App::componentBinder(new HtmxBinder(morph: true)); // htmx 2 + the idiomorph extension
+```
+
+| | htmx 2 | htmx 4 |
+|---|---|---|
+| Swap | `outerHTML` (`morph:outerHTML` with `morph: true`) | built-in `outerMorph`, always |
+| Keeping the field being typed in | the response marks it `hx-preserve` | morphing never overwrites the focused input's value |
+| Disabling the clicked button | `hx-disabled-elt="this"` | `hx-disable="this"` |
+| Refused requests (400/403/404) | not swapped (htmx 2 default) | `HX-Reswap: none` stops htmx 4 swapping the error text |
+
+Every attribute is set on the element that needs it, so htmx 4's explicit attribute inheritance doesn't affect components. The two dialects differ in attribute names (`hx-disable` means "ignore this element" in htmx 2), so pick the one matching the htmx on your pages. `HtmxBinder` answers validation errors with 200, maps events to `HX-Trigger`, redirects to `HX-Redirect`, and stale snapshots to `HX-Refresh`.
+
+### Client-only state: hx-live, Alpine
+
+Some state never needs the server: a dropdown being open, a character counter, a tab. Keep that in the browser with htmx 4's `hx-live` (or Alpine.js) inside a component's template:
+
+```html
+<textarea <?= $c->model('bio', false) ?>><?= $c->value('bio') ?></textarea>
+<small :text="q('previous textarea').value.length + ' / 280'"></small>
+```
+
+Client-side state lives on DOM nodes, so it survives a re-render only where the swap keeps those nodes — always the case with htmx 4's morphing; with htmx 2's `outerHTML` it resets on each update. Anything the server must know belongs in a `#[Model]` property.
+
+### Protocol
+
+For writing a binder or a client.
+
+**Request** — `POST /_zeal/c/{name}/{action}`, form-encoded (`application/x-www-form-urlencoded` or `multipart/form-data`):
+
+| Field | Value |
+|---|---|
+| `_zc` | the snapshot from the component's hidden input |
+| `_zc_args` | action arguments as a JSON object (`{"by": 2}`); omit for none |
+| `#[Model]` fields | as a form would send them (`tags[]` for arrays) — send **every** bound control in the component, not just the changed one: a missing `bool` means unchecked and a missing `array` means empty, so a partial post clears them |
+
+`{action}` is an `#[Action]` method name, `_update` (apply input and validate changed fields), or `_refresh` (apply input, re-render). For `_update`, name the field that changed in a `_zc_trigger` form field (the htmx binder does this); a `Zeal-Trigger` or `HX-Trigger-Name` header also works. Scripted clients send `Zeal-Request: 1`.
+
+**Response:**
+
+| Status | Meaning | Body |
+|---|---|---|
+| 200 | OK | the re-rendered component (outer element included) |
+| 422 | validation errors | the re-rendered component showing them |
+| 303 | plain form post (no `Zeal-Request` / `HX-Request`) | — `Location` is the page |
+| 400 | malformed or tampered snapshot, bad arguments | text |
+| 403 | cross-origin, sessionless without an origin header, or `authorize()` refused | text |
+| 404 | unknown component or action | text |
+| 409 | snapshot from another version, another session, or expired (or signed before a dev-mode restart) — reload the page | — |
+
+Headers: `Zeal-Events` (JSON object of event → detail), `Zeal-Redirect` (a path to navigate to), `Zeal-Reload: 1` (with 409). Every response is `Cache-Control: no-store`.
+
+## Components — Running in coroutine-legacy
+
+`App::components()` loads and reflects your component classes — and the framework's own component classes — in the master, before workers fork, so none of them is compiled cold under concurrency. Instances live for one request and are never stored in statics, so they need no isolation support.
+
+## Components — Limits in this version
+
+- **No reactive nesting.** A reactive component inside another reactive component's render throws: the parent's requests would carry the child's snapshot too. Stateless components nest freely.
+- **Dev hot-reload** (`--dev`) re-registers components from `route/*.php`, but the endpoint route and the key check are set up at boot: if a reload adds the *first* component, restart. Removed components stay registered until restart.
+- **Behind a proxy that rewrites `Host`**, the `Origin` fallback and the no-JS back-link compare against the rewritten host. Modern browsers send `Sec-Fetch-Site`, which isn't affected; the back-link falls back to `/`.
+
+## Components — What's next
+
+Planned in [the design doc](architecture/2026-11-06-server-driven-components.md): a bundled vanilla-JS client, pushing "refresh" signals over WebSocket when server data changes (`Component::invalidate('topic')`), nested components, and benchmarks against `App::renderHtmx()` fragments.
 
 ## Streaming
 
@@ -1528,7 +2016,7 @@ ZealPHP supports four streaming patterns. They share the same underlying mechani
 | Generator `yield` from a route handler | `\Generator` | SSR — stream HTML as coroutines resolve |
 | `$response->stream($fn)` | `void` (`$fn` receives a `$write` closure) | Fine-grained chunk control |
 | `$response->sse($fn)` | `void` (`$fn` receives an `$emit` closure) | Server-Sent Events to a browser `EventSource` |
-| `App::renderStream($tpl, $args)` | `\Generator` | Compose streaming output across template files |
+| `App::render($tpl, $args, stream: true)` | `\Generator` | Compose streaming output across template files |
 
 All four set `$g->_streaming = true` so `ResponseMiddleware` skips its output-buffer capture and forwards bytes to the wire immediately.
 
@@ -1609,9 +2097,9 @@ es.addEventListener('done', () => es.close());
 </script>
 ```
 
-## Streaming — Pattern 4: `App::renderStream($tpl, $args)`
+## Streaming — Pattern 4: `App::render($tpl, $args, stream: true)`
 
-`renderStream()` reads a template file and returns a `\Generator`, letting you compose streaming output across multiple files with `yield from`. The template may use any of three styles:
+With `stream: true`, `App::render()` reads a template file and returns a `\Generator` (it never echoes), letting you compose streaming output across multiple files with `yield from`. The template may use any of three styles:
 
 1. **Closure with named parameters** (cleanest — the framework injects args by name, same as route handlers):
 
@@ -1642,9 +2130,9 @@ Compose streams across templates with `yield from`:
 ```php
 $app->route('/users', function() {
     return (function() {
-        yield from App::renderStream('shell-open', ['title' => 'Users']);
-        yield from App::renderStream('users/stream', ['users' => User::all()]);
-        yield from App::renderStream('shell-close');
+        yield from App::render('shell-open', ['title' => 'Users'], stream: true);
+        yield from App::render('users/stream', ['users' => User::all()], stream: true);
+        yield from App::render('shell-close', stream: true);
     })();
 });
 ```
@@ -1703,7 +2191,7 @@ $response->sse(function($emit) {
 - **Default, cleanest** → Generator `yield`. Return a `\Generator`, write business logic top-down, parallelise with `go()` and `Channel`.
 - **You need direct `write()` control** → `$response->stream()`. Useful when the bytes don't fit naturally into `yield` (binary streams, pumping from an external iterator, interleaving non-yieldable work).
 - **You're streaming to a browser `EventSource`** → `$response->sse()`. The wire-format handling is already done for you.
-- **You're composing fragments across multiple template files** → `App::renderStream()` with `yield from`. Each template can declare its own named parameters and stream independently.
+- **You're composing fragments across multiple template files** → `App::render(..., stream: true)` with `yield from`. Each template can declare its own named parameters and stream independently.
 
 ## WebSocket
 
@@ -2630,7 +3118,7 @@ ZealPHP's concurrency model is selected once, before `App::run()`, via the one-c
 |--------|-------------|
 | `App::mode(App::MODE_COROUTINE)` | Modern ZealPHP apps — per-request coroutine concurrency, `$g` state isolated per coroutine. Recommended default. |
 | `App::mode(App::MODE_LEGACY_CGI)` | Unmodified WordPress / Drupal — each request runs in an isolated subprocess via the pre-spawned CGI pool. |
-| `App::mode(App::MODE_COROUTINE_LEGACY)` | Legacy request-style PHP run **concurrently** — modern Composer apps (Symfony, Laravel, Slim) and procedural code that needs per-coroutine isolation of `$_GET`/`$_SESSION`/`$GLOBALS`/function statics/`require_once`/conditional re-declaration. **Requires ext-zealphp.** (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`, not part of the preset.) |
+| `App::mode(App::MODE_COROUTINE_LEGACY)` | Legacy request-style PHP run **concurrently** — modern Composer apps (Symfony, Laravel, Slim) and procedural code that needs per-coroutine isolation of `$_GET`/`$_SESSION`/`$GLOBALS`/function statics/`require_once`/conditional re-declaration. **Requires ext-zealphp.** (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`, not part of the preset.) Statics (function-local and class) of code defined **before the server starts** (in `app.php`, or preloaded) are boot state and are shared by every request in the worker; only code loaded during a request is reset per request. |
 | `App::mode(App::MODE_MIXED)` | Symfony / Laravel bridge — real `$_SESSION`, sequential per-worker, no CGI fork cost. |
 
 `App::isolation(string)` is the lower-level single-axis knob that the presets drive; its values are `App::ISOLATION_COROUTINE`, `ISOLATION_CGI_POOL`, `ISOLATION_CGI_PROC`, `ISOLATION_CGI_FCGI`, and `ISOLATION_NONE`. Use `App::mode()` for the common cases and reach for `App::isolation()` only when mixing axes.
@@ -3515,6 +4003,7 @@ Traditional PHP scripts rely on `$_GET`, `$_POST`, `$_SERVER`, etc. ZealPHP emul
 ZealPHP favours a single-request-per-worker model to protect superglobals. When you need to isolate work:
 
 - `App::cgiMode('pool' | 'proc' | 'fork' | 'fcgi')` selects the per-request isolation strategy for legacy `public/*.php` files. `'pool'` (default) uses a **pre-spawned subprocess pool** (mod_php-style global isolation, ~1–3 ms warm — what unmodified WordPress/Drupal needs). `'proc'` forks a fresh PHP interpreter per request via `proc_open` + `cgi_worker.php` (~30–50 ms cold start; use when true fresh-process isolation is required every request). `'fork'` is the Apache MPM prefork runner — a fork-master forks a fresh child per request at true global scope (~1 ms fork cost, **EXPERIMENTAL**, requires `pcntl`+`posix`). `'fcgi'` forwards to an upstream php-fpm pool via `App::fcgiAddress()` — no child process at all. See [tasks-and-concurrency.md](./tasks-and-concurrency.md) for the trade-off table.
+- **Not a tenant boundary.** These modes, per-extension backends and per-domain CGI routing serve one owner's sites; all the code they run is trusted alike. The pool guards response integrity (a bug can't hand one user's response, session or input to the next user — see [fastcgi-backends.md](fastcgi-backends.md#the-cgi-pool-is-not-a-tenant-boundary)), but it does not isolate mutually distrusting tenants. Use separate OS users, containers or hosts for that.
 - `coprocess()` / `coproc()` create dedicated processes with coroutine support for longer-running workloads that should not block the main worker. These helpers are only available when superglobals are enabled (`coproc` throws otherwise).
 
 ### Custom CGI backends — host any language
@@ -3606,6 +4095,10 @@ an unregistered fallback (`['mode' => App::$cgi_mode]`, `mayExecute = false`).
 > `App::include()` but does **not** yet get an automatic `/{file}.<ext>` route.
 > Pair `cgiScriptAlias()` with a `registerCgiBackend()` for the extensions you
 > want auto-routed, or add an explicit route. (Follow-up.)
+
+Without an `interpreter`, a ScriptAlias file is exec'd directly: it must be a
+`#!` script or a compiled binary (ELF/Mach-O), and must not be world-writable,
+or the request fails with a 500 (Apache parity: nothing falls back to /bin/sh).
 
 `App::resolveCgiBackend('/path/file.py', '/cgi-bin/file.py')` returns
 `['backend' => [...], 'mayExecute' => bool]` for a given path + URL. Full
@@ -3801,6 +4294,7 @@ The default coupling — `null` everywhere — preserves the historical behaviou
 - `superglobals(false) + enableCoroutine(false)` — **always throws** unconditionally. `CoSessionManager` requires the coroutine scheduler for per-request `RequestContext` isolation; this combination is never safe.
 - `superglobals(true) + enableCoroutine(true)` — throws **only when ext-zealphp is absent**. Without it, concurrent coroutines race the process-wide `$_GET` / `$_POST` / `$_SESSION` arrays. **With ext-zealphp loaded, this combination is fully supported** — it is exactly `App::mode(App::MODE_COROUTINE_LEGACY)`, where ext-zealphp's scheduler hooks snapshot/restore superglobals per coroutine.
 - `superglobals(true) + hookAll(non-zero)` — throws **only when ext-zealphp is absent**, for the same reason: hooked I/O can yield mid-request. With ext-zealphp, coroutine-legacy mode uses this combination safely.
+- `superglobals(true) + enableCoroutine(true)` with an ext-zealphp **older than `App::MIN_EXT_VERSION_COROUTINE_LEGACY`** (0.4.1) — refuses to boot (stderr, exit 1). Request isolation in this mode lives entirely in the extension. Older builds leak state between requests: error state, request constants and by-reference locals, and, before 0.4.0, the whole superglobal/static/global state across an inline `Channel::push()` resume (connection pools). They can also crash on OOM during a coroutine switch. `ZEALPHP_ALLOW_OUTDATED_EXT=1` overrides.
 
 Pre-v0.2.27 these were `elog()`'d at warn level into `/tmp/zealphp/debug.log` but didn't refuse — in practice the warning was invisible to anyone not actively reading the debug log, and the unsafe configuration is how cross-request state-leak bugs ship to production. v0.2.27 changes this to a hard throw at `App::run()` boot — fail loud, fail fast, before any request can be served against a broken contract. Apps that need a refused combination for security-audit or debugging purposes can fork and remove the throw at `App::validateLifecycleCombination()`.
 
@@ -3936,6 +4430,13 @@ regardless of extension. It takes the same `mode` / `interpreter` / `address` /
 App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3']);
 ```
 
+> **What ScriptAlias will run.** With no `interpreter`, a file is exec'd
+> directly, so it must be a **`#!` script or a compiled binary** (ELF/Mach-O).
+> Apache parity: anything else made `exec()` fail and `/bin/sh` ran the file as
+> a shell script, whatever it contained. It must also **not be world-writable**.
+> Group-writable is fine (deploy-group setups); only suexec refuses that.
+> Either failure is a 500 with the reason in the error log.
+
 > **Implicit URL routing is automatic for ScriptAlias prefixes.** `run()`
 > registers a `patternRoute('#^<prefix>/(?P<rest>.+?)/?$#', …)` for every
 > `cgiScriptAlias()` prefix (`registerImplicitRoutes()`), so a ScriptAlias-only
@@ -3960,6 +4461,59 @@ response.
 
 `HTTP_PROXY` is **never** forwarded (httpoxy / CVE-2016-5385 mitigation) —
 same as Apache's `mod_cgi`.
+
+**ZealPHP's own subprocess channels stay home by default.**
+`ZEALPHP_REQUEST_CONTEXT` is the JSON copy of the request — and of the
+server's environment, database passwords and API keys included — that
+`cgi_worker.php` uses to rebuild its superglobals. PHP-FPM builds its
+superglobals from the CGI params and needs none of it, so it is not sent to a
+FastCGI upstream, and neither are `ZEALPHP_CWD`, `ZEALPHP_CGI_DISPLAY_ERRORS`
+or `ZEALPHP_CGI_AUTOLOAD`. Opt in only for an upstream script that reads
+`ZEALPHP_REQUEST_CONTEXT`:
+
+```php
+App::fcgiForwardContext(true);   // or ZEALPHP_FCGI_FORWARD_CONTEXT=1
+```
+
+**Session strict mode reaches FPM.** Every request carries
+`PHP_VALUE: session.use_strict_mode=1` (or `=0`), following
+`App::$session_strict_mode` exactly as the `proc` / `pool` / `fork` subprocesses
+do. FPM otherwise reads `php.ini`, and Debian/Ubuntu ship strict mode off, so a
+client-chosen `PHPSESSID` was adopted. A `PHP_VALUE` in a backend's
+`fcgi_params` is appended after that line, so an explicit setting there wins.
+
+**Response parsing.** The header block ends at the first blank line, `CRLF` or
+bare `LF`, so a body that contains `CRLF CRLF` can never be read as headers. A
+`Status:` value must be a code in 100–599 (anything else is ignored), and an
+`END_REQUEST` whose `protocolStatus` is not `REQUEST_COMPLETE` (the upstream
+was overloaded or refused the role) is a **502**, not a response.
+
+---
+
+## FastCGI Backends — The CGI pool is not a tenant boundary
+
+`cgiMode('pool' | 'proc' | 'fork' | 'fcgi')`, per-extension backends and
+per-domain routing (`HostRouterMiddleware` sending each of your domains to its
+own CGI backend) exist so **one owner** can run their sites — legacy apps
+included — side by side. Every script they run is that owner's code. ZealPHP
+does **not** isolate mutually distrusting tenants from each other: a script in
+a pool subprocess can read the files, environment and memory that subprocess
+can, a reused subprocess deliberately keeps some process state between
+requests — `ini_set()` values, constants and statics of code that stays
+loaded — so traditional apps run unmodified and fast (the keep-vs-reset
+choices are graded per app in
+[compatibility-database.md](compatibility-database.md)), and nothing stops a
+deliberately hostile script from interfering with the next request it shares a
+process with. Hosting customers who must not see each other needs separate
+OS users, containers or hosts, not separate backends.
+
+What the pool **does** guarantee is integrity against bugs in that code: one
+user's response, session, cookies or request input are never handed to the
+next user served by the same subprocess. Each request frame carries a fresh
+token the response must echo; bytes left on the response channel, a
+`body_length` over the 64 MB cap, or a frame that cannot decode get the
+subprocess killed and replaced (the request gets a **502**), and request
+frames over the cap are refused with a **413** before they reach a subprocess.
 
 ---
 
@@ -4241,7 +4795,7 @@ ZealPHP ships four one-call presets via `App::mode(string)`. For Apache + mod_ph
 | Preset | What it gives you |
 |---|---|
 | `App::mode(App::MODE_LEGACY_CGI)` | `superglobals(true)` + warm CGI pool (`~1–3 ms`). True global scope per request. Correct home for unmodified WordPress / Drupal / apps that use pure `require_once` with no Composer autoloader. |
-| `App::mode(App::MODE_COROUTINE_LEGACY)` | `superglobals(true)` + coroutine concurrency + **full per-coroutine isolation** of all request-state primitives (`$_*` superglobals, `header()`/`setcookie()`, `$GLOBALS` including object-valued, function-local `static $x`, `ini_set`, `require_once` re-execution). Requires **ext-zealphp**. (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`, not auto-enabled by the preset.) Correct home for modern Composer apps (Symfony, Laravel, Slim) that need real `$_SESSION` and concurrent request handling. |
+| `App::mode(App::MODE_COROUTINE_LEGACY)` | `superglobals(true)` + coroutine concurrency + per-coroutine isolation of the request-state primitives (`$_*` superglobals, `header()`/`setcookie()`, `$GLOBALS` including object-valued, function-local `static $x`, `ini_set`, `require_once` re-execution). Requires **ext-zealphp**. (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`, not auto-enabled by the preset.) Statics (function-local and class) of code defined **before the server starts** (in `app.php`, or preloaded) are boot state and are shared by every request in the worker; only code loaded during a request is reset per request. Correct home for modern Composer apps (Symfony, Laravel, Slim) that need real `$_SESSION` and concurrent request handling. |
 
 For the full preset matrix (including `'coroutine'` and `'mixed'`) and the orthogonal `App::isolation()` axis, see [Lifecycle modes](/coroutines#lifecycle-modes).
 
@@ -4447,6 +5001,7 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 | `ZEALPHP_CGI_MAX_REQUESTS` | unset → `500` | user | Requests a `cgiMode('pool')` subprocess serves before clean recycle (`App::$cgi_pool_max_requests`, FPM `pm.max_requests` parity). Resolved by `App::resolveCgiEnv()` when ≥ 1; explicit `App::cgiPoolMaxRequests(N)` wins. |
 | `ZEALPHP_CGI_TIMEOUT` | unset → `60` | user | Seconds to wait for a `proc`-mode CGI subprocess to emit its metadata line before SIGTERM/SIGKILL (`App::$cgi_timeout`, Apache `CGIScriptTimeout` parity). Resolved by `App::resolveCgiEnv()` when ≥ 1; explicit `App::cgiTimeout(N)` wins. |
 | `ZEALPHP_FCGI_ADDRESS` | unset → `127.0.0.1:9000` | user | Upstream FastCGI backend address for `cgiMode('fcgi')` (`App::$fcgi_address`) — `host:port` or `unix:/path/to/fpm.sock`. Resolved by `App::resolveCgiEnv()` when non-empty; explicit `App::fcgiAddress(...)` wins. |
+| `ZEALPHP_FCGI_FORWARD_CONTEXT` | unset → off | user | When truthy (`1`/`true`/`on`), FastCGI dispatch also sends ZealPHP's subprocess channels upstream: `ZEALPHP_REQUEST_CONTEXT` (a copy of the request and of the server's environment), `ZEALPHP_CWD`, `ZEALPHP_CGI_DISPLAY_ERRORS`, `ZEALPHP_CGI_AUTOLOAD` (`App::$fcgi_forward_context`). Off by default: PHP-FPM needs none of them. Resolved by `App::resolveCgiEnv()`; explicit `App::fcgiForwardContext(...)` wins. |
 | `ZEALPHP_CGI_FORK_MAX_CONCURRENT` | unset → `16` | user | Max concurrent `cgiMode('fork')` children — a per-request fork ceiling, NOT the pre-spawned pool size (`App::$cgi_fork_max_concurrent`). Resolved by `App::resolveCgiEnv()` when ≥ 1; explicit `App::cgiForkMaxConcurrent(N)` wins. |
 | `ZEALPHP_HTTP_COMPRESSION` | `!$compressionMiddleware` (true when `CompressionMiddleware` is NOT registered, false when it is) | user | In `app.php`, sets the OpenSwoole `http_compression` server setting (`env_flag`) — toggles OpenSwoole's built-in gzip/deflate response compression. |
 | `ZEALPHP_OPCACHE_ADVISORY` | unset (advisory enabled; only literal `'0'` suppresses) | user | Read in `App::opcacheLegacyBootCheck()` via `getenv()==='0'`; when `'0'`, suppresses the boot-time advisory about opcache + coroutine-legacy re-declaring `require_once`'d classes. |
@@ -4455,6 +5010,9 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 | `ZEALPHP_CWD_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineCwdIsolation()` — when `'1'`, disables per-coroutine working-directory isolation (S9a, #323), so a request's `chdir()` leaks process-wide again. |
 | `ZEALPHP_LOCALE_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineLocaleIsolation()` — when `'1'`, disables per-coroutine `setlocale()` isolation (S9b). |
 | `ZEALPHP_UMASK_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineUmaskIsolation()` — when `'1'`, disables per-coroutine `umask()` isolation (S9c). |
+| `ZEALPHP_LAST_ERROR_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineLastErrorIsolation()` — when `'1'`, concurrent requests share one `error_get_last()` slot again. The per-request clear at request start still applies. |
+| `ZEALPHP_ALLOW_OUTDATED_EXT` | unset (refuse; only literal `'1'` overrides) | user | Read in `App::activateIsolationRuntime()`. coroutine-legacy refuses to boot (stderr, exit 1) when the loaded ext-zealphp is older than `App::MIN_EXT_VERSION_COROUTINE_LEGACY`; `'1'` boots anyway and only logs the error. |
+| `ZEALPHP_STATIC_SYMLINK_STRICT` | unset (warn only; only literal `'1'` refuses) | user | Read in `App::run()`. The boot scan logs every symlink under the OpenSwoole static-handler prefixes that resolves outside the document root; `'1'` refuses to boot instead (stderr, exit 1). |
 | `ZEALPHP_TZ_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineTimezoneIsolation()` — when `'1'`, disables per-coroutine `date_default_timezone_set()` isolation (S9d). |
 | `ZEALPHP_MBENC_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineMbencIsolation()` — when `'1'`, disables per-coroutine `mb_internal_encoding()` isolation (S9e). |
 | `ZEALPHP_LIBXML_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineLibxmlIsolation()` — when `'1'`, disables per-coroutine `libxml_use_internal_errors()` flag isolation (S9f). |
@@ -4485,7 +5043,11 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 
 | Variable | Default | Scope | Description |
 |----------|---------|-------|-------------|
+| `ZEALPHP_APP_KEY` | unset → no key: boot refuses when components are registered, except in dev mode (`--dev` / `ZEALPHP_DEV=1`), which uses a random per-boot key | user | The application secret, read by `ZealPHP\AppKey`. `base64:` + base64 of ≥32 random bytes (`php app.php key:generate`), or a raw string of ≥32 bytes. Signs [reactive component](components.md) snapshots; each use derives its own key with HKDF. |
+| `ZEALPHP_APP_KEY_PREVIOUS` | unset → none | user | Comma-separated old app keys, same format. Accepted for **verifying** only, so rotating `ZEALPHP_APP_KEY` doesn't break pages already open. |
 | `ZEALPHP_CORS_ORIGINS` | unset → `["*"]` (wildcard) with a one-time `elog()` warning | user | Comma-separated CORS origin allowlist read by `CorsMiddleware::resolveOriginsList()` when no explicit origins are passed to the constructor; empty/unset → wildcard `*`. |
+| `ZEALPHP_SESSION_DIR` | `<log dir>/sessions` (0700) | user | Directory for ZealPHP's file session store when the app doesn't call `App::sessionSavePath()`. Keep it ZealPHP-only: PHP's `session.save_path` (e.g. `/var/lib/php/sessions`) is shared with every mod_php/FPM app on the host. |
+| `ZEALPHP_TRUSTED_PROXIES` | unset (trust no proxy) | user | Comma-separated proxy IPs/CIDRs for `App::trustedProxies()` when the app doesn't set them (e.g. `127.0.0.1` behind a same-host Apache/nginx). Only these peers' `X-Forwarded-For` / `X-Forwarded-Proto` are honoured, which drives `clientIp()` (rate limits, IP access) and the session cookie's Secure flag. |
 | `ZEALPHP_SESSION_SECURE` | unset → auto-detect HTTPS (Secure flag true when `HTTPS=on`, `X-Forwarded-Proto=https`, or `SERVER_PORT=443`) | user | When set, forces the session cookie's Secure flag via `filter_var(FILTER_VALIDATE_BOOLEAN)`; unset → auto-detect HTTPS (`src/Session/utils.php`). |
 | `ZEALPHP_SESSION_GC_INTERVAL` | `600000` (ms = 10 min) | user | Interval of the worker-0 deterministic session-GC timer (`App::registerSessionGc()`, `src/App.php`). Milliseconds; values `< 1000` are ignored and reset to `600000`. |
 | `ZEALPHP_WS_HMAC` | not read by the framework — app-supplied; effective default is no HMAC until the app wires it | user | Documented in the `WSRouter::setChannelHmacSecret()` docblock (`src/WSRouter.php:261`) as the env var an app reads in `app.php` to pass into `setChannelHmacSecret()`; the framework never calls `getenv` on it. When set, `WSRouter` signs/verifies `ws:server:*` and `ws:room:*` pub/sub publishes with an HMAC envelope. |
@@ -4515,7 +5077,9 @@ These are **not** user-facing configuration. Internal vars are IPC/runtime chann
 | Variable | Default | Scope | Description |
 |----------|---------|-------|-------------|
 | `ZEALPHP_CWD` | unset → no `chdir` (set internally to `App::$cwd`) | internal | CGI-subprocess env var set by `App` from `self::$cwd` and read by `cgi_worker.php` (`getenv('ZEALPHP_CWD')`; chdir's to it when present) so the child runs in the parent's working directory. |
-| `ZEALPHP_REQUEST_CONTEXT` | `'{}'` (empty JSON object) when unset | internal | IPC channel — JSON-encoded per-request context (server/get/post/cookie/files/env) `App` passes to the CGI subprocess; `cgi_worker.php` reads it via `json_decode(getenv('ZEALPHP_REQUEST_CONTEXT') ?: '{}', true)` to rebuild superglobals. |
+| `ZEALPHP_REQUEST_CONTEXT` | `'{}'` (empty JSON object) when unset | internal | JSON-encoded per-request context (server/get/post/cookie/files/env). proc mode no longer sets it: `cgi_worker.php` reads the context from the fd named by `ZEALPHP_CGI_CONTEXT_FD` (exec() refuses an env string past ~128 KB) and falls back to this var only when no fd is given. Still set for non-PHP CGI scripts while it fits, and sent to FastCGI upstreams only with `ZEALPHP_FCGI_FORWARD_CONTEXT`. |
+| `ZEALPHP_CGI_CONTEXT_FD` | unset → read `ZEALPHP_REQUEST_CONTEXT` | internal | Set by proc-mode dispatch (`4`): the fd `cgi_worker.php` reads the request context from. |
+| `ZEALPHP_CGI_META_FD` | unset → metadata on stderr | internal | Set by proc-mode dispatch (`3`): the fd `cgi_worker.php` writes its one-line JSON metadata (status, headers, cookies, session) to, so stderr output can never take its place. |
 | `ZEALPHP_CGI_AUTOLOAD` | unset (no autoload; treated as off unless exactly `'1'`) | internal | Read in `src/cgi_worker.php` via `getenv()==='1'`; when `'1'`, the CGI subprocess requires `vendor/autoload.php`. Set internally by `App.php` (~line 5695) when `App::cgiSubprocessAutoload(true)`, not by users directly. |
 | `ZEALPHP_POOL_MAX_REQUESTS` | `500` | internal | Requests a CGI pool worker handles before recycling; `src/pool_worker.php` reads it with `?: '500'`, and `WorkerPool.php` injects it into each child's env from `App::cgiPoolMaxRequests`. Normally set via the App API, not directly. |
 | `ZEALPHP_FORK_SOCK` | unset (required) | internal | UNIX-socket path the `cgiMode('fork')` runner binds. `src/CGI/ForkPool.php` mints a per-worker path and injects it; `src/fork_master.php` reads it via `getenv('ZEALPHP_FORK_SOCK')` and `stream_socket_server`s on it. Set internally, never by users. |
@@ -4555,6 +5119,7 @@ server in the foreground on the configured port (8080 by default).
 | `restart` | Stop then start. If the instance was running daemonized, the restart stays daemonized unless you pass `-d`. |
 | `status` | Report whether the instance is running (prints pid + port). |
 | `logs` | Tail the log files (Ctrl+C to stop). Combine with the log filters below to tail specific logs. |
+| `key:generate` | Print a new `ZEALPHP_APP_KEY=base64:…` line and exit, without starting a server. The key signs [reactive component](components.md) state; see [environment variables](environment-variables.md). |
 
 ## CLI reference — Options
 
@@ -6377,7 +6942,7 @@ follow-up once a Docker-based job is added.
 
 ZealPHP treats [htmx](https://htmx.org) as a first-class citizen. The model is the opposite of a SPA: **the server returns HTML**, and htmx swaps it into the page over AJAX without a full reload. You write routes that return markup; htmx wires up the interactivity from HTML attributes. There is no client-side framework, no JSON-to-DOM glue, no build step.
 
-This guide covers the full ZealPHP htmx surface: reading the htmx request headers, driving the htmx client from the response, the `App::renderHtmx()` fragment selector, out-of-band swaps, the boosting model, where htmx ends and SSE/WebSocket begin, and the CSRF pattern.
+This guide covers the full ZealPHP htmx surface: reading the htmx request headers, driving the htmx client from the response, htmx-aware rendering with `App::render(htmx: true)`, out-of-band swaps, the boosting model, where htmx ends and SSE/WebSocket begin, and the CSRF pattern.
 
 > The demo site (this repository) uses htmx globally — every page is hx-boosted. The `/learn/htmx` lesson is a gentle, narrative introduction; this guide is the reference.
 
@@ -6446,14 +7011,14 @@ $app->route('/search', function ($request) {
 
     if ($request->isHtmx()) {
         // htmx asked for just the results — return the partial.
-        return App::renderToString('search/results', ['hits' => $hits]);
+        return App::component('/search/results', ['hits' => $hits]);
     }
     // Direct navigation — return the whole page (which includes the results).
     return App::render('search/page', ['hits' => $hits]);
 }, methods: ['GET']);
 ```
 
-That branch is common enough that ZealPHP ships [`App::renderHtmx()`](#fragments--apprenderhtmx) to collapse it to one line.
+That branch is common enough that `App::render()` takes an [`htmx: true`](#htmx-aware-rendering--htmx-true) option to collapse it to one line.
 
 ## HTMX — Driving the client
 
@@ -6513,7 +7078,7 @@ $res->htmx()
     ->status(422);
 ```
 
-## HTMX — Fragments & `App::renderHtmx()`
+## HTMX — Fragments & `App::render(htmx: true)`
 
 The htmx "one URL, two responses" pattern: a direct hit returns the full page; an htmx request returns just the piece that swaps in. ZealPHP supports this two ways.
 
@@ -6534,33 +7099,38 @@ The htmx "one URL, two responses" pattern: a direct hit returns the full page; a
 
 ```php
 // Full page:        App::render('contacts/list', ['contacts' => $all])
-// One row (htmx):    App::render('contacts/list', ['contacts' => $all, 'fragment' => "contact-{$id}"])
+// One row (htmx):    App::render('contacts/list', ['contacts' => $all], fragment: "contact-{$id}")
 ```
 
 When the fragment is extracted, its closure's return value rides the [universal return contract](./templates-and-rendering.md#universal-return-contract) — it can `return 404;`, `return ['k' => 'v'];`, or yield a Generator, exactly like a route handler. A `fragment` selector that matches no region is a `404` (no silent fallback). See [Templates & Rendering](./templates-and-rendering.md#appfragment--template-fragments-the-htmx-pattern) for the full fragment semantics.
 
-### `App::renderHtmx()` — the selector
+### htmx-aware rendering — `htmx: true`
 
-`App::renderHtmx()` is a thin, htmx-aware selector over `App::render()`. It reads the current request, and:
+`App::render($template, $args, htmx: true)` reads the current request, and:
 
 - **htmx request** → renders just a fragment (partial).
 - **normal request** → renders the full page.
 
 ```php
-public static function renderHtmx(
+App::render(
     string  $template,
     array   $args = [],
-    ?string $fragmentName = null,
-    ?string $fullPageTemplate = null
+    ?string $fragment = null,   // the region for htmx requests
+    bool    $htmx = false,
+    ?string $fullPage = null,   // the page for normal requests
+    // ...
 ): mixed
 ```
 
 Fragment selection for an htmx request:
 
-1. If `$fragmentName` is passed, that region is rendered.
-2. Otherwise the framework derives the region from the request — the `HX-Target` element id (a leading `#` is stripped), falling back to `HX-Trigger-Name`. If neither is present, the template is rendered with no `fragment` key (its bare partial output).
+1. If `fragment:` is passed, that region is rendered. It overrides a `fragment` key in `$args`.
+2. Otherwise a `fragment` key in `$args` is used as given.
+3. Otherwise the framework derives the region from the request — the `HX-Target` element id (a leading `#` is stripped), falling back to `HX-Trigger-Name`. If neither is present, the template is rendered with no `fragment` key (its bare partial output).
 
-Called outside a request (a CLI render, a warmup), it falls back to the full-page path. It does **not** touch `executeFile()`; it only chooses *what* to render, so the universal return contract and streaming are preserved.
+A non-htmx request always gets the full page; a `fragment` key in `$args` is ignored there. The response carries `Vary: HX-Request, HX-Target, HX-Trigger-Name`, so a shared cache keeps the page and the fragment apart.
+
+Called outside a request (a CLI render, a warmup), it falls back to the full-page path. It only chooses *what* to render, so the universal return contract and streaming are preserved.
 
 **Before** — the manual branch:
 
@@ -6570,7 +7140,7 @@ $app->route('/search', function ($request) {
     if ($request->isHtmx()) {
         $target = ltrim($request->htmxTarget() ?? '', '#');
         if ($target !== '') {
-            return App::render('search', ['hits' => $hits, 'fragment' => $target]);
+            return App::render('search', ['hits' => $hits], fragment: $target);
         }
         return App::render('search', ['hits' => $hits]);
     }
@@ -6582,7 +7152,7 @@ $app->route('/search', function ($request) {
 
 ```php
 $app->route('/search', fn($request) =>
-    App::renderHtmx('search', ['hits' => Search::run($request->get['q'] ?? '')]), methods: ['GET']);
+    App::render('search', ['hits' => Search::run($request->get['q'] ?? '')], htmx: true), methods: ['GET']);
 ```
 
 Same shell, the `App::fragment('results', …)` region inside `search.php` is what an htmx `hx-target="#results"` request gets back; a direct hit gets the whole page.
@@ -6591,7 +7161,7 @@ Separate-template form — a bare partial for htmx plus a distinct full-page she
 
 ```php
 $app->route('/widget', fn() =>
-    App::renderHtmx('widget/partial', ['w' => $w], fullPageTemplate: 'widget/page'), methods: ['GET']);
+    App::render('widget/partial', ['w' => $w], htmx: true, fullPage: 'widget/page'), methods: ['GET']);
 ```
 
 ## HTMX — Out-of-band swaps
@@ -6694,12 +7264,13 @@ if (!Auth::check()) {
 | `oob($id, $html, $swap, $tag)` | builds an `hx-swap-oob` element (static) |
 | `response()` | returns the parent `Response` (chain back) |
 | **Rendering — `App::`** | |
-| `renderHtmx($tpl, $args, $fragmentName, $fullPageTemplate)` | htmx → fragment, else full page; derives the fragment from `HX-Target` / `HX-Trigger-Name` |
+| `render($tpl, $args, htmx: true, fragment: …, fullPage: …)` | htmx → fragment, else full page; derives the fragment from `HX-Target` / `HX-Trigger-Name` |
+| `component($name, $props)` | returns markup for a partial; never echoes |
 | `fragment($name, $fn)` | marks a named region for one-file-two-responses extraction |
 
 ## HTMX — See also
 
-- [Templates & Rendering](./templates-and-rendering.md) — the file-execution family, `App::fragment()`, and the universal return contract.
+- [Templates & Rendering](./templates-and-rendering.md) — `App::render()` and its options, `App::component()`, `App::fragment()`, and the universal return contract.
 - [Streaming](./streaming.md) — Generator SSR, `$response->stream()`, and SSE.
 - [WebSocket](./websocket.md) — `App::ws()` and realtime.
 - The `/learn/htmx` lesson — a narrative introduction to htmx on ZealPHP.

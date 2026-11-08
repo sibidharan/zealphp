@@ -145,3 +145,13 @@ $app->route('/_contract/co-state', function ($request) {
     $g->get['cid'] = $cid;
     return App::include('/_contract_test/co_state.php');
 });
+
+// --- App::component() through the response contract (follow-up to #509) --
+// A route returning markup from App::component() must send HTML, not JSON.
+$app->route('/_contract/component/safehtml', fn() =>
+    App::component('card', ['title' => 'Contract', 'body' => 'b', 'href' => '/x'])
+);
+// render(stream: true) streams like renderStream().
+$app->route('/_contract/render/stream', fn() =>
+    App::render('/components/_card', ['title' => 'Streamed', 'body' => 'b', 'href' => '/s'], stream: true)
+);

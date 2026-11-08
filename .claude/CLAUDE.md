@@ -458,27 +458,28 @@ Four streaming patterns via `src/HTTP/Response.php` and `ResponseMiddleware`:
 | Pattern | How | When to use |
 |---------|-----|-------------|
 | **Generator `yield`** | Return `\Generator`; each `yield $string` sent immediately | SSR — stream HTML shell, yield sections as coroutines resolve |
-| **`App::renderStream()`** | Returns `\Generator`; template declares params, framework injects by name | Streaming from template files — compose with `yield from` |
+| **`App::render(…, stream: true)`** | Returns `\Generator`; template declares params, framework injects by name | Streaming from template files — compose with `yield from` |
 | **`$response->stream($fn)`** | `$fn` receives `$write(string)` closure; headers flushed before `$fn` runs | Fine-grained streaming control |
 | **`$response->sse($fn)`** | `$fn` receives `$emit($data, $event, $id)` — formats SSE wire protocol | Server-Sent Events for JS `EventSource` |
 
 ### File-execution family
 
-The first four methods share a single private core (`App::executeFile()`) that runs the file, captures output, and applies the universal return contract. They differ only on (a) path resolution and (b) what the wrapper does with the result. The fifth — `App::fragment()` (v0.2.24) — runs *inside* a template and marks a named region the framework can extract by name. Canonical reference: `template/pages/templates.php#file-execution-family`.
+Everything that runs a template or public file shares one private core (`App::executeFile()`) that runs the file, captures output, and applies the universal return contract. The public surface is **two verbs plus two helpers** (see "API design" under Coding Standards):
 
-| Method | Path resolved from | Returns | Notes |
-|--------|--------------------|---------|-------|
-| `App::render($tpl, $args)` | `template/` (with `.php` suffix) | `mixed` — full return contract | **BC:** templates with no explicit `return` (the pattern in every `public/*.php`) have their captured output echoed back — every existing `App::render('_master', …)` call site keeps working unchanged. Explicit returns (int/array/string/Generator/Closure) flow back to the caller without echo. |
-| `App::renderToString($tpl, $args)` | `template/` | `string` | Coerces every shape (Generator consumed, Closure invoked, scalar cast). |
-| `App::renderStream($tpl, $args)` | `template/` | `\Generator` | Yields whatever the template returned, chunk-by-chunk. |
-| `App::include($publicPath, $args = [])` | `public/` (Apache document-root convention — leading `/` optional) | `mixed` — full return contract, never echoed | Apache parity: auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, `SCRIPT_FILENAME` for the included file (mod_php does the same). Applies `includeCheck()` so traversal outside `public/` is refused (returns `403` via the universal contract). In `superglobals(true)` mode dispatches to the CGI subprocess; in coroutine mode runs in-process. `App::includeFile()` is the deprecated alias. |
-| `App::fragment($name, $fn)` (v0.2.24) | N/A — called *inside* a template, not on a path | `void`. The closure's return rides the full return contract when the fragment is extracted (the parent `App::render()` propagates it back through `ResponseMiddleware`). | The htmx-essay "template fragment" pattern. Mark named regions inside any template; `App::render('page', $args)` either runs every `App::fragment()` inline (no selector → full page) or extracts just one region (`$args['fragment'] = 'name'`). State carried in `$g->memo['_fragment']` (save+restored across nested renders). Missing fragment → HTTP 404 — no silent fallback. First match wins on repeated names. |
+| Method | Job | Path resolved from | Returns |
+|--------|-----|--------------------|---------|
+| `App::render($tpl, $args, fragment:, htmx:, fullPage:, stream:, echo:)` | **Respond**: a page for a route or `public/*.php` | `template/` (leading `/` absolute; else the current public file's folder first, then top level) | `mixed` — full return contract. Echoes a string result unless `echo: false` (every `App::render('_master', …)` in `public/*.php` relies on it). `stream: true` → `\Generator`, never echoes. `htmx: true` → fragment for htmx requests, full page otherwise (`fullPage:` = separate page template); sends `Vary`. `fragment:` beats an `$args['fragment']` key. |
+| `App::component($name, $props, key:)` | **Compose**: markup inside a page, or a route's whole response | registered reactive name → that class; else `template/components/{name}.php` then `_{name}.php`; leading `/` → any template, absolute from `template/` | `SafeHtml`, never echoes. The return contract sends it as HTML. |
+| `App::include($publicPath, $args = [])` | Run a `public/` file (Apache document-root convention) | `public/` | `mixed` — full return contract, never echoed. Populates `PHP_SELF`/`SCRIPT_NAME`/`SCRIPT_FILENAME`; `includeCheck()` refuses traversal (403); CGI subprocess in superglobals mode. `App::includeFile()` is a deprecated alias. |
+| `App::fragment($name, $fn)` | Mark a named region *inside* a template | — | `void`. Extracted by `render(…, fragment:)` / `htmx: true`; missing fragment → 404. |
+
+Deprecated aliases (work until 1.0; only `route/_contract_test.php` should call them): `renderToString()` → `component('/path')`, `renderStream()` → `render(…, stream: true)`, `renderHtmx()` → `render(…, htmx: true)`.
 
 The 4 implicit-route call sites in `src/App.php` (`serveDirectory()`, implicit `/`, implicit `/{file}`, implicit `/{dir}/{uri}`) all collapse to one-line `return App::include('/...')` calls — `include()` owns the `$_SERVER` preamble and the result-coercion shape that `ResponseMiddleware` consumes.
 
 ### Template Rendering
 
-`App::render() / renderToString() / renderStream()` are three of the five members of the [file-execution family](#file-execution-family) — see that table for the full method comparison (the other two are `App::include()` for `public/`-rooted files and `App::fragment()` for in-template named regions).
+`App::render()` (pages, with `stream:`/`htmx:`/`fragment:` options) and `App::component()` (markup) are the two verbs of the [file-execution family](#file-execution-family); `App::include()` runs `public/` files and `App::fragment()` marks in-template regions.
 
 **Streaming templates** — template returns a Closure with named parameters; framework injects by name (same as route handlers):
 
@@ -494,18 +495,18 @@ The 4 implicit-route call sites in `src/App.php` (`serveDirectory()`, implicit `
 
 // Route handler — compose streams
 $app->route('/users', fn() => (function() {
-    yield from App::renderStream('shell-open', ['title' => 'Users']);
-    yield from App::renderStream('users/stream', ['users' => User::all()]);
-    yield from App::renderStream('shell-close');
+    yield from App::render('shell-open', ['title' => 'Users'], stream: true);
+    yield from App::render('users/stream', ['users' => User::all()], stream: true);
+    yield from App::render('shell-close', stream: true);
 })());
 ```
 
-`renderStream()` supports three template styles:
+`render(…, stream: true)` supports three template styles:
 1. `return function($var) { yield ...; };` — Closure with param injection (cleanest)
 2. `return (function() use ($var) { yield ...; })();` — IIFE Generator (explicit)
 3. Regular echo template — captured output yielded as one chunk
 
-**Universal return contract** — one contract, every entry point. Route handler, fallback, error handler, `App::render() / renderToString() / renderStream() / include()`, public file, API closure, streaming-template Closure — every one of them rides the same return-shape mapping. Canonical home: `template/pages/responses.php#return-contract`. This table mirrors that one **verbatim** — any change to return-value handling MUST update both in lock-step. The shared private core that implements this is `App::executeFile()`.
+**Universal return contract** — one contract, every entry point. Route handler, fallback, error handler, `App::render() / component() / include()`, public file, API closure, streaming-template Closure — every one of them rides the same return-shape mapping. Canonical home: `template/pages/responses.php#return-contract`. This table mirrors that one **verbatim** — any change to return-value handling MUST update both in lock-step. The shared private core that implements this is `App::executeFile()`.
 
 | The handler / file does | Core sees | ResponseMiddleware emits |
 |-------------------------|-----------|--------------------------|
@@ -524,7 +525,7 @@ $app->route('/users', fn() => (function() {
 | You return | What happens |
 |------------|--------------|
 | `return 0;` / `-1;` / `42;` / `999;` (out of range) | Coerced to **500 Internal Server Error** with a warning logged via `elog()`. Matches Apache HTTP server behaviour. Grep `/tmp/zealphp/debug.log` (or `ZEALPHP_DEBUG_LOG`) for `Invalid HTTP status code returned:` to surface these in production. |
-| `return 1;` (special case) | PHP's `include` returns `1` by default when a file has no explicit `return`. Inside `App::include() / render() / renderToString() / renderStream()`, a `1` return is treated as "no explicit return" — the framework surfaces the buffered echo as the response body instead of trying to set HTTP status 1. The same return from a plain route handler DOES get treated as a status. If you ever explicitly mean "return 1 as a status," return `100` instead. |
+| `return 1;` (special case) | PHP's `include` returns `1` by default when a file has no explicit `return`. Inside `App::include() / render() / component()`, a `1` return is treated as "no explicit return" — the framework surfaces the buffered echo as the response body instead of trying to set HTTP status 1. The same return from a plain route handler DOES get treated as a status. If you ever explicitly mean "return 1 as a status," return `100` instead. |
 | `return null;` | "No status override, no body override" — the response defaults to `200` with whatever body the framework computed. |
 | 600–999 | Coerced to **500** like every other out-of-range code (`App::coerceStatusCode()` accepts only `100 ≤ status < 600`). Verified against Apache mod_php 8.4: `http_response_code(600/750/999)` → `HTTP/1.1 500 Internal Server Error` there too — Apache's own status table has no entry for them (#320). The escape hatch Apache honours — a raw `header("HTTP/1.1 600 Custom")` status line passing through verbatim — is a separate tracked parity follow-up. |
 
@@ -536,7 +537,7 @@ Non-standard codes have empty reason phrases on the wire (`HTTP/1.1 451\r\n` wit
 - Route handlers: `return (function() { yield ...; })();`
 - Public files: `public/feed.php` returns a Generator → framework streams it
 - API handlers: `$get = function() { return (function() { yield ...; })(); };`
-- Templates via `renderStream()`: `return function($items) { yield ...; };`
+- Templates via `render(…, stream: true)`: `return function($items) { yield ...; };`
 - Files dispatched via `App::include()`: same — the file's `return` value flows through the same contract.
 
 `$g->_streaming = true` is set by `stream()`/`sse()` so `ResponseMiddleware` knows to skip `ob_get_clean()`.
@@ -755,7 +756,8 @@ The PHPStan badge at `.github/badges/phpstan.json` must match `phpstan.neon`'s l
 The rendering API grew one helper per need — `render()`, `renderToString()`, `renderStream()`, `renderHtmx()`, plus `include()` and `fragment()` — each a separate entry point with its own slightly different rules (echoes vs returns, how paths resolve, a magic `'fragment'` key hidden in `$args`). Every difference became a pitfall: `<?= App::render('child') ?>` prints twice, and the `$args['fragment']` key silently beat the explicit `$fragmentName` argument (#509). Don't repeat that. Rules for every public API:
 
 - **One verb per job.** `App::component($name, $props)` *composes* (returns markup, never echoes; stateless template or reactive class). `App::render($template, $args)` *responds* (a page for a route or public file, the universal return contract). Pages call `render()`; anything inside a page calls `component()`.
-- **A new capability is an option on the existing verb, not a new function.** Add a named parameter (`render(…, stream: true)`), never a `renderX()` sibling. The consolidation is planned in a follow-up PR: `renderStream()` → `render(…, stream: true)`, `renderHtmx()` → `render(…, htmx: true)`, `renderToString()` → `(string) App::component()` / `render(…, echo: false)`; the old helpers stay as `@deprecated` aliases until 1.0.
+- **A new capability is an option on the existing verb, not a new function.** Add a named parameter (`render(…, stream: true)`), never a `renderX()` sibling. Done: `render()` takes `fragment:`, `htmx:` (+ `fullPage:`), `stream:` and `echo:`; `renderStream()` → `render(…, stream: true)`, `renderHtmx()` → `render(…, htmx: true)`, `renderToString()` → `App::component('/path', $args)` (a leading `/` = any template, absolute from `template/`). The old helpers are `@deprecated` aliases until 1.0 — don't use them in new code, docs or the site (only `route/_contract_test.php` keeps exercising them).
+- **Markup is `SafeHtml`.** `App::component()` returns `ZealPHP\SafeHtml`; the return contract treats it as HTML (route returns, template returns, streams), never as a JSON object.
 - **No magic keys in data arrays.** Behaviour is selected by named parameters, never by a reserved key inside user data (`$args['fragment']` was both a template variable and a selector).
 - **Return values over side effects.** A function that produces markup returns it; echoing is the caller's choice. Never both.
 - **One name per concept** across code, docs, site nav and URLs (the Components merge: stateless + reactive under one `App::component()`, one page, one guide).
@@ -804,7 +806,7 @@ The site uses **htmx** globally. `_master.php` sets `hx-boost="true"` on `<body>
 **Server-side htmx API surface.** ZealPHP exposes the full htmx HX-* request/response header set plus a fragment selector — canonical user docs: `docs/htmx.md` + the `/htmx` website page (`template/pages/htmx.php`).
 - **Request — `ZealPHP\HTTP\Request` (the injected `$request`)** — 8 accessors, one per HX-* request header: `isHtmx()` (`HX-Request`), `isBoosted()` (`HX-Boosted`), `isHistoryRestoreRequest()` (`HX-History-Restore-Request`), `htmxTarget()` (`HX-Target`), `htmxTrigger()` (`HX-Trigger`), `htmxTriggerName()` (`HX-Trigger-Name`), `htmxCurrentUrl()` (`HX-Current-URL`), `htmxPrompt()` (`HX-Prompt`). Booleans return `false` when absent; the rest return `null`.
 - **Response — `$response->htmx()` → `ZealPHP\HTTP\HtmxResponse`** — fluent builder queuing HX-* **response** headers (each value CRLF/NUL-guarded by `Response::header()`): `pushUrl`/`replaceUrl`/`redirect`/`location` (history/nav), `reswap`/`retarget`/`reselect` (swap control), `refresh` (page), `trigger`/`triggerAfterSwap`/`triggerAfterSettle`/`triggerJSON` (events), plus `oob()` (static — builds an `hx-swap-oob` element) and `response()` (returns the parent `Response` so the chain flows back: `$res->htmx()->retarget('#x')->response()->status(422)`). **`triggerJSON($event, $detail)`** JSON-encodes `[$event => $detail]` then delegates to `trigger()`.
-- **`App::renderHtmx($template, $args = [], ?$fragmentName = null, ?$fullPageTemplate = null): mixed`** — htmx-aware selector over `App::render()`: an htmx request gets a fragment (via the `App::fragment()` mechanism), a normal request gets the full page (`$fullPageTemplate ?? $template`). Fragment = `$fragmentName`, else derived from `HX-Target` (leading `#` stripped) → `HX-Trigger-Name`, else bare partial (no `fragment` key). Falls back to the full page when there's no current request. A thin selector — does NOT touch `executeFile()`; the universal return contract + streaming are preserved. The website-page + docs-guide slug is `htmx` (must appear in the `$allowed`/`GUIDE_SLUGS` lists in `api/docs/page.php` + `src/Docs/MarkdownRenderer.php`, the docs index `template/pages/docs/index.php`, the docs sidebar `template/pages/docs/_sidebar.php`, and the top nav `template/_nav.php`).
+- **`App::render($template, $args, htmx: true, fragment: ?, fullPage: ?)`** (formerly `App::renderHtmx()`, now a deprecated alias) — htmx-aware selection inside `App::render()`: an htmx request gets a fragment (via the `App::fragment()` mechanism), a normal request gets the full page (`$fullPageTemplate ?? $template`). Fragment = `$fragmentName`, else derived from `HX-Target` (leading `#` stripped) → `HX-Trigger-Name`, else bare partial (no `fragment` key). Falls back to the full page when there's no current request. A thin selector — does NOT touch `executeFile()`; the universal return contract + streaming are preserved. The website-page + docs-guide slug is `htmx` (must appear in the `$allowed`/`GUIDE_SLUGS` lists in `api/docs/page.php` + `src/Docs/MarkdownRenderer.php`, the docs index `template/pages/docs/index.php`, the docs sidebar `template/pages/docs/_sidebar.php`, and the top nav `template/_nav.php`).
 
 ### Separation of concerns (formerly tech debt — now enforced)
 
@@ -879,7 +881,7 @@ All ZealPHP usage examples live as first-class project files:
 
 | File | Role |
 |------|------|
-| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, file-execution family (`render()`/`renderToString()`/`renderStream()`/`include()` — all sharing a private `executeFile()` core — plus `fragment()` for in-template named regions), `setFallback()`, `tick()`/`after()`/`onWorkerStart()`, CLI `parseCliArgs()`. `includeFile()` is a deprecated alias for `include()`. |
+| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, file-execution family (`render()`/`component()`/`include()` — all sharing a private `executeFile()` core — plus `fragment()` for in-template named regions), `setFallback()`, `tick()`/`after()`/`onWorkerStart()`, CLI `parseCliArgs()`. `includeFile()` is a deprecated alias for `include()`. |
 | `cgi_worker.php` | CGI-style process for legacy apps — true global scope, uopz header/cookie capture, SSE streaming via flush() |
 | `G.php` | Per-request global state; superglobals mode uses static singleton, coroutine mode uses `Coroutine::getContext()` |
 | `Store.php` | `OpenSwoole\Table` adapter — cross-worker shared-memory key-value store |
@@ -1047,7 +1049,7 @@ Verify Packagist picked up the tag: `curl -sS https://repo.packagist.org/p2/zeal
 ```bash
 (cd <main-repo> && make docs-rebuild)                                   # or: php scripts/build-agent-reference.php
 cp <main-repo>/examples/agents/zealphp_reference.txt <scaffold-path>/llms.txt
-# sanity: the new docs must be in it, e.g. `grep -c renderHtmx <scaffold-path>/llms.txt` > 0
+# sanity: the new docs must be in it, e.g. `grep -c "htmx: true" <scaffold-path>/llms.txt` > 0
 
 cd <scaffold-path>                            # discovered via the env-var/sibling chain above
 # Edit composer.json: "zealphp/zealphp": "^X.Y.Z" (bump floor, not just caret)

@@ -28,7 +28,7 @@ ${basename(__FILE__, '.php')} = function () {
     }
     $html = '';
     foreach ($rows as $row) {
-        $html .= App::renderToString('/components/_chat_history_bubble', [
+        $html .= App::component('chat_history_bubble', [
             'role'  => $row['role'],
             'items' => json_decode($row['items_json'], true) ?: [],
         ]);

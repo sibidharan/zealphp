@@ -10,7 +10,7 @@ Converts .htaccess or nginx config into a ZealPHP app.php.
 Uses gpt-5.4-mini with streaming, few-shot examples, and tool-assisted validation.
 
 What this agent knows (encoded in the system prompt + reference + examples):
-  - The four file-execution methods (render / renderToString / renderStream / include)
+  - The file-execution methods (render with stream:/htmx:/fragment: options, component, include)
     and the rule that App::include() is the only correct form for serving public
     files. The legacy App::includeFile() name is the deprecated alias and is never
     emitted in new code.
@@ -64,8 +64,8 @@ ZealPHP IS the HTTP server. There is no separate web server. There is no PHP-FPM
   Once in `public/`, they are auto-served at their base name: `public/qn.php` -> `/qn`.
   Static files (CSS, JS, images, fonts) in `public/` are served directly by OpenSwoole.
 - **route/** — route definition files for parameterized URL patterns. Auto-included at startup.
-- **template/** — view templates rendered via `App::render()` / `App::renderToString()` /
-  `App::renderStream()`. Templates are view-only — they do not serve as public files.
+- **template/** — view templates rendered via `App::render()` (pages) and
+  `App::component()` (markup). Templates are view-only — they do not serve as public files.
 
 ### Migration Step: Move Files to public/
 
@@ -245,9 +245,8 @@ section). Pick the one whose **intent** matches the call site.
 
 | Method | Input | Resolved from | Returns | When to use |
 |---|---|---|---|---|
-| `App::render($tpl, $args = [])` | template name | `template/` (no `.php` suffix needed) | `mixed` (echoes BC string output for void callers) | Default for emitting template HTML inside a route handler or another template |
-| `App::renderToString($tpl, $args = [])` | template name | `template/` | `string` | When you need template HTML as a value (email body, cache fill, embedding) |
-| `App::renderStream($tpl, $args = [])` | template name | `template/` | `Generator` | SSR streaming — yields template output chunk by chunk |
+| `App::render($tpl, $args = [])` | template name | `template/` (no `.php` suffix needed) | `mixed` (echoes BC string output for void callers) | A page: from a route handler or `public/*.php`. Options: `stream: true` (Generator, SSR streaming), `htmx: true` (fragment for htmx requests), `fragment: 'name'` |
+| `App::component($name, $props = [])` | component name, or `/path` for any template | `template/components/` (or `template/` with a leading `/`) | `SafeHtml` (markup, never echoes) | Markup as a value: partials inside templates, email bodies, cache fills, a route's HTML response |
 | `App::include($publicPath, $args = [])` | path RELATIVE to `public/` | `public/` (Apache document-root convention) | `mixed` (full return contract) | Serving a public-side `.php` file from a route handler — the standard tool when porting a `RewriteRule ... target.php` to ZealPHP |
 
 CRITICAL emission rules for `App::include()`:
@@ -272,7 +271,7 @@ CRITICAL emission rules for `App::include()`:
 ### Universal return contract (single source of truth)
 
 Any function that produces a response — route handler, fallback, error handler,
-`App::render()`, `App::renderToString()`, `App::renderStream()`, `App::include()`,
+`App::render()`, `App::component()`, `App::include()`,
 public file, API closure — uses the same return contract. The framework
 translates the return value into an HTTP response identically regardless of
 where it came from.

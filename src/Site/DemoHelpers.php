@@ -36,7 +36,7 @@ class DemoHelpers
      */
     public static function demo_render(string $title, string $description, array $sections, string $back_slug, string $back_label): string
     {
-        return App::renderToString('/components/_demo_shell', [
+        return (string) App::component('demo_shell', [
             'title'       => $title,
             'description' => $description,
             'sections'    => $sections,

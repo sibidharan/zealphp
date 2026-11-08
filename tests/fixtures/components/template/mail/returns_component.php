@@ -1,0 +1,1 @@
+<?php return \ZealPHP\App::component("card", ["title" => "in-template"]);

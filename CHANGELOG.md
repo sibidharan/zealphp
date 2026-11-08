@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Changed — one rendering API
+- **Two verbs.** `App::component()` produces markup (a component, or any template with a leading `/`); `App::render()` produces a page or response, now with options: `fragment:`, `htmx:` (+ `fullPage:`), `stream:` and `echo:`.
+- **Deprecated (still work until 1.0):** `App::renderToString()` → `App::component('/path', $args)`; `App::renderStream()` → `App::render(…, stream: true)`; `App::renderHtmx()` → `App::render(…, htmx: true)`. The site, docs and Learn lessons now use the new API.
+
+### Fixed
+- **Returning `App::component()` from a route sends HTML.** `SafeHtml` used to hit the object-to-JSON branch of the return contract and send `{}`. The same applies to templates that return a component.
+
 ### Added
 - **Output-escaping helpers** (#509): `ZealPHP\e()` for HTML text and quoted attributes, plus `ZealPHP\Escape::url()`, `safeUrl()` (refuses `javascript:`/`data:` and similar), `js()` (JSON safe inside `<script>`) and `raw()` for trusted markup. See [Escaping output](docs/templates-and-rendering.md#escaping-output).
 

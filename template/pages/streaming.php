@@ -4,7 +4,7 @@
 <h1 class="section-title">SSR Streaming</h1>
 <p class="section-desc">Send HTML to the browser progressively as coroutines resolve — like React's <code>renderToPipeableStream</code>, but in PHP. Three APIs, same result: the browser paints content incrementally.</p>
 
-<p class="stream-note">Returning a <code>\Generator</code> from any handler triggers streaming — see the <a href="/responses#return-contract">universal return contract</a> for the full table of return shapes, and the <a href="/templates#file-execution-family">file-execution family</a> for how <code>App::renderStream()</code> composes with <code>render()</code> / <code>renderToString()</code> / <code>include()</code> / <code>fragment()</code>.</p>
+<p class="stream-note">Returning a <code>\Generator</code> from any handler triggers streaming — see the <a href="/responses#return-contract">universal return contract</a> for the full table of return shapes, and <a href="/templates#file-execution-family">the rendering methods</a> for how <code>App::render(..., stream: true)</code> relates to <code>App::component()</code>, <code>App::include()</code> and <code>App::fragment()</code>.</p>
 
 <div class="stream-cards">
   <div class="card"><div class="card-icon">📤</div><h3>Generator yield</h3><p>Return a <code>\Generator</code> from your handler. Each <code>yield $html</code> flushes immediately. No API changes needed.</p></div>
@@ -77,9 +77,9 @@ $app->route('/stream/events', function($response) {
 // es.addEventListener('tick', e => console.log(JSON.parse(e.data)));
 PHP]); ?>
 
-<h2 class="stream-h2-section">Streaming from templates — <code>App::renderStream()</code></h2>
+<h2 class="stream-h2-section">Streaming from templates — <code>App::render(stream: true)</code></h2>
 
-<p>Templates can <code>yield</code>. Return a Closure with named parameters — the framework injects them by name (same as route handlers). Each yield flushes to the browser immediately. Regular echo-based templates work too — output captured as one chunk.</p>
+<p>Templates can <code>yield</code>. Render them with <code>stream: true</code> to get a Generator. Return a Closure with named parameters — the framework injects them by name (same as route handlers). Each yield flushes to the browser immediately. Regular echo-based templates work too — output captured as one chunk.</p>
 
 <?php App::render('/components/_code', [
     'label' => 'Streaming template — template/dashboard/stats.php',
@@ -104,20 +104,20 @@ PHP]); ?>
 $app->route('/dashboard', function() {
     return (function() {
         // Regular template → yields as single chunk
-        yield from App::renderStream('shell-open', ['title' => 'Dashboard']);
+        yield from App::render('shell-open', ['title' => 'Dashboard'], stream: true);
 
         // Streaming template → yields per-metric card
-        yield from App::renderStream('dashboard/stats', [
+        yield from App::render('dashboard/stats', [
             'metrics' => ['Requests' => '67k/s', 'Latency' => '21ms', 'Workers' => 4],
-        ]);
+        ], stream: true);
 
         // Another streaming template — yields per-row
-        yield from App::renderStream('dashboard/activity', [
+        yield from App::render('dashboard/activity', [
             'events' => fetchRecentEvents(),
-        ]);
+        ], stream: true);
 
         // Regular template → yields as single chunk
-        yield from App::renderStream('shell-close');
+        yield from App::render('shell-close', stream: true);
     })();
 });
 PHP]); ?>
@@ -125,7 +125,7 @@ PHP]); ?>
 <h3>Three template styles — all compose in the same pipeline</h3>
 
 <table class="ztable">
-<tr><th>Template style</th><th>Code</th><th>What renderStream() does</th></tr>
+<tr><th>Template style</th><th>Code</th><th>What <code>render(stream: true)</code> does</th></tr>
 <tr>
   <td>Closure (cleanest)</td>
   <td><code>return function($users) { yield ...; };</code></td>
@@ -150,7 +150,7 @@ use OpenSwoole\Coroutine\Channel;
 
 $app->route('/feed', function() {
     return (function() {
-        yield from App::renderStream('shell-open', ['title' => 'Feed']);
+        yield from App::render('shell-open', ['title' => 'Feed'], stream: true);
 
         // Fetch data in parallel — stream results as each completes
         $ch = new Channel(3);
@@ -161,13 +161,14 @@ $app->route('/feed', function() {
         for ($i = 0; $i < 3; $i++) {
             $result = $ch->pop();
             // Each section streams as its data arrives
-            yield from App::renderStream(
+            yield from App::render(
                 "feed/{$result['type']}",
-                ['items' => $result['data']]
+                ['items' => $result['data']],
+                stream: true
             );
         }
 
-        yield from App::renderStream('shell-close');
+        yield from App::render('shell-close', stream: true);
     })();
 });
 PHP]); ?>

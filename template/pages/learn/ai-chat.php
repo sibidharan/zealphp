@@ -289,7 +289,7 @@ if (msg.type === 'note_changed') {
       process. That's the headline.
     </p>
 
-    <h2>Bonus — <code>App::renderStream()</code></h2>
+    <h2>Bonus — <code>App::render(stream: true)</code></h2>
     <p>
       SSE is one form of streaming. ZealPHP also supports <strong>streaming HTML</strong> — sending
       chunks of a page as they're generated, rather than waiting for the entire page to render.
@@ -303,7 +303,7 @@ return function($items) {
     yield "&lt;/section&gt;";
 };</code></pre>
     <p>
-      <code>App::renderStream()</code> returns a Generator. Each <code>yield</code> is flushed to the
+      <code>App::render('feed', $args, stream: true)</code> returns a Generator. Each <code>yield</code> is flushed to the
       browser immediately. For AI responses, database-heavy pages, or any slow render, this means the
       user sees content arriving progressively instead of staring at a blank screen.
     </p>
@@ -329,7 +329,7 @@ return function($items) {
       'SSE streams events from server to browser — perfect for AI token streaming',
       '<code>$response->sse($emit)</code> handles headers and formatting automatically',
       'Tool calls let AI agents interact with your data — shown as expandable cards',
-      '<code>App::renderStream()</code> streams HTML chunks for progressive page rendering',
+      '<code>App::render(..., stream: true)</code> streams HTML chunks for progressive page rendering',
     ]]); ?>
 
     <div class="lesson-chips">

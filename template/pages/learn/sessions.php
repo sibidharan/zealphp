@@ -28,7 +28,7 @@
     <?php App::render('/components/_tryit', [
       'title' => 'Live demo: a session-backed counter (cross-tab synced)',
       'body'  => '<div class="lsess-center">' .
-                 App::renderToString('/components/_session_counter', ['n' => (int)($g->session['lesson_counter'] ?? 0)]) .
+                 App::component('session_counter', ['n' => (int)($g->session['lesson_counter'] ?? 0)]) .
                  '<div data-session-counter-status class="ws-counter-status lsess-counter-status">starting…</div>' .
                  '<p class="lsess-popup-line">' .
                  '<a href="/demo/view/sessions/counter" target="_blank" rel="opener">Open this counter in a popup &rarr;</a>' .

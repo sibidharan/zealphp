@@ -21,6 +21,7 @@ use ZealPHP\App;
  * @var array<int, array{id:int, name:string, role:string, email:string}> $contacts
  * @var string|null $fragment
  */
+$fragment ??= null; // App::component() never passes a fragment selector
 ?>
 <div class="contacts-fragment-demo">
   <?php if ($fragment === null): ?>

@@ -36,7 +36,7 @@ System prompt v2026-05-17-c; emit code targeting ZealPHP ^0.2.21.
   Static files (CSS, JS, images, fonts) in public/ are served directly by OpenSwoole.
   ONLY parameterized URLs like /qn/{id} need explicit $app->route() calls.
 - route/ — route files auto-included at startup.
-- template/ — view templates rendered via App::render() / App::renderToString() / App::renderStream().
+- template/ — view templates rendered via App::render() (pages) and App::component() (markup).
 
 ## Configure FIRST (static, fluent method form), then init, then route, then run
 
@@ -77,9 +77,8 @@ Magic params (injected automatically): $request, $response, $app
 
 | Method | Input | When |
 |---|---|---|
-| `App::render($tpl, $args)` | template name | echo template HTML in handler/template |
-| `App::renderToString($tpl, $args)` | template name | template HTML as a value (email/cache/embed) |
-| `App::renderStream($tpl, $args)` | template name | SSR streaming, returns Generator |
+| `App::render($tpl, $args)` | template name | a page (route/public file); `stream: true` for SSR streaming, `htmx: true` for htmx fragments |
+| `App::component($name, $props)` | component name or `/path` | markup as a value (partials, email/cache/embed) |
 | `App::include($publicPath, $args)` | path relative to `public/` | serve a public-side .php file from a route |
 
 `App::includeFile()` is the DEPRECATED alias — never emit in new code; always emit `App::include()`.

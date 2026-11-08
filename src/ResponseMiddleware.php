@@ -158,6 +158,9 @@ class ResponseMiddleware implements MiddlewareInterface
             }
 
             $status = $g->status ?? 200;
+            if ($object instanceof \ZealPHP\SafeHtml) {
+                $object = (string) $object; // markup from App::component(), not JSON
+            }
             if (is_array($object) or is_object($object)) {
                 response_add_header('Content-Type', 'application/json');
                 $body = (string)json_encode($object);
@@ -395,6 +398,10 @@ class ResponseMiddleware implements MiddlewareInterface
             if ($object instanceof ResponseInterface) {
                 ob_end_clean();
                 return $object;
+            }
+
+            if ($object instanceof \ZealPHP\SafeHtml) {
+                $object = (string) $object; // markup from App::component(), not JSON
             }
 
             if (is_array($object) || is_object($object)) {

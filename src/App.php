@@ -7719,6 +7719,7 @@ class App
     {
         if ($result === null) return '';
         if (is_string($result)) return $result;
+        if ($result instanceof SafeHtml) return (string) $result;
         if (is_int($result) || is_float($result) || is_bool($result)) return (string)$result;
         if ($result instanceof \Generator) {
             $buf = '';
@@ -7753,6 +7754,10 @@ class App
             yield from $result;
             return;
         }
+        if ($result instanceof SafeHtml) {
+            yield (string) $result;
+            return;
+        }
         if (is_array($result) || is_object($result)) {
             yield (string)json_encode($result);
             return;
@@ -7763,37 +7768,116 @@ class App
     }
 
     /**
-     * Render a template with the provided data.
+     * Render a template as a response — a page for a route or a public file.
      *
-     * Templates are looked up under ./template/ in the current working dir;
-     * PHP_SELF is consulted as a sub-directory prefix unless $tpl starts with `/`.
+     * One verb, with options, for every way of rendering a page:
      *
-     * **Return contract**: see executeFile(). Templates may return int / array /
-     * string / Generator / Closure to participate in the universal contract.
+     * ```php
+     * App::render('_master', ['page' => 'home']);              // echo the page (public/*.php)
+     * return App::render('users/show', ['user' => $u]);         // a route's response
+     * return App::render('search', $args, htmx: true);          // fragment for htmx, page otherwise
+     * return App::render('contacts', $args, fragment: 'row-7'); // one App::fragment() region
+     * return App::render('feed', $args, stream: true);          // a Generator, flushed chunk by chunk
+     * ```
      *
-     * **Backwards compatibility**: legacy callers expect render() to echo. When
-     * the template has no explicit `return` (the historical pattern in every
-     * public/*.php) the captured output is echoed back. Explicit non-void
-     * returns flow through to the caller unchanged.
+     * To produce markup inside a page (a partial, a card, a widget), use
+     * {@see App::component()}: it returns markup and never echoes.
      *
-     * @see App::executeFile() (private core) and the sibling methods (renderToString / renderStream / include).
+     * - `fragment:` renders only that `App::fragment()` region (404 if missing).
+     * - `htmx:` renders a fragment for htmx requests and the full page
+     *   otherwise: the region is `fragment:`, else a `fragment` key in `$args`,
+     *   else derived from `HX-Target` / `HX-Trigger-Name`; with `fullPage:`,
+     *   `$template` is a bare partial for htmx and `fullPage:` is the page.
+     *   Sends `Vary: HX-Request, HX-Target, HX-Trigger-Name`.
+     * - `stream:` returns a Generator (never echoes); compose with `yield from`.
+     * - `echo:` (default true) echoes a string result for `public/*.php`-style
+     *   callers, and returns it either way; `echo: false` only returns.
      *
-     * @param array<string, mixed> $__args
+     * Paths resolve under `template/`: a leading `/` is absolute; otherwise the
+     * current public file's name is tried as a folder first
+     * (`template/users/header.php` from `public/users.php`), then the top level.
+     *
+     * **Return contract:** see executeFile() — int / array / string / Generator /
+     * Closure results flow to the caller, and a route returning them gets the
+     * universal contract at the response boundary.
+     *
+     * @see App::executeFile() (private core) and App::component() (markup).
+     *
+     * @param array<string, mixed> $__args template variables (a `fragment` key
+     *        still selects a region for BC; prefer the `fragment:` parameter)
      */
-    public static function render(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): mixed
-    {
+    public static function render(
+        string $__template_file = 'index',
+        array $__args = [],
+        string $__default_template_dir = 'template',
+        ?string $fragment = null,
+        bool $htmx = false,
+        ?string $fullPage = null,
+        bool $stream = false,
+        bool $echo = true,
+    ): mixed {
+        if ($fullPage !== null && !$htmx) {
+            throw new \InvalidArgumentException('App::render(): fullPage: only applies with htmx: true');
+        }
+        if ($htmx) {
+            [$__template_file, $selected] = self::htmxSelection($__template_file, $__args, $fragment, $fullPage);
+            unset($__args['fragment']);
+            if ($selected !== null) {
+                $__args['fragment'] = $selected;
+            }
+        } elseif ($fragment !== null) {
+            $__args['fragment'] = $fragment;
+        }
         $path = self::resolveTemplatePath($__template_file, $__default_template_dir);
         $result = self::executeFile($path, $__args);
-        // BC: void-context callers (every App::render('_master', ...) call in
-        // public/*.php) expect echo. If executeFile() returned a string (the
-        // "file only echoed, no explicit return" case OR an explicit string
-        // return) emit it now. Explicit non-string returns pass through so
-        // route handlers can `return App::render(...)` and get the universal
-        // contract applied at the response boundary.
-        if (is_string($result)) {
+        if ($stream) {
+            return self::coerceToStream($result);
+        }
+        // public/*.php pages call render() as a statement and rely on the echo.
+        // Explicit non-string returns pass through so a route handler can
+        // `return App::render(...)` and get the universal contract.
+        if ($echo && is_string($result)) {
             echo $result;
         }
         return $result;
+    }
+
+    /**
+     * Pick the template and fragment for an htmx-aware render.
+     *
+     * @param array<string, mixed> $args
+     * @return array{0: string, 1: string|null} [template, fragment or null for the whole template]
+     */
+    private static function htmxSelection(string $template, array $args, ?string $fragment, ?string $fullPage): array
+    {
+        $g = RequestContext::instance();
+        $req = $g->zealphp_request;
+        // The body depends on these request headers (full page vs fragment), so a
+        // shared cache must key on them — else it can serve a fragment as the page.
+        $g->zealphp_response?->header('Vary', 'HX-Request, HX-Target, HX-Trigger-Name', false);
+
+        // No request in scope (CLI render, warmup) or a normal page load → the
+        // full page, never a fragment (#509).
+        if (!$req instanceof \ZealPHP\HTTP\Request || !$req->isHtmx()) {
+            return [$fullPage ?? $template, null];
+        }
+        // An explicit fragment wins over a `fragment` key in $args (#509).
+        if ($fragment !== null) {
+            return [$template, $fragment];
+        }
+        if (is_string($args['fragment'] ?? null)) {
+            return [$template, $args['fragment']];
+        }
+        // #444 — with a full-page template, $template is a bare partial (the swap
+        // content itself, no App::fragment() regions): render it whole.
+        if ($fullPage !== null) {
+            return [$template, null];
+        }
+        // Single-template form: derive the region from HX-Target (leading '#'
+        // stripped), else HX-Trigger-Name; neither → the whole template.
+        $target = $req->htmxTarget();
+        $derived = $target !== null ? ltrim($target, '#') : $req->htmxTriggerName();
+        return [$template, ($derived !== null && $derived !== '') ? $derived : null];
     }
 
     /**
@@ -7857,6 +7941,8 @@ class App
      * - **Stateless** — any other name renders a template from
      *   `template/components/`: `'card'` → `components/card.php`, else
      *   `components/_card.php`; `'ui/button'` → `components/ui/button.php`.
+     *   A leading `/` names any template, absolute from `template/`
+     *   (`'/emails/welcome'`) — the replacement for `renderToString()`.
      *   `$props` become template variables (plus `$props` itself). Pass child
      *   markup as the `slot` prop. Stateless components may be used anywhere,
      *   including inside reactive ones.
@@ -7923,24 +8009,32 @@ class App
      */
     private static function statelessComponent(string $name, array $props): SafeHtml
     {
-        if (preg_match('#^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*$#', $name) !== 1) {
+        // A leading '/' names any template, absolute from template/ (what
+        // renderToString() did); otherwise the name is under template/components/.
+        $absolute = str_starts_with($name, '/');
+        $rel = $absolute ? substr($name, 1) : $name;
+        if (preg_match('#^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$#', $rel) !== 1
+            || str_contains($rel, '..')
+            || (!$absolute && preg_match('#^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*$#', $rel) !== 1)) {
             throw new \LogicException(
                 "Component {$name} is not registered and isn't a valid template name "
                 . '(lowercase letters, digits, - and _, with / for folders)'
             );
         }
-        $dir = self::$cwd . '/template/components/';
-        $base = basename($name);
-        $sub = dirname($name) === '.' ? '' : dirname($name) . '/';
+        $root = $absolute ? '' : 'components/';
+        $dir = self::$cwd . '/template/' . $root;
+        $base = basename($rel);
+        $sub = dirname($rel) === '.' ? '' : dirname($rel) . '/';
         foreach ([$sub . $base, $sub . '_' . $base] as $candidate) {
             if (is_file($dir . $candidate . '.php')) {
                 unset($props['fragment']); // a prop, never a fragment selector
-                return new SafeHtml(self::renderToString('/components/' . $candidate, $props + ['props' => $props]));
+                $path = self::resolveTemplatePath('/' . $root . $candidate, 'template');
+                return new SafeHtml(self::coerceToString(self::executeFile($path, $props + ['props' => $props])));
             }
         }
         throw new \LogicException(
             "Component {$name} is neither registered with App::components() nor a template at "
-            . "template/components/{$sub}{$base}.php"
+            . "template/{$root}{$sub}{$base}.php"
         );
     }
 
@@ -8027,53 +8121,11 @@ class App
      * @param string|null          $fragmentName      Region to extract for htmx; null → derive from HX-Target / HX-Trigger-Name.
      * @param string|null          $fullPageTemplate  Template for non-htmx requests; null → `$template`.
      * @return mixed The {@see App::render()} return value, riding the universal contract.
+     * @deprecated Use `App::render($template, $args, htmx: true, fragment: …, fullPage: …)`.
      */
     public static function renderHtmx(string $template, array $args = [], ?string $fragmentName = null, ?string $fullPageTemplate = null): mixed
     {
-        $req = RequestContext::instance()->zealphp_request;
-
-        // The body depends on these request headers (full page vs fragment), so a
-        // shared cache must key on them — else it can serve a fragment as the page.
-        RequestContext::instance()->zealphp_response?->header('Vary', 'HX-Request, HX-Target, HX-Trigger-Name', false);
-
-        // No request in scope (CLI render, warmup, etc.) → full page.
-        // A `fragment` key in $args would make render() extract one region, so
-        // drop it: fragment selection only applies to htmx requests (#509).
-        if (!$req instanceof \ZealPHP\HTTP\Request || !$req->isHtmx()) {
-            unset($args['fragment']);
-            return self::render($fullPageTemplate ?? $template, $args);
-        }
-
-        // Explicit fragment wins (either form) — assign, not `+`, so it
-        // overrides a `fragment` key already in $args (#509).
-        if ($fragmentName !== null) {
-            $args['fragment'] = $fragmentName;
-            return self::render($template, $args);
-        }
-
-        // #444 — separate-template form: a non-null $fullPageTemplate signals
-        // that $template is a BARE PARTIAL (the htmx swap content itself, with no
-        // App::fragment() region), not a fragment-bearing page. A real htmx swap
-        // carries HX-Target, so deriving a fragment here would ask the partial
-        // for a region it doesn't have → executeFile's post-flight 404. The
-        // partial IS the response — render it directly. Fragment derivation only
-        // applies to the single-template form (a page that holds the regions).
-        if ($fullPageTemplate !== null) {
-            return self::render($template, $args);
-        }
-
-        // Single-template form: derive the fragment from the request — HX-Target
-        // (strip a leading '#'), else HX-Trigger-Name. If neither is present,
-        // render the template with no fragment key (its bare partial output).
-        // `+` is deliberate here: a caller-supplied $args['fragment'] beats the
-        // header-derived guess.
-        $target = $req->htmxTarget();
-        $derived = $target !== null ? ltrim($target, '#') : $req->htmxTriggerName();
-        if ($derived !== null && $derived !== '') {
-            return self::render($template, $args + ['fragment' => $derived]);
-        }
-
-        return self::render($template, $args);
+        return self::render($template, $args, fragment: $fragmentName, htmx: true, fullPage: $fullPageTemplate);
     }
 
     /**
@@ -8082,6 +8134,9 @@ class App
      * are JSON-encoded.
      *
      * @see App::executeFile() (private core) and the sibling methods (render / renderStream / include).
+     * @deprecated For markup use `App::component('/path', $args)` (any template,
+     *             absolute from template/) or a component name; for a response
+     *             use `App::render()`.
      *
      * @param array<string, mixed> $__args
      */
@@ -8108,6 +8163,7 @@ class App
      * ```
      *
      * @see App::executeFile() (private core) and the sibling methods (render / renderToString / include).
+     * @deprecated Use `App::render($template, $args, stream: true)`.
      *
      * @param array<string, mixed> $__args
      */

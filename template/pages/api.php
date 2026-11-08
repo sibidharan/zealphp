@@ -365,10 +365,10 @@ PHP]); ?>
 use ZealPHP\App;
 // Return a Generator → streams to browser
 return (function() {
-    yield App::renderToString('shell-open',
-        ['title' => 'Dashboard']);
+    yield from App::render('shell-open',
+        ['title' => 'Dashboard'], stream: true);
     yield "<h1>Dashboard</h1>";
-    yield App::renderToString('shell-close');
+    yield from App::render('shell-close', stream: true);
 })();
 PHP]); ?>
 </div>
