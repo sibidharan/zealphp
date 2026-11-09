@@ -151,20 +151,18 @@ function async_logging_enabled(): bool
 /**
  * Ordered list of directories ZealPHP will try for its logs + PID files, most
  * preferred first. Pure (no I/O, no memoization) so it is unit-testable; the
- * actual pick — the first candidate that is writable or creatable — happens in
- * `resolve_log_dir()`.
+ * actual pick — the first candidate that passes `zealphp_private_dir_ok()` —
+ * happens in `resolve_log_dir()`.
  *
  * Order:
  *   1. `$ZEALPHP_LOG_DIR` — explicit override, when set.
- *   2. `/tmp/zealphp` — the shared default, kept first for BC (used whenever the
- *      current user can create/write it: single-user box, root, or fresh box).
- *   3. Per-user fallbacks for the collision case where `/tmp/zealphp` already
- *      exists owned by ANOTHER user (e.g. root started a server there first), so
- *      this user cannot write it: `$XDG_RUNTIME_DIR/zealphp`, then a uid/user-
- *      suffixed temp dir (`sys_get_temp_dir()/zealphp-<uid>`). These keep us off a
- *      non-writable `/tmp/zealphp` without polluting the project tree, and resolve
- *      deterministically so `start` and `stop`/`status` agree on the same dir.
+ *   2. `$XDG_RUNTIME_DIR/zealphp` — per-user runtime dir.
+ *   3. `sys_get_temp_dir()/zealphp-<uid>` — per-user temp dir.
  *   4. Project-tree last resorts (`./tmp/zealphp`, `./logs/zealphp`).
+ *
+ * There is deliberately no shared `/tmp/zealphp`: any local user can create
+ * that path first (or plant symlinks in it) and so read or redirect another
+ * user's logs, PID files and session files. Every default candidate is per-user.
  *
  * @return list<string>
  */
@@ -176,8 +174,6 @@ function zealphp_log_dir_candidates(): array
     if ($envDir !== false && trim((string) $envDir) !== '') {
         $candidates[] = trim((string) $envDir);
     }
-
-    $candidates[] = '/tmp/zealphp';
 
     $uid = function_exists('posix_getuid')
         ? (string) posix_getuid()
@@ -203,11 +199,52 @@ function zealphp_log_dir_candidates(): array
 }
 
 /**
- * Resolve the first writable log directory from `zealphp_log_dir_candidates()`.
+ * True when `$dir` is safe to hold ZealPHP's logs, PID files and sessions:
+ * a real directory (not a symlink) owned by the current effective uid and not
+ * writable by group or others. A missing directory is created `0700`. A
+ * directory we own that is group/world-writable is tightened to `0700` first
+ * (directories made by older releases were `0775`); one owned by someone else
+ * is refused, because its owner controls what is in it.
+ */
+function zealphp_private_dir_ok(string $dir): bool
+{
+    $dir = rtrim($dir, '/');
+    if ($dir === '' || is_link($dir)) {
+        return false;
+    }
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0700, true);
+        clearstatcache(true, $dir);
+    }
+    $st = @lstat($dir);
+    if ($st === false || ($st['mode'] & 0170000) !== 0040000) {
+        return false; // missing, or not a directory (e.g. a symlink created meanwhile)
+    }
+    if (function_exists('posix_geteuid') && $st['uid'] !== posix_geteuid()) {
+        return false;
+    }
+    if (($st['mode'] & 0022) !== 0) {
+        if (!@chmod($dir, 0700)) {
+            return false;
+        }
+        clearstatcache(true, $dir);
+        $st = @lstat($dir);
+        if ($st === false || ($st['mode'] & 0022) !== 0) {
+            return false;
+        }
+    }
+    return is_writable($dir);
+}
+
+/**
+ * Resolve the log directory: the explicit `ZEALPHP_LOG_DIR` when it is (or can
+ * be created as) a writable directory, else the first per-user candidate from
+ * `zealphp_log_dir_candidates()` that passes `zealphp_private_dir_ok()`.
  *
- * Creates the directory (with `0775` permissions, recursively) if it does not
- * yet exist. Memoises the result so the filesystem is only probed once per
- * worker lifetime. Returns `null` when no candidate is writable or creatable.
+ * The explicit override is trusted as given (an operator may point it at a
+ * shared, group-readable log dir on purpose); it is only created `0700` when
+ * missing. Memoises the result so the filesystem is only probed once per
+ * worker lifetime. Returns `null` when no candidate is usable.
  */
 function resolve_log_dir(): ?string
 {
@@ -220,11 +257,19 @@ function resolve_log_dir(): ?string
     }
     $checked = true;
 
+    $envDir = getenv('ZEALPHP_LOG_DIR');
+    $explicit = ($envDir !== false && trim((string) $envDir) !== '') ? trim((string) $envDir) : null;
+
     foreach (zealphp_log_dir_candidates() as $candidate) {
-        if (!is_dir($candidate)) {
-            @mkdir($candidate, 0775, true);
+        if ($candidate === $explicit) {
+            if (!is_dir($candidate)) {
+                @mkdir($candidate, 0700, true);
+            }
+            $ok = is_dir($candidate) && is_writable($candidate);
+        } else {
+            $ok = zealphp_private_dir_ok($candidate);
         }
-        if (is_dir($candidate) && is_writable($candidate)) {
+        if ($ok) {
             $resolved = rtrim($candidate, '/');
             return $resolved;
         }

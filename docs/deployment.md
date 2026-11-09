@@ -93,7 +93,7 @@ journalctl -u zealphp -p err     # errors only
 ```
 
 ZealPHP's per-stream log files (`access.log`, `debug.log`) still exist
-under `/tmp/zealphp/` and can be tailed independently with
+under the per-user log dir (`/tmp/zealphp-<uid>/`) and can be tailed independently with
 `php app.php logs`.
 
 ---
@@ -121,7 +121,7 @@ systemd unit (`Environment="..."`), Docker `-e` flags, or shell.
 
 | Variable | Type | Default | Purpose |
 |---|---|---|---|
-| `ZEALPHP_LOG_DIR` | path | `/tmp/zealphp` | Base directory for all log files |
+| `ZEALPHP_LOG_DIR` | path | `$XDG_RUNTIME_DIR/zealphp`, else `/tmp/zealphp-<uid>` | Base directory for all log files |
 | `ZEALPHP_LOG_FILE` | path | (per-stream) | Single-file override for all streams |
 | `ZEALPHP_ACCESS_LOG_FILE` | path | `$LOG_DIR/access.log` | Per-request access log |
 | `ZEALPHP_DEBUG_LOG_FILE` | path | `$LOG_DIR/debug.log` | `elog()` output |
