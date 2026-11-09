@@ -58,7 +58,7 @@ php -m | grep uopz      # fallback (only needed if ext-zealphp is absent)
 
 At minimum `openswoole` and one of `zealphp` or `uopz` must print the module name.
 
-> **Session unserialize whitelist (v0.2.26).** When ZealPHP virtualizes `session_start()` (via ext-zealphp or uopz), it reads `$_SESSION` blobs through `unserialize()` with `['allowed_classes' => ['stdClass']]`. Scalars, arrays, and `stdClass` round-trip normally; any other class read back from session storage becomes `__PHP_Incomplete_Class`. Adding a class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first. See `src/Session/utils.php` and the `template/pages/sessions.php#objects-in-session` page for the canonical reference.
+> **Session unserialize whitelist (v0.2.26).** When ZealPHP virtualizes `session_start()` (via ext-zealphp or uopz), it reads `$_SESSION` blobs through `unserialize()` with `['allowed_classes' => ['stdClass']]`. Scalars, arrays, and `stdClass` round-trip normally; any other class read back from session storage becomes `__PHP_Incomplete_Class`. Adding a class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first. See `src/Session/utils.php` and the `template/sessions/sessions.php#objects-in-session` page for the canonical reference.
 
 ## Getting Started — 2. Clone and Install Dependencies
 
@@ -1550,14 +1550,14 @@ App::render('_master', ['title' => 'About Us', 'page' => 'about']);
 <body>
   <?= App::component('/_nav', ['active' => $page]) ?>
   <main>
-    <?= App::component("/pages/$page") ?>
+    <?= App::component("/$page/" . basename($page)) ?>   <!-- template/about/about.php -->
   </main>
   <?= App::component('/_footer') ?>
 </body>
 </html>
 ```
 
-This is exactly how the ZealPHP docs site works — every page in `public/` is 3 lines calling `App::render('_master', [...])`. The master renders the nav, the page content, and the footer.
+This is exactly how the ZealPHP docs site works — every page in `public/` is 3 lines calling `App::render('_master', [...])`, with `'page'` set to the public file's path. The master renders the nav, the page's own template (in the page's folder, `template/about/about.php`, next to its `components/`), and the footer.
 
 ## Templates and Rendering — Editor / IDE: making injected variables visible
 
@@ -1567,7 +1567,7 @@ This is exactly how the ZealPHP docs site works — every page in `public/` is 3
 
 ```php
 <?php
-// template/pages/home.php
+// template/index/index.php
 return function (string $title, array $users, \ZealPHP\RequestContext $g): string {
     $rows = '';
     foreach ($users as $u) { $rows .= '<li>' . htmlspecialchars($u['name']) . '</li>'; }
@@ -3052,7 +3052,7 @@ While ZealPHP does not yet ship a testing harness, you can instantiate middlewar
 
 ## Middleware and Authentication — Built-in Middleware Classes
 
-ZealPHP ships parity middleware for Apache/nginx behaviours. The framework's per-middleware reference table lives in `template/pages/middleware.php` (the website's `/middleware` page). The following entries cover several additional classes — all opt-in, all PSR-15 — that complete the parity surface.
+ZealPHP ships parity middleware for Apache/nginx behaviours. The framework's per-middleware reference table lives in `template/middleware/middleware.php` (the website's `/middleware` page). The following entries cover several additional classes — all opt-in, all PSR-15 — that complete the parity surface.
 
 ### `RequestIdMiddleware`
 
@@ -3423,7 +3423,7 @@ $post = function () {
 };
 ```
 
-All three hooks default to `null` (fail-closed): without `App::authChecker()`, `isAuthenticated()` returns `false` and `requirePostAuth()` rejects every request. See `template/pages/api.php` on the live site for the full auth-hooks reference.
+All three hooks default to `null` (fail-closed): without `App::authChecker()`, `isAuthenticated()` returns `false` and `requirePostAuth()` rejects every request. See `template/api/api.php` on the live site for the full auth-hooks reference.
 
 ## Middleware and Authentication — Session Fixation Defence (#244)
 
@@ -3449,7 +3449,7 @@ Session fixation has two halves, and ZealPHP closes both:
 
 - A higher-level `Auth` facade built on top of the existing `App::authChecker()` / `App::adminChecker()` / `App::usernameProvider()` hooks (sessions, JWT, API keys in one call).
 
-Note: middleware groups and route-scoped stacks now ship — see [Per-route Middleware](#per-route-middleware) above (`middleware:` route option, `App::middlewareAlias()`, `$app->group()`). CSRF protection (`CsrfMiddleware`), CORS (`CorsMiddleware`), and rate limiting (`RateLimitMiddleware`) are already shipped as built-in PSR-15 middleware — see `template/pages/middleware.php` on the live site.
+Note: middleware groups and route-scoped stacks now ship — see [Per-route Middleware](#per-route-middleware) above (`middleware:` route option, `App::middlewareAlias()`, `$app->group()`). CSRF protection (`CsrfMiddleware`), CORS (`CorsMiddleware`), and rate limiting (`RateLimitMiddleware`) are already shipped as built-in PSR-15 middleware — see `template/middleware/middleware.php` on the live site.
 
 Contributions in these areas are welcome—align proposals with the PSR-15 contract to keep interoperability intact.
 
@@ -5444,7 +5444,7 @@ These are **not** user-facing configuration. Internal vars are IPC/runtime chann
 | `ZEALPHP_LEARN_RATE_LIMIT_LOOPBACK` | unset (loopback rate-limiting bypassed) | test | When set to exactly `'1'`, re-enables Learn-demo rate limiting for loopback clients (otherwise bypassed so the integration suite can re-run without restarting); checked in `src/Learn/Auth.php::rateLimit()`. |
 | `ZEALPHP_COVERAGE_DIR` | unset (coverage collection inert) | test | Directory where the running server dumps per-process `src/` code-coverage `.cov` files; coverage instrumentation in `app.php` only activates when this is a non-empty string and a coverage driver is loaded. |
 | `ZEALPHP_BENCH_MODE` | `false` | build/CI | When truthy (`env_flag`), disables all logging for benchmark runs; read once via `env_flag('ZEALPHP_BENCH_MODE', false)` in `bench_mode_enabled()` (`src/utils.php`). |
-| `ZEALPHP_TEST_ROUTES` | `false` | test | When truthy (`env_flag`), the demo site loads the integration-test fixture routes in `route/_*.php` (`/__error_test/*`, `/__fallback_test/*`, `/_contract_test/*`, `/__pipeline_test/*`). Start the server with it before running `tests/Integration/`; CI and `scripts/coverage_full.sh` set it. |
+| `ZEALPHP_TEST_ROUTES` | `false` | test | When truthy (`env_flag`), the demo site loads the integration-test fixture routes in `route/_*.php` (`/__error_test/*`, `/__fallback_test/*`, `/_contract_test/*`, `/__pipeline_test/*`) and serves the test/debug fixtures that print request or process state (`public/test_apps/*`, `public/_contract_test/*`, `/api/php/req`, `/api/zeal/{coproc_test,sessleak}`, `/api/swoole/{process,sessleak,attacker}`). Never set it on a public server: those fixtures print the environment. Start the server with it before running `tests/Integration/`; CI and `scripts/coverage_full.sh` set it. |
 | `ZEALPHP_SKIP_DOCS_BUILD` | `false` | build/CI | When truthy (`env_flag`), skips the boot-time background API-docs build in `app.php` (CI sets it so an in-flight build doesn't flake timing-sensitive integration tests). |
 
 ---

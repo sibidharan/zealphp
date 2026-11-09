@@ -154,7 +154,7 @@ While ZealPHP does not yet ship a testing harness, you can instantiate middlewar
 
 ## Built-in Middleware Classes
 
-ZealPHP ships parity middleware for Apache/nginx behaviours. The framework's per-middleware reference table lives in `template/pages/middleware.php` (the website's `/middleware` page). The following entries cover several additional classes — all opt-in, all PSR-15 — that complete the parity surface.
+ZealPHP ships parity middleware for Apache/nginx behaviours. The framework's per-middleware reference table lives in `template/middleware/middleware.php` (the website's `/middleware` page). The following entries cover several additional classes — all opt-in, all PSR-15 — that complete the parity surface.
 
 ### `RequestIdMiddleware`
 
@@ -525,7 +525,7 @@ $post = function () {
 };
 ```
 
-All three hooks default to `null` (fail-closed): without `App::authChecker()`, `isAuthenticated()` returns `false` and `requirePostAuth()` rejects every request. See `template/pages/api.php` on the live site for the full auth-hooks reference.
+All three hooks default to `null` (fail-closed): without `App::authChecker()`, `isAuthenticated()` returns `false` and `requirePostAuth()` rejects every request. See `template/api/api.php` on the live site for the full auth-hooks reference.
 
 ## Session Fixation Defence (#244)
 
@@ -551,6 +551,6 @@ Session fixation has two halves, and ZealPHP closes both:
 
 - A higher-level `Auth` facade built on top of the existing `App::authChecker()` / `App::adminChecker()` / `App::usernameProvider()` hooks (sessions, JWT, API keys in one call).
 
-Note: middleware groups and route-scoped stacks now ship — see [Per-route Middleware](#per-route-middleware) above (`middleware:` route option, `App::middlewareAlias()`, `$app->group()`). CSRF protection (`CsrfMiddleware`), CORS (`CorsMiddleware`), and rate limiting (`RateLimitMiddleware`) are already shipped as built-in PSR-15 middleware — see `template/pages/middleware.php` on the live site.
+Note: middleware groups and route-scoped stacks now ship — see [Per-route Middleware](#per-route-middleware) above (`middleware:` route option, `App::middlewareAlias()`, `$app->group()`). CSRF protection (`CsrfMiddleware`), CORS (`CorsMiddleware`), and rate limiting (`RateLimitMiddleware`) are already shipped as built-in PSR-15 middleware — see `template/middleware/middleware.php` on the live site.
 
 Contributions in these areas are welcome—align proposals with the PSR-15 contract to keep interoperability intact.

@@ -53,7 +53,7 @@ php -m | grep uopz      # fallback (only needed if ext-zealphp is absent)
 
 At minimum `openswoole` and one of `zealphp` or `uopz` must print the module name.
 
-> **Session unserialize whitelist (v0.2.26).** When ZealPHP virtualizes `session_start()` (via ext-zealphp or uopz), it reads `$_SESSION` blobs through `unserialize()` with `['allowed_classes' => ['stdClass']]`. Scalars, arrays, and `stdClass` round-trip normally; any other class read back from session storage becomes `__PHP_Incomplete_Class`. Adding a class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first. See `src/Session/utils.php` and the `template/pages/sessions.php#objects-in-session` page for the canonical reference.
+> **Session unserialize whitelist (v0.2.26).** When ZealPHP virtualizes `session_start()` (via ext-zealphp or uopz), it reads `$_SESSION` blobs through `unserialize()` with `['allowed_classes' => ['stdClass']]`. Scalars, arrays, and `stdClass` round-trip normally; any other class read back from session storage becomes `__PHP_Incomplete_Class`. Adding a class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first. See `src/Session/utils.php` and the `template/sessions/sessions.php#objects-in-session` page for the canonical reference.
 
 ## 2. Clone and Install Dependencies
 

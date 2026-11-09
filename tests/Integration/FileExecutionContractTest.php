@@ -9,7 +9,7 @@ use ZealPHP\Tests\TestCase;
  * public/_contract_test/ and template/_contract_test/; routes that exercise
  * them are registered in route/_contract_test.php.
  *
- * The canonical contract is documented in template/pages/responses.php
+ * The canonical contract is documented in template/responses/responses.php
  * (anchor #return-contract). Keep this test, the docs page, and CLAUDE.md
  * in lock-step on any change to the contract.
  */
