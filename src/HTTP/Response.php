@@ -478,10 +478,22 @@ class Response
             return;
         }
         $this->flush();
+        // Component push: an HTML stream gets the push script in the chunk
+        // that carries </body>; SSE and other types are never touched.
+        \ZealPHP\Component\Push::streaming();
+        $html = true;
+        foreach ($this->headersList as [$name, $value]) {
+            if (strcasecmp($name, 'Content-Type') === 0) {
+                $html = str_contains(strtolower($value), 'html');
+            }
+        }
         // Guard each write: if the client disconnected, write() would return false
         // and OpenSwoole would emit ERRNO 1005 notices — return false silently instead.
-        $write = function(string $chunk): bool {
+        $write = function(string $chunk) use ($html): bool {
             if (!$this->parent->isWritable()) return false;
+            if ($html) {
+                $chunk = \ZealPHP\Component\Push::spliceStream($chunk);
+            }
             return $this->parent->write($chunk) !== false;
         };
         try {

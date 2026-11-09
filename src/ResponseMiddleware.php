@@ -500,6 +500,14 @@ class ResponseMiddleware implements MiddlewareInterface
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        // Component push: componentPushRoot() prints a placeholder while the
+        // page renders; finish() puts the script there, or before </body>.
+        \ZealPHP\Component\Push::deferRoot();
+        return \ZealPHP\Component\Push::finish($this->route($request));
+    }
+
+    private function route(ServerRequestInterface $request): ResponseInterface
+    {
         $g = RequestContext::instance();
         // Stash the canonical PSR-7 request so inner layers (ZealAPI's in-file
         // $middleware onion, etc.) can reach the same object the middleware

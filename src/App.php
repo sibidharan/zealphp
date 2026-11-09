@@ -1598,6 +1598,10 @@ class App
         }
         // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
         $g->zealphp_response->flush();
+        // Component push: a stream can't be rewritten after it's sent, so the
+        // script is spliced into the chunk that carries </body> (or the root's
+        // placeholder), and componentPushRoot() inside the stream prints it.
+        Component\Push::streaming();
         // Capture echo/print emitted INSIDE the generator body (between yields)
         // so it follows the universal return contract — streamed to the client
         // in wire order — instead of leaking to the server's stdout. A handler
@@ -1616,10 +1620,10 @@ class App
                 if ($buffered !== false && $buffered !== '') {
                     \ob_clean();
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->write($buffered);
+                    $g->openswoole_response->write(Component\Push::spliceStream($buffered));
                 }
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                $g->openswoole_response->write((string)$chunk);
+                $g->openswoole_response->write(Component\Push::spliceStream((string)$chunk));
                 // #354 — yield to the scheduler ONLY when inside a coroutine.
                 // In mixed mode (enable_coroutine=false) the handler runs outside
                 // any coroutine, so Coroutine::sleep(0) throws "API must be called
@@ -1641,7 +1645,7 @@ class App
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 if ($trailing !== false && $trailing !== '' && $g->openswoole_response->isWritable()) {
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->write($trailing);
+                    $g->openswoole_response->write(Component\Push::spliceStream($trailing));
                 }
             }
         }
@@ -8348,10 +8352,12 @@ class App
     }
 
     /**
-     * The push connection for this page: a `<script>` that subscribes the
-     * page to the topics of the reactive components it rendered. Put
-     * `<?= App::componentPushRoot() ?>` once at the end of the layout, after
-     * the components; it renders nothing when no component has topics.
+     * Where the push script goes: a `<script>` that subscribes the page to
+     * the topics of the reactive components it rendered. Optional — without
+     * it the framework adds the script before `</body>`. In a buffered page
+     * it can go anywhere (it marks the spot; the script is filled in when the
+     * response is finished); in a stream it prints the script for the
+     * components rendered so far. A page never gets two.
      */
     public static function componentPushRoot(): SafeHtml
     {

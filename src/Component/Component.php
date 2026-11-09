@@ -94,7 +94,7 @@ abstract class Component
     /**
      * Topics this component depends on. When any of them is invalidated
      * (`Component::invalidate('contacts')`), open pages showing this
-     * component re-render it. Needs `App::componentPushRoot()` in the layout.
+     * component re-render it (the framework adds the push script to the page).
      * Topics: 1-128 letters, digits, `:`, `_`, `.` or `-` (e.g. `contact:42`).
      *
      * @return list<string>

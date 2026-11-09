@@ -177,7 +177,7 @@ Start the server with a key (`ZEALPHP_APP_KEY=… php app.php`) and open `/count
 $app->route('/counter', fn() => App::render('counter-page', ['title' => 'Counter']));
 ```
 
-In a site with a shared layout, put the htmx `<script>` in the layout's `<head>` once and call `App::component()` from any page template, partial or other component's template. Two optional extras also go in the layout once: `<?= App::componentPushRoot() ?>` before `</body>` for [live updates](#live-updates-push), and `ZealJsBinder::script()` instead of htmx for [pages without htmx](#without-htmx-zealjsbinder).
+In a site with a shared layout, put the htmx `<script>` in the layout's `<head>` once and call `App::component()` from any page template, partial or other component's template. [Live updates](#live-updates-push) need nothing in the layout: the framework adds their script to pages that use them. For [pages without htmx](#without-htmx-zealjsbinder), put `ZealJsBinder::script()` in the layout instead of htmx.
 
 The browser receives the component already rendered:
 
@@ -581,20 +581,25 @@ final class SharedLikes extends Component
 }
 ```
 
-Add the push root once to your layout, after the components:
+That's all the page needs. When a page renders a component with topics, the framework adds the push script before `</body>`: one script per page, listing every such component. A page without one gets nothing, and a response without `</body>` (an htmx fragment, a component refresh, JSON) is never touched. Call `Component::invalidate()` from anywhere that changes the data — an action, an API handler, a task worker, a sidecar process, a timer.
+
+### Placing the script yourself
+
+To choose where the script goes, call `<?= App::componentPushRoot() ?>` in the layout:
 
 ```php
-<?= App::componentPushRoot() ?>
-</body>
+<head>
+  <?= App::componentPushRoot() ?>
+</head>
 ```
 
-It's needed only for push. Components without `topics()` work without it, like the counter in [Putting it on a page, end to end](#putting-it-on-a-page-end-to-end). It prints a `<script>` only when the page rendered a component with topics, and nothing otherwise, so a shared layout can include it on every page at no cost.
+It can go anywhere, `<head>` included: it marks the spot, and the script is filled in when the response is finished, so it still lists components rendered after it. Calling it more than once still gives one script; the framework doesn't add another.
 
-**Put it after the components**, at the end of `<body>`. It reads the topics each component recorded while it rendered, so placed in `<head>` (before the page body renders) it prints nothing and the page never connects. Call `Component::invalidate()` from anywhere that changes the data — an action, an API handler, a task worker, a sidecar process, a timer.
+**Streamed pages** (a generator, `render(…, stream: true)`, `$response->stream()`) can't be rewritten once a chunk is sent, so the script rides in the chunk that carries `</body>`. Inside a stream, `componentPushRoot()` prints the script at once for the components rendered so far: call it after them, or leave it out. SSE responses are never touched.
 
 ### How it works
 
-1. While rendering, each reactive component's `topics()` are recorded. The push root signs the list into a token bound to the visitor's session, so a page can only subscribe to topics it was actually shown.
+1. While rendering, each reactive component's `topics()` are recorded. The push script carries the list, signed into a token bound to the visitor's session, so a page can only subscribe to topics it was actually shown.
 2. The page opens one connection: a WebSocket (`/_zeal/c/ws`) or an SSE stream (`/_zeal/c/stream`).
 3. `Component::invalidate('demo:likes')` delivers to this worker's connections, sends the topics to the node's other workers (OpenSwoole `sendMessage`), and, with the Redis or Tiered `Store` backend, publishes them to other nodes. From a task worker or a sidecar process it reaches every HTTP worker.
 4. A connection receives only the **ids** of its stale components, never HTML or data. The page then re-requests each one through the normal endpoint (`_refresh`), with its own cookies, so each visitor sees what *their* session is allowed to see.
@@ -613,7 +618,7 @@ App::componentPush(transport: 'sse', maxConnections: 2000, coalesce: 0.1);   // 
 | `maxConnections` | 1000 | open push connections per worker; beyond it a WebSocket is closed with 1013 (retry later) and an SSE stream asks the browser to come back in 15–45 s |
 | `coalesce` | 0.05 | seconds to gather invalidations into one message |
 
-**WebSocket or SSE.** WebSockets are the default because browsers allow only six HTTP/1.1 connections per host: with SSE, each open tab holds one, so a visitor's seventh tab of your site would stall. Use SSE over HTTP/2 (one connection carries every stream) or where a proxy blocks WebSockets. SSE holds a coroutine per open page and needs coroutine mode; without coroutines the push root uses the WebSocket regardless.
+**WebSocket or SSE.** WebSockets are the default because browsers allow only six HTTP/1.1 connections per host: with SSE, each open tab holds one, so a visitor's seventh tab of your site would stall. Use SSE over HTTP/2 (one connection carries every stream) or where a proxy blocks WebSockets. SSE holds a coroutine per open page and needs coroutine mode; without coroutines the push script uses the WebSocket regardless.
 
 Both reconnect on their own: SSE after a jittered 1–4 s, the WebSocket client with backoff (0.5 s to 60 s, jittered). A stream ends when the browser leaves (noticed at the next 15 s heartbeat) and after an hour. Navigating with hx-boost to a page without the components closes the connection.
 
@@ -768,7 +773,7 @@ final class CartBadge extends Component
 
 ## Limits in this version
 
-- **Push needs the root on the page, after the components.** Pages that don't include `App::componentPushRoot()`, or call it before the components render, show them normally but never receive updates.
+- **Push needs `</body>` or the root.** The script is added before `</body>` or where `App::componentPushRoot()` is called. A full page always has one of them; a hand-built page that has neither gets no live updates.
 - **Dev hot-reload** (`--dev`) re-registers components from `route/*.php`, but the endpoint route and the key check are set up at boot: if a reload adds the *first* component, restart. Removed components stay registered until restart.
 - **Behind a proxy that rewrites `Host`**, the `Origin` fallback and the no-JS back-link compare against the rewritten host. Modern browsers send `Sec-Fetch-Site`, which isn't affected; the back-link falls back to `/`.
 

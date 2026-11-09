@@ -265,13 +265,7 @@ final class SharedLikes extends Component
     }
 }
 PHP]) ?>
-<?= App::component('/components/_code', [
-    'label' => 'template/_master.php (once, before </body>)',
-    'lang'  => 'html',
-    'code'  => <<<'HTML'
-<?= App::componentPushRoot() ?>
-HTML]) ?>
-<p>Only push needs this line; the counter and signup form above work without it. It prints a <code>&lt;script&gt;</code> only on a page that rendered a component with <code>topics()</code>, and nothing elsewhere, so it can sit in a shared layout. Keep it after the components: it reads the topics they recorded while rendering, so in <code>&lt;head&gt;</code> it would print nothing. <a href="/docs/guide/components#live-updates-push">Live updates (push)</a> has the details.</p>
+<p>The layout needs nothing for this: the framework adds the push script before <code>&lt;/body&gt;</code> on pages that render a component with <code>topics()</code>, one per page. To choose the spot, call <code>&lt;?= App::componentPushRoot() ?&gt;</code> anywhere in the layout. <a href="/docs/guide/components#live-updates-push">Live updates (push)</a> has the details, including streamed pages.</p>
   </div>
 </div>
 
