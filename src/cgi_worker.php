@@ -689,7 +689,9 @@ try {
     $__z_return_value = $__z_result;
 } catch (\Throwable $__z_err) {
     $__z_status = 500;
-    echo '<pre>' . htmlspecialchars($__z_err->getMessage()) . "\n" . htmlspecialchars($__z_err->getTraceAsString()) . '</pre>';
+    // Details to the server log; to the client only with display_errors on.
+    \ZealPHP\CGI\SubprocessError::log($__z_err, 'cgi_worker');
+    echo '<pre>' . htmlspecialchars(\ZealPHP\CGI\SubprocessError::body($__z_err, \ZealPHP\CGI\SubprocessError::displayRequested($__z_ctx ?? null))) . '</pre>';
 }
 
 // #357 — fire header_register_callback() here, while the header() override is
