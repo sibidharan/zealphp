@@ -58,6 +58,16 @@
           </p>
         </div>
         <div class="why-card">
+          <h3 class="why-card-title">Pages built from components, routes kept thin</h3>
+          <p class="why-card-body">
+            A page is a public file and a template folder; its template is laid out from components,
+            each kept next to the page that uses it until another page needs it. Live UI is a reactive
+            component driven from the server. Routes and APIs only wire a request to a <code>src/</code>
+            class and return data or a component &mdash; they never build HTML. The structure is a
+            rule, checked by the framework&rsquo;s own tests (<a href="/docs/guide/directory-structure#where-code-goes">Where code goes</a>).
+          </p>
+        </div>
+        <div class="why-card">
           <h3 class="why-card-title">PHP as the application server</h3>
           <p class="why-card-body">
             HTTP, WebSocket, task workers, timers, shared memory, sessions — in one PHP application server,

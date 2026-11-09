@@ -1,0 +1,10 @@
+/* learn/project-structure — two-column comparison */
+.ps-split {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.ps-split-col {
+  flex: 1;
+}

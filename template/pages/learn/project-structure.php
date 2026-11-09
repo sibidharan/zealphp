@@ -100,8 +100,8 @@ $app->run();</code></pre>
       However, if you're migrating an existing app or simply prefer the classic PHP-FPM mental model, you can flip one switch and install the C-extension:
     </p>
 
-    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
-      <div style="flex: 1;">
+    <div class="ps-split">
+      <div class="ps-split-col">
         <?php App::render('/components/_code', [
           'label' => 'Coroutine Mode (Default)',
           'code'  => <<<'PHP'
@@ -116,7 +116,7 @@ echo "Hello, $name! Visits: {$g->session['visits']}";
 PHP
         ]); ?>
       </div>
-      <div style="flex: 1;">
+      <div class="ps-split-col">
         <?php App::render('/components/_code', [
           'label' => 'Coroutine-Legacy Mode',
           'code'  => <<<'PHP'
@@ -165,13 +165,27 @@ PHP
       (<code>/users/{id}</code>), namespaced groups (<code>$app-&gt;nsRoute('admin', ...)</code>),
       or background timers (<code>App::tick()</code>). Each file registers many routes.
     </p>
-
-    <h3><code>template/</code> — views only</h3>
     <p>
-      Templates render HTML. Call them with <code>App::render('pages/about', ['title' =&gt; ...])</code>.
-      The <strong>hard rule</strong>: no business logic, no inline <code>&lt;script&gt;</code> blocks,
-      no <code>style=</code> attributes. Templates produce HTML; everything else lives in <code>src/</code>
-      or <code>public/js/</code>.
+      <strong>Route files are wiring, not views.</strong> A handler reads its input, calls a <code>src/</code>
+      class, and returns a status, an array (sent as JSON), or <code>App::render()</code> /
+      <code>App::component()</code>. Never build HTML in a route or API file &mdash; no markup strings,
+      no heredocs. An htmx endpoint returns a component.
+    </p>
+
+    <h3><code>template/</code> — views, built from components</h3>
+    <p>
+      A page&rsquo;s templates live in a folder named after its public file: <code>public/invoices.php</code>
+      renders <code>template/invoices/invoices.php</code>, which lays the page out from components. A
+      self-contained piece of UI &mdash; a card, a form, a list row, a widget &mdash; is a component
+      (<code>App::component('row', $props)</code>), kept next to the page in
+      <code>template/invoices/components/</code>. When a second page needs it, move it to
+      <code>template/components/</code>; the call doesn&rsquo;t change.
+    </p>
+    <p>
+      The <strong>hard rule</strong>: no business logic, no function declarations, no inline
+      <code>&lt;script&gt;</code> blocks, no <code>style=</code> attributes. Templates produce HTML;
+      everything else lives in <code>src/</code> or <code>public/js/</code>. The full rules are in
+      <a href="/docs/guide/directory-structure#where-code-goes">Where code goes</a>.
     </p>
 
     <h3><code>src/</code> — your business logic</h3>
@@ -210,7 +224,10 @@ PHP
         <tr><td>Add a URL-param route like <code>/users/{id}</code></td><td><code>route/users.php</code> with <code>$app-&gt;route(...)</code></td></tr>
         <tr><td>Add a WebSocket endpoint</td><td><code>route/ws.php</code> with <code>$app-&gt;ws(...)</code></td></tr>
         <tr><td>Add a background timer</td><td><code>route/timers.php</code> using <code>App::tick()</code></td></tr>
-        <tr><td>Add a reusable HTML fragment</td><td><code>template/components/_card.php</code></td></tr>
+        <tr><td>Add a piece of UI one page uses</td><td>a component in that page&rsquo;s folder: <code>template/pricing/components/plan.php</code></td></tr>
+        <tr><td>Reuse that piece on another page</td><td>move it to <code>template/components/plan.php</code> (calls don&rsquo;t change)</td></tr>
+        <tr><td>Return an HTML fragment to htmx</td><td>a component; the route or API returns <code>App::component('/pricing/components/plan', $props)</code></td></tr>
+        <tr><td>Add UI whose state changes on the page</td><td>a reactive component: a class in <code>src/Components/</code> + its template</td></tr>
         <tr><td>Add a layout used by many pages</td><td><code>template/_master.php</code> or a new layout file</td></tr>
         <tr><td>Add a class like <code>AuthService</code></td><td><code>src/AuthService.php</code> (namespaced)</td></tr>
         <tr><td>Add new middleware</td><td><code>src/Middleware/MyMiddleware.php</code>, register in <code>app.php</code></td></tr>

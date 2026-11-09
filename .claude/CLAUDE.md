@@ -779,8 +779,13 @@ The rendering API grew one helper per need — `render()`, `renderToString()`, `
 
 ### Separation of Concerns — Hard Rules
 
+Canonical, user-facing form: `docs/directory-structure.md#where-code-goes`. Enforced by `tests/Unit/ArchitectureRulesTest.php` (markup in `route/`/`api/`, inline script/style in templates, top-level functions) — keep it green, and keep the demo site an example AI assistants can copy: they imitate the codebase more than the docs.
+
 | Rule | Rationale |
 |------|-----------|
+| **No markup in `route/` or `api/` files** (no HTML strings, heredocs, echoed tags) | Routes and APIs are wiring: read input → call a `src/` class → return a status, data, or `App::render()` / `App::component()`. An htmx endpoint returns a component. `route/_*.php` test fixtures are the only exemption (they test the return contract with literal HTML). |
+| **Build pages from components** | A page template arranges `App::component()` calls; any self-contained UI (card, form, row, widget, endpoint fragment) is a component with props — never markup copied between pages or a block buried in a long page template. Inside a page call `App::component()`, not `App::render('/components/…')`. |
+| **Components live next to their page** | `template/<page>/components/` (page = public file path without `.php`); move to `template/components/` when a second page needs it. A route/API names a page's component absolutely: `App::component('/learn/notes/components/note_card', $props)`. |
 | **No inline `<script>` blocks in templates** | All JS goes to `public/js/`. Templates produce HTML only. |
 | **No inline `style=` attributes or `<style>` blocks in templates** | All CSS goes to `public/css/`. Use CSS classes. |
 | **No PHP function definitions in templates** (`template/`) | Templates are view-only. Extract helpers to `src/` classes. |
