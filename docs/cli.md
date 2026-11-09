@@ -72,15 +72,22 @@ Each instance writes a PID file named per port: `zealphp_{port}.pid` under the
 runtime dir. That's how `stop` / `status` / `restart` target a specific instance —
 pass the same `-p` you started it with.
 
-**Runtime dir resolution.** The PID + log files default to **`/tmp/zealphp`**, but
-that path is shared across users. If `/tmp/zealphp` already exists owned by a
-*different* user (e.g. root started a server there first), ZealPHP can't write it,
-so it **falls back to a per-user dir automatically** — `$XDG_RUNTIME_DIR/zealphp`
-when available, otherwise `<temp>/zealphp-<uid>` (e.g. `/tmp/zealphp-1000`). The
-fallback is deterministic, so `start` and `stop`/`status` always agree on the same
-directory. You never need `sudo` or to change `/tmp`'s permissions. To pin an
-explicit location set **`ZEALPHP_LOG_DIR=/path`** (or `ZEALPHP_PID_FILE` / the
+**Runtime dir resolution.** The PID + log (and session) files live in a
+**per-user** dir: `$XDG_RUNTIME_DIR/zealphp` when available, otherwise
+`<temp>/zealphp-<uid>` (e.g. `/tmp/zealphp-1000`), then `./tmp/zealphp` /
+`./logs/zealphp`. A dir is only used if it is owned by you, is not a symlink and
+is not group/world-writable (created `0700`); a shared `/tmp/zealphp` is never
+used, since any local user could create it first. Resolution is deterministic, so
+`start` and `stop`/`status`/`logs` agree on the same directory. To pin an explicit
+location set **`ZEALPHP_LOG_DIR=/path`** (or `ZEALPHP_PID_FILE` / the
 `--pid-file` flag for just the PID file) — an explicit value always wins.
+
+**Process safety.** `start` never stops anything: it refuses when the server is
+already running, when the PID file names a live process that isn't your ZealPHP
+server, or when the port is taken. `stop`/`restart` signal a pid only if it is
+owned by you, runs `php … app.php` and listens on that port — the master pid
+alone, never a process group. A stale PID file is removed; a foreign one is
+reported and left alone.
 
 > `php app.php restart` (no `-p`) only restarts the **default** instance. If you
 > run a second instance on, say, `:9501`, restart it explicitly:
@@ -101,7 +108,7 @@ over the `app.php` defaults. The common ones:
 | `ZEALPHP_DAEMONIZE` | run detached (like `-d`) | `false` |
 | `ZEALPHP_DEV` | enable route hot-reload (like `--dev`) | `false` |
 | `ZEALPHP_PID_FILE` | custom PID-file path (like `--pid-file`) | per-port default |
-| `ZEALPHP_LOG_DIR` | directory for PID + log files (explicit override) | `/tmp/zealphp`, else a per-user fallback |
+| `ZEALPHP_LOG_DIR` | directory for PID + log files (explicit override) | per-user: `$XDG_RUNTIME_DIR/zealphp`, else `<temp>/zealphp-<uid>` |
 | `ZEALPHP_SUPERGLOBALS` | start in superglobals mode (`App::superglobals`) | `false` |
 | `ZEALPHP_PROCESS_ISOLATION` | toggle `App::processIsolation()` | follows mode |
 | `ZEALPHP_ENABLE_COROUTINE` | toggle `App::enableCoroutine()` | follows mode |
