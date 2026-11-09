@@ -166,22 +166,10 @@ $app->route('/api/learn/demo/check', ['methods' => ['POST']], function () {
     $answer  = trim((string) ($g->post['answer'] ?? ''));
     $correct = trim((string) ($g->post['correct'] ?? ''));
     $explain = trim((string) ($g->post['explain'] ?? ''));
-    $isRight = $answer === $correct;
-    // Allow a tiny tag whitelist so lesson authors can put <code>, <em>,
-    // <strong> in the explanation text. The value round-trips through a
-    // form hidden input (browser decodes once before submit), so the
-    // raw payload here is what the lesson author wrote — OR what a
-    // malicious client crafted in a hand-rolled POST. strip_tags
-    // filters tags but does NOT filter attributes, so we deliberately
-    // exclude <a> (would allow href="javascript:…") and any tag with
-    // an event-handler attribute surface. <code>/<em>/<strong>/<br>
-    // are inert — no attributes worth abusing — so they're safe to allow.
-    $safe = strip_tags($explain, '<code><em><strong><br>');
     header('Content-Type: text/html; charset=utf-8');
-    return App::component('callout', [
-        'variant' => $isRight ? 'success' : 'warn',
-        'title'   => $isRight ? 'Correct!' : 'Not quite',
-        'body'    => '<p>' . $safe . '</p>',
+    return App::component('concept_check_result', [
+        'correct' => $answer === $correct,
+        'explain' => Demo::concept_check_explanation($explain),
     ]);
 });
 
@@ -222,34 +210,9 @@ $app->route('/api/learn/demo/session-bump', ['methods' => ['POST']], function ()
 // Standalone popup-friendly viewer — open in N windows to see cross-tab sync.
 $app->route('/demo/view/sessions/counter', ['methods' => ['GET']], function () {
     $g = G::instance();
-    $n = (int) ($g->session['lesson_counter'] ?? 0);
-    return DemoHelpers::demo_render(
-        'Session-counter cross-tab demo',
-        'Click <strong>+1</strong>. Open this URL in a second window — both update live via a WebSocket broadcast scoped to your <code class="demo-inline">PHPSESSID</code>. Foundations &rarr; <a href="/learn/sessions">Sessions</a> explains the mechanism.',
-        [
-            ['heading' => 'Live counter', 'body' =>
-                '<div style="text-align:center;padding:1.25rem 0">' .
-                App::component('/learn/sessions/components/session_counter', ['n' => $n]) .
-                '<div data-session-counter-status class="ws-counter-status" style="margin-top:.85rem">starting…</div>' .
-                '</div>'
-            ],
-            ['heading' => 'How it works', 'body' =>
-                '<pre class="demo-payload">// Client
-const ws = new WebSocket(proto + \'//\' + host + \'/ws/session-counter\');
-ws.onmessage = e =&gt; document.getElementById(\'session-counter-btn\')
-                       ?.outerHTML = e.data;
-
-// Server (excerpt — route/learn.php)
-use ZealPHP\\Learn\\Demo;   // broadcast helper lives in a src/ class
-
-$app-&gt;route(\'/api/learn/demo/session-bump\', ...
-    $html = (string) App::component(\'session_counter\', [\'n\' =&gt; $n]);
-    Demo::ws_session_counter_broadcast($sid, $html);
-    return $html;   // for the clicking tab&rsquo;s htmx swap
-);</pre>'],
-        ],
-        'learn/sessions', 'Sessions'
-    );
+    return DemoHelpers::demo_render('Session-counter cross-tab demo', App::component('/demos/view/sessions/counter', [
+        'n' => (int) ($g->session['lesson_counter'] ?? 0),
+    ]), 'learn/sessions', 'Sessions');
 });
 
 // ── Public WebSocket Store demo (for /demo/view/store/incr + set-get) ──
@@ -529,9 +492,14 @@ $app->ws('/ws/tictactoe',
 
 $app->route('/api/learn/demo/greeting', ['methods' => ['GET']], function () {
     $g = G::instance();
-    $name = htmlspecialchars(trim((string) ($g->get['name'] ?? 'World')));
     header('Content-Type: text/html; charset=utf-8');
-    return Demo::learn_demo_shell('Greeting Demo', '<h2>Hello, ' . $name . '!</h2><p>This page was rendered by ZealPHP at ' . date('H:i:s') . '.</p>');
+    return App::component('/demos/components/learn_shell', [
+        'title' => 'Greeting Demo',
+        'slot'  => App::component('/demos/learn/greeting', [
+            'name' => trim((string) ($g->get['name'] ?? 'World')),
+            'time' => date('H:i:s'),
+        ]),
+    ]);
 });
 
 // ── Render method demos (Lesson 4) ──────────────────────────────────
@@ -562,7 +530,8 @@ $app->route('/api/learn/demo/timing', ['methods' => ['GET']], function () {
     return ['mode' => $mode, 'elapsed_ms' => $elapsed];
 });
 
-// learn_demo_shell() lives on ZealPHP\Learn\Demo (src/Learn/Demo.php).
+// The render-method demos linked from /learn/components. Their pages are
+// in template/demos/learn/ and template/demos/components/.
 
 $app->route('/api/learn/demo/render', ['methods' => ['GET']], function () {
     header('Content-Type: text/html; charset=utf-8');
@@ -570,52 +539,39 @@ $app->route('/api/learn/demo/render', ['methods' => ['GET']], function () {
     // render() renders the page the route returns; component() renders the
     // clock card that goes inside it.
     return App::render('/components/_demo_shell', [
-        'title'       => 'App::render() demo',
-        'description' => 'The route returns <code>App::render()</code>, so the rendered template is the response.',
-        'sections'    => [[
-            'heading' => 'One-shot render',
-            'body'    => (string) App::component('demo_clock', ['label' => 'render() — the response', 'now' => microtime(true)]),
-        ]],
-        'back_slug'   => 'learn/components',
-        'back_label'  => 'Components',
+        'title'      => 'App::render() demo',
+        'slot'       => App::component('/demos/learn/render', [
+            'clock' => App::component('/demos/components/clock', ['label' => 'render() — the response', 'now' => microtime(true)]),
+        ]),
+        'back_slug'  => 'learn/components',
+        'back_label' => 'Components',
     ]);
 });
 
 $app->route('/api/learn/demo/render-to-string', ['methods' => ['GET']], function () {
     header('Content-Type: text/html; charset=utf-8');
     header('X-Render-Method: App::component');
-    $card = App::component('demo_clock', [
+    $card = App::component('/demos/components/clock', [
         'label' => 'component() — composed',
         'now'   => microtime(true),
     ]);
-    return Demo::learn_demo_shell('App::component() demo', '<section class="render-demo"><h4>Composed wrapper</h4>' . $card . '</section>');
+    return App::component('/demos/components/learn_shell', [
+        'title' => 'App::component() demo',
+        'slot'  => App::component('/demos/learn/render-to-string', ['card' => $card]),
+    ]);
 });
 
 $app->route('/api/learn/demo/render-stream', ['methods' => ['GET']], function () {
     header('Content-Type: text/html; charset=utf-8');
     header('X-Render-Method: App::render(stream: true)');
-    return (function () {
-        yield <<<HTML
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>App::render(stream: true) demo · ZealPHP Learn</title>
-  <link rel="stylesheet" href="/css/learn.css">
-  <style>body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1c1917; } nav { margin-bottom: 1rem; font-size: .85rem; } nav a { color: #f59e0b; text-decoration: none; margin-right: 1rem; }</style>
-</head>
-<body>
-  <nav><a href="/learn/components">← Back to Lesson 4</a> · <strong>App::render(stream: true) demo</strong> · streaming 12 rows over ~1.8s</nav>
-  <section class="render-demo"><h4>Streamed rows</h4>
-HTML;
+    $rows = (function () {
         for ($i = 1; $i <= 12; $i++) {
             usleep(150000);
-            yield from App::render('/components/_demo_clock', [
+            yield from App::render('/demos/components/clock', [
                 'label' => "render(stream: true) — row {$i}/12",
                 'now'   => microtime(true),
             ], stream: true);
         }
-        yield "</section></body></html>";
     })();
+    return App::render('/demos/learn/render-stream', ['rows' => $rows], stream: true);
 });

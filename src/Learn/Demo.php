@@ -87,24 +87,18 @@ class Demo
         }
     }
 
-    public static function learn_demo_shell(string $title, string $body): string
+    /**
+     * A concept check's explanation, reduced to inert tags. The value
+     * round-trips through a form hidden input (browser decodes once before
+     * submit), so the raw payload is what the lesson author wrote — OR what
+     * a malicious client crafted in a hand-rolled POST. strip_tags filters
+     * tags but does NOT filter attributes, so <a> (would allow
+     * href="javascript:…") and any tag with an event-handler attribute
+     * surface are excluded. <code>/<em>/<strong>/<br> are inert — no
+     * attributes worth abusing — so they're safe to allow.
+     */
+    public static function concept_check_explanation(string $explain): string
     {
-        $titleHtml = htmlspecialchars($title);
-        return <<<HTML
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{$titleHtml} · ZealPHP Learn</title>
-  <link rel="stylesheet" href="/css/learn.css">
-  <style>body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1c1917; } nav { margin-bottom: 1rem; font-size: .85rem; } nav a { color: #f59e0b; text-decoration: none; margin-right: 1rem; }</style>
-</head>
-<body>
-  <nav><a href="/learn/components">← Back to Lesson 4</a> · <strong>{$titleHtml}</strong></nav>
-  {$body}
-</body>
-</html>
-HTML;
+        return strip_tags($explain, '<code><em><strong><br>');
     }
 }

@@ -28,3 +28,16 @@ body.demo-shell-body { max-width: 760px; margin: 0 auto; padding: 1.25rem 1rem 4
     font-family: var(--font, ui-sans-serif, system-ui); font-size: inherit;
 }
 .inject-case:has(.ttt, .notes-app, .chat, .demo-login-wrap, .ws-counter-card) { border: none; border-radius: 0; }
+/* Demo-viewer bodies (template/demos/view/*) — moved here from style=
+   attributes the route file used to build. Selectors are specific enough
+   to beat learn.css's pre.demo-payload / .ws-counter-status defaults, as
+   the inline styles did. */
+.demo-output p.demo-note { margin: .85rem 0 0; color: #57534e; font-size: .85rem; }
+.demo-output p.demo-hint { margin: .6rem 0 0; font-size: .85rem; color: #78716c; }
+.demo-output p.demo-flush { margin: 0; }
+pre.demo-payload.demo-payload-gap { margin-top: .6rem; }
+.ws-counter-status.demo-status-gap { margin-top: .65rem; }
+form.demo-store-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: .6rem; align-items: end; padding: .4rem 0; }
+.demo-store-form label { font-size: .85rem; color: #57534e; }
+.demo-store-form input { display: block; margin-top: .2rem; width: 100%; padding: .45rem .6rem; border: 1px solid #d6d3d1; border-radius: 6px; }
+.demo-store-form .btn { padding: .55rem 1rem; }

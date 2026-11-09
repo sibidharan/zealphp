@@ -1,19 +1,18 @@
 <?php
 /**
- * Standalone demo viewer shell. Mirrors the clean look of
- * Demo::learn_demo_shell() in src/Learn/Demo.php — site CSS, slim breadcrumb,
- * focused content area, no big top-nav. Open in new tab/popup.
+ * Standalone demo viewer shell. Mirrors the clean look of the
+ * /api/learn/demo/* pages (template/demos/components/learn_shell.php) —
+ * site CSS, slim breadcrumb, focused content area, no big top-nav. Open in
+ * new tab/popup.
  *
  * Expects:
  *   $title       — page heading
- *   $description — HTML string (can include <code>)
- *   $sections    — array of ['heading' => string, 'body' => string]
+ *   $slot        — the page body: a view from template/demos/ (its
+ *                  description paragraph and demo sections), as SafeHtml
  *   $back_slug   — lesson slug for the back-link (e.g. 'learn/sessions')
  *   $back_label  — human-readable lesson name
  */
 $title       ??= 'Demo';
-$description ??= '';
-$sections    ??= [];
 $back_slug   ??= 'learn';
 $back_label  ??= 'Learn';
 $v           = defined('ZEALPHP_ASSET_VERSION') ? ZEALPHP_ASSET_VERSION : (string)time();
@@ -60,19 +59,6 @@ $titleHtml   = htmlspecialchars($title);
   </nav>
 
   <h1 class="demo-shell-title"><?= $titleHtml ?></h1>
-  <?php if ($description !== ''): ?>
-    <p class="demo-shell-desc"><?= $description ?></p>
-  <?php endif; ?>
-
-  <?php foreach ($sections as $sec): ?>
-    <h2 class="demo-shell-h"><?= htmlspecialchars($sec['heading'] ?? '') ?></h2>
-    <div class="inject-case">
-      <div class="inject-case-body inject-case-body--solo">
-        <div class="demo-output">
-          <?= $sec['body'] ?? '' ?>
-        </div>
-      </div>
-    </div>
-  <?php endforeach; ?>
+  <?= $slot ?? '' ?>
 </body>
 </html>

@@ -1,0 +1,4 @@
+/* learn-demo-shell.css — the minimal page around the /api/learn/demo/*
+   pages (greeting, render demos): template/demos/components/learn_head.php.
+   Moved verbatim from the <style> block that page used to inline. */
+body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1c1917; } nav { margin-bottom: 1rem; font-size: .85rem; } nav a { color: #f59e0b; text-decoration: none; margin-right: 1rem; }
