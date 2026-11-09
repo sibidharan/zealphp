@@ -690,7 +690,21 @@ try {
 } catch (\Throwable $__z_err) {
     $__z_status = 500;
     // Details to the server log; to the client only with display_errors on.
-    \ZealPHP\CGI\SubprocessError::log($__z_err, 'cgi_worker');
+    // This worker runs without the autoloader by default (fast spawn for
+    // legacy apps), so load the dependency-free helper by path on this path.
+    if (!class_exists(\ZealPHP\CGI\SubprocessError::class)) {
+        require __DIR__ . '/CGI/SubprocessError.php';
+    }
+    if ($__z_meta_fd !== null) {
+        \ZealPHP\CGI\SubprocessError::log($__z_err, 'cgi_worker');
+    } else {
+        // Without a metadata fd the metadata frame is stderr's first line:
+        // log after it (shutdown functions run in registration order, after
+        // the one that sends it).
+        register_shutdown_function(static function () use ($__z_err): void {
+            \ZealPHP\CGI\SubprocessError::log($__z_err, 'cgi_worker');
+        });
+    }
     echo '<pre>' . htmlspecialchars(\ZealPHP\CGI\SubprocessError::body($__z_err, \ZealPHP\CGI\SubprocessError::displayRequested($__z_ctx ?? null))) . '</pre>';
 }
 

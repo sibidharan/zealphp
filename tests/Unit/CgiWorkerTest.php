@@ -543,7 +543,13 @@ PHP);
 
         $meta = $this->parseMeta($r['stderr']);
         $this->assertSame(500, $meta['status_code'], 'uncaught throwable → 500');
-        $this->assertStringContainsString('boom', $r['stdout'], 'error message rendered in body');
+        // D-4: the message and trace go to the log (stderr, after the
+        // metadata line), not to the client.
+        $this->assertSame('<pre>500 Internal Server Error</pre>', $r['stdout']);
+        $this->assertStringContainsString('[cgi_worker] RuntimeException: boom', $r['stderr']);
+
+        $shown = $this->runSubprocess($f, ['display_errors' => true]);
+        $this->assertStringContainsString('RuntimeException: boom', $shown['stdout'], 'details with display_errors');
     }
 
     public function testSubprocessFlushStreamsMetadataBeforeBody(): void
