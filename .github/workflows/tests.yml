@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # These jobs run the PR's code; keep the token out of .git/config.
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
@@ -59,6 +62,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # These jobs run the PR's code; keep the token out of .git/config.
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
@@ -150,6 +156,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # These jobs run the PR's code; keep the token out of .git/config.
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
@@ -168,9 +177,13 @@ jobs:
           echo "openswoole missing — building from source"
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev libc-ares-dev
+          # Pinned tag + commit (same source as setup.sh), never a moving branch.
+          OPENSWOOLE_REF=v26.2.0
+          OPENSWOOLE_SHA=25daa6c02cd183cc576ab99e83a5f3682d1da682
           tmpdir=$(mktemp -d)
-          git clone --depth 1 https://github.com/openswoole/openswoole.git "$tmpdir"
+          git clone --depth 1 --branch "$OPENSWOOLE_REF" https://github.com/openswoole/ext-openswoole.git "$tmpdir"
           cd "$tmpdir"
+          test "$(git rev-parse 'HEAD^{commit}')" = "$OPENSWOOLE_SHA" || { echo "::error::openswoole $OPENSWOOLE_REF is not $OPENSWOOLE_SHA"; exit 1; }
           phpize
           ./configure --enable-openssl --enable-hook-curl --enable-http2 --enable-mysqlnd --enable-sockets
           make -j"$(nproc)"
@@ -181,8 +194,10 @@ jobs:
 
       - name: Build and install ext-zealphp
         run: |
-          # Use the pinned submodule to avoid version mismatch (#140)
-          git submodule update --init ext/zealphp 2>/dev/null || git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git ext/zealphp
+          # Build exactly the commit the ext/zealphp submodule pins (#140). No
+          # fallback to cloning the default branch: that would build whatever
+          # the branch points at today instead of the reviewed commit.
+          git submodule update --init ext/zealphp
           cd ext/zealphp
           phpize
           ./configure --enable-zealphp
