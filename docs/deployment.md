@@ -239,15 +239,17 @@ needed.
 docker build -t zealphp:0.4.19 .
 ```
 
-The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
-ext-zealphp compiled via `setup.sh --docker`. uopz is optional — `setup.sh`
-falls back to it only when the ext-zealphp build fails. Pin extension
-versions with the build args:
+The shipped `Dockerfile` is PHP-cli on `bookworm` with OpenSwoole and
+ext-zealphp (required) compiled via `setup.sh --docker`; the default
+ext-zealphp tag is checked against its pinned commit before it is built. The
+server runs as the unprivileged `zealphp` user (uid 10001) on port 8080. Pin
+extension versions with the build args (an overridden ext-zealphp tag is not
+commit-checked):
 
 ```bash
 docker build \
-    --build-arg OPENSWOOLE_VERSION=22.1.2 \
-    --build-arg ZEALPHP_EXT_VERSION=v0.3.33 \
+    --build-arg OPENSWOOLE_VERSION=26.2.0 \
+    --build-arg ZEALPHP_EXT_VERSION=v0.4.1 \
     -t zealphp:0.4.19 .
 ```
 

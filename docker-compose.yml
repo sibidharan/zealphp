@@ -15,6 +15,10 @@ services:
     build:
       context: .
     image: zealphp:local
+    # Local benchmark tooling: writes results into the ./bench/results bind
+    # mount, which is owned by the host user, so it runs as root. The `app`
+    # service keeps the image's unprivileged `zealphp` user.
+    user: root
     command:
       - ./scripts/bench.sh
       - --workers
@@ -33,6 +37,10 @@ services:
     build:
       context: .
     image: zealphp:local
+    # Local benchmark tooling: writes results into the ./bench/results bind
+    # mount, which is owned by the host user, so it runs as root. The `app`
+    # service keeps the image's unprivileged `zealphp` user.
+    user: root
     cpus: 4.0
     command:
       - ./scripts/bench_compare.sh
