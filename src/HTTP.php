@@ -166,7 +166,7 @@ final class HTTP
 
         try {
             $client = new \OpenSwoole\Coroutine\Http\Client($host, $port, $tls);
-            $client->set(['timeout' => $timeout]);
+            $client->set(['timeout' => $timeout] + ($tls ? self::tlsOptions($host) : []));
             $client->setMethod(strtoupper($method));
             if ($finalHeaders !== []) { $client->setHeaders($finalHeaders); }
             if ($bodyStr !== '')      { $client->setData($bodyStr); }
@@ -226,6 +226,18 @@ final class HTTP
             if (strtolower($k) === $lower) { return true; }
         }
         return false;
+    }
+
+    /**
+     * TLS settings for OpenSwoole's coroutine HTTP client. It does not verify
+     * the server's certificate unless told to, so any certificate (self-signed,
+     * expired, another host's) was accepted. The system CA store is used.
+     *
+     * @return array{ssl_verify_peer: true, ssl_allow_self_signed: false, ssl_host_name: string}
+     */
+    public static function tlsOptions(string $host): array
+    {
+        return ['ssl_verify_peer' => true, 'ssl_allow_self_signed' => false, 'ssl_host_name' => $host];
     }
 
     /**

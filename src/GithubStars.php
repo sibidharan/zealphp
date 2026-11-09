@@ -121,7 +121,7 @@ final class GithubStars
             'User-Agent' => 'ZealPHP',
             'Accept'     => 'application/vnd.github+json',
         ]);
-        $client->set(['timeout' => self::FETCH_TIMEOUT]);
+        $client->set(['timeout' => self::FETCH_TIMEOUT] + HTTP::tlsOptions('api.github.com'));
         $client->get('/repos/' . $repo);
 
         $status = is_int($client->statusCode) ? $client->statusCode : 0;
