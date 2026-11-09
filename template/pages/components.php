@@ -12,11 +12,12 @@ $live = Registry::byClass(LikeCounter::class) !== null;
 <p class="section-desc">Build pages from components: plain PHP templates that take props, and — when you need interactivity — PHP classes that keep state, run actions and bind form inputs. The server renders HTML; the browser swaps it in. No client-side framework, no JSON API to keep in sync, and pages still work with JavaScript turned off.</p>
 
 <div class="callout info">
-  <p>One call renders both kinds: <code>App::component('card', $props)</code>. A name registered with <code>App::components()</code> is a <strong>reactive</strong> component; any other name renders a <strong>stateless</strong> template from <code>template/components/</code>. The full guide is <a href="/docs/guide/components"><code>docs/components.md</code></a>; <code>App::render()</code>, streaming and fragments are in the <a href="/templates">Templates &amp; Rendering reference</a>.</p>
+  <p>One call renders both kinds: <code>App::component('card', $props)</code>. A name registered with <code>App::components()</code> is a <strong>reactive</strong> component; any other name renders a <strong>stateless</strong> template, looked up from the page outward: the page's own <code>components/</code> folder first, <code>template/components/</code> last. The full guide is <a href="/docs/guide/components"><code>docs/components.md</code></a>; <code>App::render()</code>, streaming and fragments are in the <a href="/templates">Templates &amp; Rendering reference</a>.</p>
 </div>
 
 <h2 id="stateless" class="lc-mt-2">Stateless components</h2>
-<p>A template in <code>template/components/</code> that takes props. Like a React function component without hooks: same props in, same HTML out. Pass child markup as the <code>slot</code> prop.</p>
+<p>A template that takes props. Like a React function component without hooks: same props in, same HTML out. Pass child markup as the <code>slot</code> prop.</p>
+<p>Keep a component next to the page that uses it, in that page's <code>components/</code> folder (<code>template/invoices/components/card.php</code> for <code>public/invoices.php</code>). Move it to <code>template/components/</code> when another page needs it; the call doesn't change.</p>
 
 <div class="lc-demo-grid">
   <div class="lc-panel">
@@ -47,7 +48,7 @@ HTML]); ?>
 HTML]); ?>
   </div>
 </div>
-<p>The name resolves to <code>components/card.php</code>, then <code>components/_card.php</code>; use <code>'ui/button'</code> for folders. Stateless components can be used anywhere, including inside reactive ones.</p>
+<p>The name resolves like <code>App::render()</code>'s, nearest first: the page's folder, the page's <code>components/</code>, <code>template/</code>, then <code>template/components/</code>, with <code>card.php</code> before <code>_card.php</code> in each. A leading <code>/</code> is absolute from <code>template/</code>; use <code>'ui/button'</code> for folders. Stateless components can be used anywhere, including inside reactive ones.</p>
 
 <h2 id="reactive" class="lc-mt-2">Reactive components</h2>
 <p>A PHP class. Its public properties are its state, <code>#[Action]</code> methods are what buttons call, and <code>#[Model]</code> properties bind to form inputs. Every request builds a fresh instance from a signed snapshot in the page, so workers keep nothing between requests.</p>
