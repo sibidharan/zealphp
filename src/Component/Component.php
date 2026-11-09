@@ -157,9 +157,9 @@ abstract class Component
         $args = $vars + $this->state() + ['c' => $this, 'errors' => $this->zcErrors, 'slot' => $this->slot()];
         // Not a fragment selector: a component template is always rendered whole.
         unset($args['fragment']);
-        // Absolute from template/: a relative name would be namespaced by the
-        // current public file, so the page and the endpoint could pick
-        // different templates.
+        // Absolute from template/: a relative name resolves from the request's
+        // page, and the endpoint (/_zeal/c/...) has none, so the page and the
+        // endpoint could pick different templates.
         return App::component('/' . ltrim($template, '/'), $args);
     }
 

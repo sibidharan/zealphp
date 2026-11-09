@@ -8010,9 +8010,11 @@ class App
      * - `echo:` (default true) echoes a string result for `public/*.php`-style
      *   callers, and returns it either way; `echo: false` only returns.
      *
-     * Paths resolve under `template/`: a leading `/` is absolute; otherwise the
-     * current public file's name is tried as a folder first
-     * (`template/users/header.php` from `public/users.php`), then the top level.
+     * Paths resolve under `template/` by the rule shared with component()
+     * (templateCandidates()): a leading `/` is absolute; otherwise nearest
+     * first from the request's page — `template/users/header.php`,
+     * `template/users/components/header.php` (from `public/users.php`), then
+     * `template/header.php`, `template/components/header.php`.
      *
      * **Return contract:** see executeFile() — int / array / string / Generator /
      * Closure results flow to the caller, and a route returning them gets the

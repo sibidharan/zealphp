@@ -476,7 +476,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
 <section class="section home-section-return">
   <div class="container">
     <h2 class="section-title">Return anything, get the right response</h2>
-    <p class="section-desc">ZealPHP inspects your return type and does the right thing — no boilerplate. One contract for every entry point (route handler, public file, API closure, fallback, error handler, <code>App::render() / component() / include()</code>).</p>
+    <p class="section-desc">ZealPHP inspects your return type and does the right thing — no boilerplate. One contract for every entry point (route handler, public file, API closure, fallback, error handler, <code>App::render()</code>, <code>App::include()</code>); <code>App::component()</code> takes its content half, since a component is part of someone else&rsquo;s response.</p>
     <table class="ztable home-return-table">
       <tr><th class="home-return-col-return">Return</th><th class="home-return-col-result">Result</th><th>Example</th></tr>
       <tr><td><code>int</code></td><td>HTTP status code</td><td><code>return 404;</code> <code>return 201;</code></td></tr>
