@@ -75,6 +75,17 @@ class ComponentHelpersTest extends TestCase
         App::component('tag');
     }
 
+    public function testTagWithATrailingNewlineIsRefused(): void
+    {
+        $c = new class extends Component {
+            protected string $tag = "div\n";
+            public function render(): mixed { return ''; }
+        };
+        Registry::register($c::class, 'nltag');
+        $this->expectException(\LogicException::class);
+        App::component('nltag');
+    }
+
     public function testSubmitMustNameAnAction(): void
     {
         $c = new class extends Component {
@@ -249,6 +260,12 @@ class ComponentHelpersTest extends TestCase
         $this->assertSame('class="a b" disabled', Attr::render(Attr::merge(['class' => 'a'], ['class' => 'b', 'disabled' => true, 'x' => null, 'y' => false])));
         $this->expectException(\InvalidArgumentException::class);
         Attr::render(['on"click' => 'x']);
+    }
+
+    public function testAttrRefusesATrailingNewlineInTheName(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        Attr::render(["id\n" => 'x']);
     }
 
     public function testModelRejectsNegativeDebounce(): void

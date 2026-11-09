@@ -59,3 +59,4 @@
 .lc-success { color: var(--success); font-weight: 600; margin: 0 0 .75rem; }
 
 .zc-error { color: var(--danger); font-size: .85rem; }
+.lc-note { color: var(--text-muted); flex-basis: 100%; }

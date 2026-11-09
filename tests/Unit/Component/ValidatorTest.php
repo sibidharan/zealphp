@@ -76,6 +76,11 @@ class ValidatorTest extends TestCase
         yield 'accepted string true' => ['accepted', 'true', true];
         yield 'regex non-scalar' => ['regex:/a/', ['a'], false];
         yield 'email non-string' => ['email', 5, false];
+        // `$` alone matches before a trailing newline; the rules must not.
+        yield 'integer trailing newline' => ['integer', "5\n", false];
+        yield 'alpha trailing newline' => ['alpha', "abc\n", false];
+        yield 'alpha_num trailing newline' => ['alpha_num', "a1\n", false];
+        yield 'alpha_dash trailing newline' => ['alpha_dash', "a-b\n", false];
     }
 
     #[DataProvider('cases')]

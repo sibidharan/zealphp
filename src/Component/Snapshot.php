@@ -174,8 +174,8 @@ final class Snapshot
         return self::bindingFor($sid, AppKey::derive('component-session'));
     }
 
-    /** Whether a snapshot's binding is this session's, under the current or a previous key. */
-    private static function bindingMatches(string $binding): bool
+    /** Whether a binding is this session's, under the current or a previous key. */
+    public static function bindingMatches(string $binding): bool
     {
         $sid = self::sessionId();
         if ($sid === '') {
@@ -218,7 +218,7 @@ final class Snapshot
 
     private static function unb64(string $s): ?string
     {
-        if (preg_match('/^[A-Za-z0-9_-]+$/', $s) !== 1) {
+        if (preg_match('/^[A-Za-z0-9_-]+$/D', $s) !== 1) {
             return null;
         }
         $raw = base64_decode(strtr($s, '-_', '+/'), true);

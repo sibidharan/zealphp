@@ -193,7 +193,7 @@ final class Type
         $backing = (new \ReflectionEnum($enum))->getBackingType();
         if ($backing instanceof \ReflectionNamedType && $backing->getName() === 'int') {
             if (is_string($value)) {
-                if (preg_match('/^-?\d{1,18}$/', $value) !== 1) {
+                if (preg_match('/^-?\d{1,18}$/D', $value) !== 1) {
                     return null;
                 }
                 $value = (int) $value;

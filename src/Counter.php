@@ -78,8 +78,14 @@ class Counter
         // DON'T reset existing counters. Pre-N-1, this was force-set —
         // hidden footgun for callers building per-room / per-user
         // monotonic counters.
-        if ($name !== null || $initial !== 0) {
-            self::defaultBackend()->setIfAbsent($this->name, $initial);
+        //
+        // The Atomic backend is the exception: its shared-memory slot must
+        // be allocated here, at construction (normally in the master, before
+        // fork). Left to the first read, each worker would allocate its own
+        // Atomic after fork and the counter would silently be per-worker.
+        $backend = self::defaultBackend();
+        if ($name !== null || $initial !== 0 || $backend instanceof AtomicBackend) {
+            $backend->setIfAbsent($this->name, $initial);
         }
     }
 

@@ -61,6 +61,12 @@ class RegistryTest extends TestCase
         Registry::register(Counter::class, 'Bad_Name');
     }
 
+    public function testNamesWithATrailingNewlineAreRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        Registry::register(Counter::class, "counter\n");
+    }
+
     public function testMetaDescribesStateModelsAndActions(): void
     {
         $meta = Registry::register(Signup::class);

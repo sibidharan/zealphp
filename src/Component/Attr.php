@@ -23,7 +23,7 @@ final class Attr
     {
         $out = [];
         foreach ($attrs as $name => $value) {
-            if (preg_match('/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/', $name) !== 1) {
+            if (preg_match('/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/D', $name) !== 1) {
                 throw new \InvalidArgumentException("Invalid HTML attribute name: {$name}");
             }
             if ($value === null || $value === false) {
