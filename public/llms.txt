@@ -1,0 +1,65 @@
+# ZealPHP
+
+> A PHP web framework and application server built on OpenSwoole: file-based routing, PSR-15 middleware, streaming SSR, WebSocket/SSE, server-driven reactive components, shared memory and task workers in one `php app.php` process. Coroutine mode by default; legacy request-style PHP runs through compatibility modes.
+
+Generated from the docs by scripts/build-agent-reference.php. Install: `composer create-project zealphp/project my-app`.
+
+## Rules for AI assistants
+
+Follow these when writing a ZealPHP app. They are the framework's structure, checked in its own test suite; don't put HTML in route files or build a whole page in one template.
+
+These are rules, not suggestions. The demo app follows them and `tests/Unit/ArchitectureRulesTest.php` enforces them, because both people and AI assistants copy what a codebase does more than what its docs say.
+
+```text
+app.php                                  bootstrap: config, middleware, run()
+public/invoices.php                      a page: App::render('invoices', $data)
+template/invoices/invoices.php           its template: lays the page out from components
+template/invoices/components/row.php     a component only this page uses
+template/components/card.php             a component several pages use
+route/invoices.php                       wiring: $app->route(...) → a src/ class → a response
+api/invoices/list.php                    wiring: one closure → a src/ class → data
+src/Billing/Invoices.php                 the logic
+```
+
+1. **Routes and APIs are wiring.** A handler reads its input, calls a `src/` class, and returns a status, data (an array becomes JSON), or `App::render()` / `App::component()`. No markup in `route/` or `api/`: no HTML strings, heredocs or echoed tags. An htmx endpoint returns a component, not a string it built.
+2. **Build pages from components.** A page template arranges components; any self-contained piece of UI (a card, a form, a list row, a widget, the fragment an endpoint returns) is a component with props, not markup copied between pages or a block inside a long page template.
+3. **Components live next to the page that uses them,** in its `components/` folder. Move one to `template/components/` when a second page needs it; the call doesn't change (names resolve nearest first). A route or API has no page, so it names a page's component in full: `App::component('/invoices/components/row', $props)`.
+4. **Templates are views.** No function or class declarations, no queries or business logic, no inline `<script>` or `style=` (JS in `public/js/`, CSS in `public/css/`).
+5. **Logic lives in `src/` classes**, autoloaded (PSR-4). No top-level functions in `route/`, `api/` or `template/`: they can't be re-declared, which also breaks [route hot-reload](https://php.zeal.ninja/docs/guide/hot-reload).
+6. **State that changes on the page is a reactive component** (`App::components()`), not markup a handler rebuilds by hand. See [Components](https://php.zeal.ninja/docs/guide/components).
+
+## Docs
+
+- [Getting Started](https://php.zeal.ninja/docs/guide/getting-started): This guide walks through setting up a workstation capable of running ZealPHP, verifying prerequisite extensions, creating a new project, and launching the OpenSwoole HTTP server.
+- [Directory Structure](https://php.zeal.ninja/docs/guide/directory-structure): ZealPHP projects follow a predictable layout so that the runtime can discover routes, APIs, templates, and task handlers without additional configuration.
+- [Routing](https://php.zeal.ninja/docs/guide/routing): ZealPHP blends implicit routing (public directory and APIs) with programmable routes that you can register from any PHP file.
+- [API Layer](https://php.zeal.ninja/docs/guide/api-layer): ZealPHP exposes a lightweight convention for building HTTP APIs while preserving the familiar ergonomics of file-based PHP.
+- [Error Handling](https://php.zeal.ninja/docs/guide/error-handling): ZealPHP provides three layers of error-handling parity with Apache+mod_php:
+- [Templates and Rendering](https://php.zeal.ninja/docs/guide/templates-and-rendering): ZealPHP renders HTML on the server with plain PHP — no Blade, no Twig, no compile step.
+- [Components](https://php.zeal.ninja/docs/guide/components): ZealPHP builds pages from components, and one call renders both kinds:
+- [Streaming](https://php.zeal.ninja/docs/guide/streaming): ZealPHP supports four streaming patterns.
+- [WebSocket](https://php.zeal.ninja/docs/guide/websocket): ZealPHP exposes WebSocket via `App::ws()`, built on OpenSwoole's WebSocket server.
+- [Middleware and Authentication](https://php.zeal.ninja/docs/guide/middleware-and-authentication): Middleware is the preferred way to enforce cross-cutting policies in ZealPHP.
+- [Tasks and Concurrency](https://php.zeal.ninja/docs/guide/tasks-and-concurrency): ZealPHP embraces OpenSwoole’s asynchronous primitives to help you build responsive applications that scale across CPU cores.
+- [Running modern PHP apps on ZealPHP](https://php.zeal.ninja/docs/guide/running-modern-apps): Practical config recipes from the 50-app coroutine-legacy sweep.
+- [Compatibility Database](https://php.zeal.ninja/docs/guide/compatibility-database): How 50 popular PHP apps run on ZealPHP across **all four runtime modes**, with **`coroutine-legacy`** — the headline mode for legacy apps ("old PHP just works, concurrently") — the column to read first.
+- [Runtime Architecture](https://php.zeal.ninja/docs/guide/runtime-architecture): ZealPHP wraps OpenSwoole’s event-driven HTTP server with a framework that feels familiar to PHP developers while enabling coroutine-friendly patterns.
+- [FastCGI Backends](https://php.zeal.ninja/docs/guide/fastcgi-backends): ZealPHP can forward requests to any server that speaks the **FastCGI 1.0** protocol — php-fpm, HHVM, a Python/Ruby/Perl FastCGI daemon, or your own implementation — instead of running the target file in-process.
+- [Apache + mod_php Parity](https://github.com/sibidharan/zealphp/blob/master/docs/apache-parity.md): ZealPHP targets verbatim Apache+mod_php behavior so that unmodified legacy applications (WordPress, Drupal, classic PHP) run unchanged.
+- [Dev route hot-reload](https://php.zeal.ninja/docs/guide/hot-reload): Reload `route/*.php` edits **without restarting** the OpenSwoole worker process — "save the file, refresh the page, see the new route."
+- [Environment Variables](https://php.zeal.ninja/docs/guide/environment-variables): This is the canonical reference for every `ZEALPHP_*` environment variable read by the framework.
+- [CLI reference](https://php.zeal.ninja/docs/guide/cli): ZealPHP's server is driven by `php app.php`.
+- [Deploying ZealPHP](https://php.zeal.ninja/docs/guide/deployment): ZealPHP is a long-lived OpenSwoole server process.
+- [WSRouter — Production Hardening Guide](https://php.zeal.ninja/docs/guide/WSROUTER-PRODUCTION): Everything you need to know before pointing `WSRouter` at real traffic.
+- [Competitive Analysis: PHP Async Landscape](https://php.zeal.ninja/docs/guide/competitive-analysis): This document compares ZealPHP with existing solutions for async/concurrent PHP.
+- [Coroutine-isolation security research](https://php.zeal.ninja/docs/guide/coroutine-isolation-security-research): A starting map for security researchers auditing ZealPHP's **per-coroutine request-state isolation** — the headline guarantee that lets traditional request-style PHP run under OpenSwoole coroutine co…
+- [Database connection pool — `ZealPHP\Db\DbConnectionPool`](https://github.com/sibidharan/zealphp/blob/master/docs/db-connection-pool.md): A coroutine-aware, connection-library-agnostic pool of SQL connections.
+- [HTTP fuzzing & robustness harness](https://php.zeal.ninja/docs/guide/fuzzing): ZealPHP's ethos is *proven, not claimed*.
+- [HTMX](https://php.zeal.ninja/docs/guide/htmx): ZealPHP treats [htmx](https://htmx.org) as a first-class citizen.
+- [The road to "old PHP just works"](https://php.zeal.ninja/docs/guide/just-works-roadmap): ZealPHP's coroutine-legacy mode is a **compatibility runtime**: traditional request-style PHP — written against the PHP-FPM "fresh state per request" mental model — runs *concurrently* under OpenSwoo…
+- [Scaling limits & sizing](https://github.com/sibidharan/zealphp/blob/master/docs/scaling-limits.md): The hard limits and sizing formulas you need when running ZealPHP at scale, from the 2026-06-03 scalability audit.
+- [Standards and Roadmap](https://php.zeal.ninja/docs/guide/standards-and-roadmap): ZealPHP positions itself as a modern PHP framework that blends the productivity of classic PHP with the scalability of OpenSwoole.
+
+## Optional
+
+- [Full reference](https://php.zeal.ninja/llms-full.txt): every guide above in one plain-text file
