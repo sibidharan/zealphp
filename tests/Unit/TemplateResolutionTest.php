@@ -40,6 +40,8 @@ class TemplateResolutionTest extends TestCase
     public static function lookups(): iterable
     {
         yield 'page folder first' => ['/users.php', 'row', 'page-folder row'];
+        yield "then the page's components" => ['/users.php', 'pill', 'page pill'];
+        yield 'shared components from another page' => ['/index.php', 'pill', 'shared pill'];
         yield 'then template/' => ['/index.php', 'row', 'top-level row'];
         yield 'then template/components/' => ['/index.php', 'card', '<article'];
         yield 'partial _name' => ['/index.php', 'note', 'top-level partial'];
@@ -69,7 +71,7 @@ class TemplateResolutionTest extends TestCase
             App::render('nope', [], echo: false);
             $this->fail('expected TemplateUnavailableException');
         } catch (\ZealPHP\TemplateUnavailableException $e) {
-            $this->assertStringContainsString('template/users/nope.php, template/users/_nope.php, template/nope.php, template/_nope.php, template/components/nope.php, template/components/_nope.php', $e->getMessage());
+            $this->assertStringContainsString('template/users/nope.php, template/users/_nope.php, template/users/components/nope.php, template/users/components/_nope.php, template/nope.php, template/_nope.php, template/components/nope.php, template/components/_nope.php', $e->getMessage());
         }
         $this->expectException(\LogicException::class);
         $this->expectExceptionMessage('template/components/_nope.php');

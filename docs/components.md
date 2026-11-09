@@ -7,7 +7,7 @@ ZealPHP builds pages from components, and one call renders both kinds:
 <?= App::component(Counter::class, ['count' => 5]) ?>     // reactive: state, actions, input binding
 ```
 
-- A **stateless component** is a template rendered with `App::component()`: props in, markup out — like a React function component without hooks. Names resolve like `render()`'s (page folder, `template/`, then `template/components/`; a leading `/` is absolute).
+- A **stateless component** is a template rendered with `App::component()`: props in, markup out — like a React function component without hooks. Names resolve like `render()`'s, nearest first: the page's folder, the page's `components/`, `template/`, then `template/components/` (a leading `/` is absolute).
 - A **reactive component** is a PHP class. Public properties are its **state**, `#[Action]` methods are what buttons **call**, and `#[Model]` properties **bind** to form inputs, with validation. The server owns the state and renders HTML; the browser swaps it in. There's no client-side framework and no JSON API to keep in sync, and pages still work with JavaScript turned off.
 
 Start stateless; make a component reactive when it needs to respond to the user. Live demo: [`/components`](/components). For `App::render()`, streaming and fragments, see [Templates and Rendering](templates-and-rendering.md).

@@ -119,7 +119,7 @@ PHP]); ?>
 <table class="ztable">
 <tr><th>Name</th><th>Looks in, in order</th></tr>
 <tr><td><code>'/emails/welcome'</code></td><td><code>template/emails/welcome.php</code> &mdash; a leading <code>/</code> is absolute from <code>template/</code></td></tr>
-<tr><td><code>'header'</code> from <code>public/users.php</code></td><td><code>template/users/header.php</code> (the page's folder), then <code>template/header.php</code>, then <code>template/components/header.php</code></td></tr>
+<tr><td><code>'header'</code> from <code>public/users.php</code></td><td>Nearest first: <code>template/users/header.php</code> (the page's folder), <code>template/users/components/header.php</code> (that page's components), <code>template/header.php</code>, <code>template/components/header.php</code></td></tr>
 </table>
 
 <h2 id="file-execution-family">The rendering methods — <code>render()</code> and <code>component()</code></h2>

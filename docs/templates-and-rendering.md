@@ -101,9 +101,9 @@ To compose templates, use `<?= App::component(...) ?>`, or call `App::render()` 
 | Name | Looks in, in order |
 |------|--------------------|
 | `'/emails/welcome'` | `template/emails/welcome.php` — a leading `/` is absolute from `template/` |
-| `'header'` from `public/users.php` | `template/users/header.php` (the current page's folder), then `template/header.php`, then `template/components/header.php` |
+| `'header'` from `public/users.php` | nearest first: `template/users/header.php` (the page's folder), `template/users/components/header.php` (that page's components), `template/header.php`, `template/components/header.php` |
 
-In each place `name.php` comes before the partial `_name.php`, and `'ui/button'` names a folder. A missing template's error lists every place it looked. A registered reactive component's name wins over templates in `component()`.
+Keep a component used by one page in that page's `components/` folder; move it to `template/components/` when another page needs it — no call changes. In each place `name.php` comes before the partial `_name.php`, and `'ui/button'` names a folder. A missing template's error lists every place it looked. A registered reactive component's name wins over templates in `component()`.
 
 ## `App::component()` — markup as a value
 

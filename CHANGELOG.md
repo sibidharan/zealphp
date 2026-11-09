@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file. The format 
 ## [Unreleased]
 
 ### Changed — one template rule for `render()` and `component()`
-- **`component()` resolves names exactly like `render()`.** One resolver serves both: a leading `/` is absolute from `template/`; otherwise the current page's folder, then `template/`, then `template/components/`, with `name.php` before the partial `_name.php` in each place. Existing `component('card')` calls resolve as before (`template/components/` is the last place looked). A missing template's error lists every place it looked.
+- **`component()` resolves names exactly like `render()`.** One resolver serves both: a leading `/` is absolute from `template/`; otherwise nearest first: the current page's folder, that page's `components/` folder (new: colocate a component with the one page that uses it), `template/`, then `template/components/`, with `name.php` before the partial `_name.php` in each place. Existing `component('card')` calls resolve as before (`template/components/` is the last place looked). A missing template's error lists every place it looked.
 - **A component returns content only, and says so.** Stateless templates and reactive `render()` share one coercion (`App::componentMarkup()`): echo, strings, `SafeHtml`/`Stringable`, Generators, and Closures (now called with their props injected — previously printed as `{}`). A status code, array or response object used to be printed into the page (`404`, `{"ok":true}`); it now throws a `LogicException` explaining that the route or page owning the response must return it.
 
 ### Added — components without htmx

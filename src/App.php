@@ -7710,8 +7710,10 @@ class App
      * `render()` and `component()`:
      *
      *   - `/emails/welcome`: absolute from `template/`;
-     *   - `header`: the current page's folder (`template/users/header` for
-     *     `public/users.php`), then `template/`, then `template/components/`.
+     *   - `header`: nearest first — the current page's folder
+     *     (`template/users/` for `public/users.php`), that page's components
+     *     (`template/users/components/`), then `template/`, then
+     *     `template/components/`.
      *
      * In each place `name.php` comes before the partial `_name.php`.
      *
@@ -7726,7 +7728,7 @@ class App
         $places = [''];
         if (!$absolute) {
             $page = self::getCurrentFile(null);
-            $places = $page !== '' ? [$page . '/', '', 'components/'] : ['', 'components/'];
+            $places = $page !== '' ? [$page . '/', $page . '/components/', '', 'components/'] : ['', 'components/'];
         }
         $candidates = [];
         foreach ($places as $place) {
