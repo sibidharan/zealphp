@@ -580,6 +580,9 @@ final class TableSessionHandler implements \SessionHandlerInterface
         $file = self::$savePath . '/sess_' . basename((string) $sessionId);
         $fp = @fopen($file, 'c+');
         if (!$fp) return false;
+        // 0600 before any data is written: 'c+' creates the file with the
+        // process umask (typically 0644, readable by other local users).
+        @chmod($file, 0600);
         try {
             if (!flock($fp, LOCK_EX)) return false;
             // #233 residual — read-merge-write under the lock. The Table path
