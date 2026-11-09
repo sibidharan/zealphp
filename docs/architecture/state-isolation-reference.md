@@ -58,18 +58,16 @@ App::functionIsolation(true);  // optional but recommended
 ### Mode 4 (Hybrid) — coroutines + superglobals + ext-zealphp isolation
 
 ```php
-App::superglobals(true);
-App::enableCoroutine(true);
-App::processIsolation(false);
-App::defineIsolation(true);
-App::coroutineGlobalsIsolation(true);  // Stage 2 COW
-App::functionIsolation(true);
+App::mode(App::MODE_COROUTINE_LEGACY);
+App::defineIsolation(true);   // optional: per-request define() constants
 ```
+
+Since v0.4.20 this mode is set through the preset. `superglobals(true)` with coroutines but without the preset's isolation stack (`silentRedeclare` + include/function isolation) is refused at boot: concurrent requests would share statics and globals.
 
 - **PHP analog:** none (novel — coroutine concurrency + traditional PHP semantics)
 - **Overhead:** 0 ms per request
 - **Concurrency:** full coroutine, hooked I/O yields
-- **Requires:** ext-zealphp v0.3.7+
+- **Requires:** ext-zealphp
 - **When to use:** modern apps wanting concurrency while keeping `$_GET`/`$_POST` semantics
 
 ### Mode 5 (Coroutine) — pure coroutine, no superglobals
@@ -459,9 +457,7 @@ The fix (FD-3 IPC + don't re-run leftover shutdown fns + ob_end_flush re-open) l
 │ Q: Is throughput critical AND code is coroutine-clean?          │
 │    (no top-level function/class declarations in includes)       │
 │ ─► YES: Mode 4 (Hybrid)                                          │
-│   App::superglobals(true);                                       │
-│   App::enableCoroutine(true);                                    │
-│   App::coroutineGlobalsIsolation(true);                          │
+│   App::mode(App::MODE_COROUTINE_LEGACY);                         │
 │   App::defineIsolation(true);                                    │
 └─────────────────────────────────────────────────────────────────┘
        ↓ NO

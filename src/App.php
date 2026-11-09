@@ -4840,6 +4840,20 @@ class App
                 . 'exposing process-wide superglobal mutations to other coroutines.'
             );
         }
+        // ext-zealphp isolates the superglobals per coroutine, but concurrent
+        // superglobals-mode requests also share statics and globals, and the
+        // per-request resets that clear those are only safe with the boot
+        // snapshot that exempts the framework's own statics. Both come from the
+        // coroutine-legacy stack; without it one request's state reached
+        // another's, and framework statics could read back empty mid-request.
+        if ($sg && ($enableCo || $hookFlags !== 0) && $hasZealphpExt && !self::perRequestStateResetsActive()) {
+            throw new \RuntimeException(
+                'ZealPHP lifecycle: App::superglobals(true) with coroutines (enableCoroutine or hookAll) '
+                . 'needs the coroutine-legacy isolation stack: use App::mode(App::MODE_COROUTINE_LEGACY). '
+                . 'Without it, concurrent requests share statics and globals. For sequential '
+                . 'superglobals mode use App::mode(App::MODE_MIXED) or App::mode(App::MODE_LEGACY_CGI).'
+            );
+        }
     }
 
     /**
@@ -10868,8 +10882,6 @@ class App
 
         if(App::$ignore_php_ext){
             $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
-                $app = App::instance();
-                assert($app !== null);
                 // Apache parity (#25): a `.php` file that exists on disk but is
                 // blocked from direct access is 403 Forbidden; a `.php` URL with
                 // no backing file is 404 Not Found — "doesn't exist" must not
@@ -10880,7 +10892,10 @@ class App
                 $docRoot = App::resolveDocumentRoot();
                 $abs = realpath($docRoot . '/' . ltrim($reqPath, '/'));
                 $exists = $abs !== false && is_file($abs) && str_starts_with($abs, $docRoot . '/');
-                return $app->renderError($exists ? 403 : 404);
+                $status = $exists ? 403 : 404;
+                // No assert(): compiled out in production, it let a null
+                // instance through to a fatal method call.
+                return App::instance()?->renderError($status) ?? $status;
             });
         }
 
@@ -10896,9 +10911,7 @@ class App
             $this->patternRoute('#(^|/)\.(?!well-known(?:/|$))[^/]*(/|$)#', [
                 'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD']
             ], function($response) {
-                $app = App::instance();
-                assert($app !== null);
-                return $app->renderError(403);
+                return App::instance()?->renderError(403) ?? 403;
             });
         }
         // $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
@@ -11572,7 +11585,10 @@ class App
                     // (Apache ErrorDocument equivalent) runs even at the top level.
                     try {
                         $app = App::instance();
-                        assert($app !== null);
+                        if ($app === null) {
+                            // The plain 500 in the catch below, not a fatal.
+                            throw new \RuntimeException('no App instance to render the error page');
+                        }
                         $errResp = $app->renderError(500, $e);
                         App::emitStatus($response->parent, $errResp->getStatusCode());
                         foreach ($errResp->getHeaders() as $name => $values) {
@@ -11789,9 +11805,8 @@ class App
                 \ZealPHP\elog('[security] WebSocket upgrade from foreign Origin ' . $wsOrigin . ' on ' . $path . ': session not loaded (see App::wsAllowedOrigins())', 'warn');
                 unset($wsCookies[$sessionName]);
             }
-            $app = App::instance();
-            assert($app !== null);
-            $route = $app->wsRoutes()[$path] ?? null;
+            // No instance reads as no route: the upgrade is refused below.
+            $route = App::instance()?->wsRoutes()[$path] ?? null;
             // No route, no session: an upgrade to an unregistered path must not
             // touch the store.
             if ($route === null) {
@@ -11855,9 +11870,7 @@ class App
             assert(is_int($fd));
             $path  = $wsFdMap[$fd] ?? null;
             $g     = RequestContext::instance();
-            $app = App::instance();
-            assert($app !== null);
-            $route = $path ? ($app->wsRoutes()[$path] ?? null) : null;
+            $route = $path ? (App::instance()?->wsRoutes()[$path] ?? null) : null;
             if ($route !== null) {
                 ($route['message'])($server, $frame, $g);
             }
@@ -11868,9 +11881,7 @@ class App
             $path  = $wsFdMap[$fd] ?? null;
             unset($wsFdMap[$fd]);
             $g     = RequestContext::instance();
-            $app = App::instance();
-            assert($app !== null);
-            $route = $path ? ($app->wsRoutes()[$path] ?? null) : null;
+            $route = $path ? (App::instance()?->wsRoutes()[$path] ?? null) : null;
             try {
                 if ($route !== null && $route['close'] !== null) {
                     ($route['close'])($server, $fd, $g);
