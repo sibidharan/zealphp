@@ -143,10 +143,26 @@ pid_is_ours() {
     pid_listens_on_port "$pid"
 }
 
+# True when $1 belongs to THIS app: its working directory is $ROOT_DIR, or its
+# command line runs this app's app.php by absolute path (a daemonized master
+# chdirs to /, so its cwd alone can't tell). A ZealPHP server from another app
+# directory on the same port is somebody else's server and must not be touched.
+pid_in_this_app() {
+    local pid="$1" root cwd app args
+    root="$(cd "$ROOT_DIR" && pwd -P)"
+    if [[ -e "/proc/$pid/cwd" ]]; then
+        cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+        [[ -n "$cwd" && "$cwd" == "$root" ]] && return 0
+    fi
+    app="$(cd "$(dirname "$APP_FILE")" 2>/dev/null && pwd -P)/$(basename "$APP_FILE")"
+    args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+    [[ " $args " == *" $app "* ]]
+}
+
 port_pid() {
     if have ss; then
         ss -Hltnp "sport = :$PORT" 2>/dev/null \
-            | awk -F 'pid=' '/users:\(\("php"/ { split($2, parts, ","); print parts[1]; exit }'
+            | awk -F 'pid=' '/users:\(\("php[0-9.]*"/ { split($2, parts, ","); print parts[1]; exit }'
         return 0
     fi
     if have lsof; then
@@ -176,10 +192,15 @@ server_pid() {
 
     pid="$(port_pid || true)"
     if [[ -n "$pid" ]] && pid_is_ours "$pid"; then
+        if ! pid_in_this_app "$pid"; then
+            echo "zealphp.sh: port $PORT is held by ZealPHP pid $pid from another app directory; not touching it" >&2
+            return 1
+        fi
         # The first listener found may be a worker: climb to the topmost
         # ancestor that is still our server.
         local ppid
-        while ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | trim)" && [[ -n "$ppid" ]] && pid_is_ours "$ppid"; do
+        while ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | trim)" && [[ -n "$ppid" ]] \
+            && pid_is_ours "$ppid" && pid_in_this_app "$ppid"; do
             pid="$ppid"
         done
         printf '%s' "$pid"
