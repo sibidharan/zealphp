@@ -1236,8 +1236,9 @@ function zeal_session_get_cookie_params(): array
  *
  * Accepts either the positional-args form (PHP < 8.0 style) or an options
  * array (PHP 8.0+ `session_set_cookie_params(array $options)` style). Both
- * are merged over the defaults `['lifetime'=>0, 'path'=>'/', 'domain'=>'',
- * 'secure'=>false, 'httponly'=>false, 'samesite'=>'Lax']`.
+ * are merged over the current params, or before any call over the defaults the
+ * session starts with: `['lifetime'=>0, 'path'=>'/', 'domain'=>'',
+ * 'secure'=>false, 'httponly'=>true, 'samesite'=>'Lax']`.
  *
  * @param int|array<string, mixed> $lifetime_or_options  Integer lifetime in seconds, or an options array.
  * @param string $path
@@ -1254,10 +1255,14 @@ function zeal_session_set_cookie_params($lifetime_or_options, $path = null, $dom
     // strip HttpOnly/Secure from the session cookie. The array form likewise
     // merges over the CURRENT params (native: keys absent from the array keep
     // their configured value), not over hardcoded defaults.
+    // Before any call, the "current" params are the ones the session starts
+    // with (HttpOnly on). Merging over httponly=false here made the first
+    // session_set_cookie_params(3600) drop HttpOnly, putting the session id
+    // within reach of page scripts.
     $current = $g->session_params['cookie_params'] ?? null;
     $base = array_merge([
         'lifetime' => 0, 'path' => '/', 'domain' => '',
-        'secure' => false, 'httponly' => false, 'samesite' => 'Lax',
+        'secure' => false, 'httponly' => true, 'samesite' => 'Lax',
     ], is_array($current) ? $current : []);
     if (is_array($lifetime_or_options)) {
         $g->session_params['cookie_params'] = array_merge($base, $lifetime_or_options);
