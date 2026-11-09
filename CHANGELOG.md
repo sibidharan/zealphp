@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Security
+- **Uploads no longer fill `/tmp`.** Every multipart request left its `swoole.upfile.*` temp files on disk for good: the request wrapper held OpenSwoole's `tmpfiles` list by reference, which hides it from OpenSwoole's cleanup, and a cycle between the request context and the response kept each request alive until PHP's cycle collector ran. Both fixed; temp files are deleted when the request ends.
+- **`compat/g.php` no longer hands one visitor's `$g` to the next.** Under ZealPHP the shim stored the first request's context in `$GLOBALS['g']`, which every later (and concurrent) request in the worker then read and wrote, session included. `$GLOBALS['g']` is now a proxy that resolves the current request on every access. If you keep a copy of the shim (the docs' `load.php` pattern, `examples/lamp-scaffold/bootstrap/g.php`), update it from `compat/g.php`.
+- **Superglobals with coroutines needs the coroutine-legacy stack.** With ext-zealphp, `superglobals(true)` plus `enableCoroutine(true)` or `hookAll()` was accepted by hand, but concurrent requests still shared statics and globals. `App::run()` now refuses it unless the isolation stack is on; use `App::mode(App::MODE_COROUTINE_LEGACY)`. Request paths that `assert()`ed an App instance (compiled out in production) now fall back cleanly.
+- **Test fixtures and query-driven Redis demos are off by default.** `route/_*.php` and `public/_contract_test/` load only with `ZEALPHP_TEST_ROUTES=1` (set it when running `tests/Integration/`); `/demo/pubsub/publish*` and `/demo/rooms/*` need `ZEALPHP_REDIS_DEMOS=1`, and publishing is limited to `demo:` channels.
+- **`/phpinfo` hides connection-string credentials:** `*_URL` / `*_URI` variables (other than the request's own) and the password in any `scheme://user:password@` value.
+- **CGI subprocess errors stay in the log.** Pool, proc and fork subprocesses sent stderr, exception messages and (proc) full stack traces to the client. The client now gets a plain status; details are logged, and shown only with `App::displayErrors()` on.
+- **`session_set_cookie_params()` no longer drops HttpOnly** on its first call.
+- **Outbound HTTPS verifies certificates.** `ZealPHP\HTTP` accepted self-signed, expired and wrong-host certificates (OpenSwoole's client doesn't verify by default).
+
 ## [0.4.19] - 2026-11-09
 
 ### Added — slots for reactive components (#509 phase 4)
