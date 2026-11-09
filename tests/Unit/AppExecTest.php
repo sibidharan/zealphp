@@ -131,9 +131,6 @@ final class AppExecTest extends TestCase
 
     public function testExecInCoroutineCapturesStdoutOnly(): void
     {
-        if (getenv('GITHUB_ACTIONS') === 'true') {
-            $this->markTestSkipped('TEMP: skipped in CI while ExecProbeTest finds the exit-143 trigger');
-        }
         // A CLI that logs to stderr and prints JSON on stdout (labsctl): the
         // log lines used to land in front of the JSON.
         $result = null;

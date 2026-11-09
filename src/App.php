@@ -3996,9 +3996,9 @@ class App
      * worker. Outside a coroutine (boot / CLI) it falls back to the blocking
      * `App::rawExec()` implementation. Either way the return shape is the same.
      *
-     * `output` is stdout only — stderr is not captured, as with PHP's own
-     * `shell_exec()` — so a tool's log lines can't corrupt the output it
-     * prints (e.g. JSON). Redirect explicitly (`2>&1`) to capture both.
+     * `output` is stdout only, so a tool's log lines can't corrupt the output
+     * it prints (e.g. JSON). In a coroutine the command's stderr is discarded;
+     * redirect explicitly (`2>&1`) to capture both.
      *
      * `$timeout` is enforced with coreutils `timeout`: the command is stopped
      * (SIGTERM, then SIGKILL a second later) and `code` is 124. OpenSwoole's
@@ -4016,13 +4016,13 @@ class App
         }
         if (\OpenSwoole\Coroutine::getCid() >= 0) {
             // Keep stderr out of the captured output (a CLI's DEBUG lines used to
-            // land in front of its JSON) by redirecting it in the shell, and let
-            // OpenSwoole's pipe carry stdout only. Not via get_error_stream=false:
-            // on OpenSwoole 25.2 that path takes the calling process group down
-            // (SIGTERM) when the command writes to stderr. The truthy argument has
-            // always been safe; the redirect sends stderr to this process's own
-            // stderr (the server log), as shell_exec() would.
-            $r = \OpenSwoole\Coroutine\System::exec(self::stderrToWorker($cmd), ...self::systemExecArgs());
+            // land in front of its JSON). The shell discards the command's stderr
+            // (stderrDiscarded()) and OpenSwoole's pipe carries stdout only. Two
+            // things that look simpler fail: get_error_stream=false, and sending
+            // stderr to this process's own stderr — on OpenSwoole 25.2 a child
+            // writing to the worker's inherited stderr took the whole process
+            // down (SIGTERM, exit 143, seen in CI).
+            $r = \OpenSwoole\Coroutine\System::exec(self::stderrDiscarded($cmd), ...self::systemExecArgs());
             if (is_array($r)) {
                 $output = $r['output'] ?? '';
                 $code = $r['code'] ?? 0;
@@ -4065,24 +4065,22 @@ class App
     private static ?bool $exec_second_is_timeout = null;
 
     /**
-     * Wrap a command so its stderr goes to this process's stderr (Linux
-     * `/proc/<pid>/fd/2`), or is discarded where that path doesn't exist.
+     * Wrap a command so its stderr is discarded unless it redirects it itself
+     * (`2>&1` still captures it).
      */
-    private static function stderrToWorker(string $cmd): string
+    private static function stderrDiscarded(string $cmd): string
     {
-        $own = '/proc/' . getmypid() . '/fd/2';
-        $target = file_exists($own) ? $own : '/dev/null';
-        // `exec 2>>…` re-points the shell's own stderr before the command runs,
-        // so the command's own redirects (`2>&1`, subshells) behave exactly as
-        // written. (A `{ …; } 2>>file` group doesn't: dash mishandles a
+        // `exec 2>/dev/null` re-points the shell's own stderr before the command
+        // runs, so the command's own redirects (`2>&1`, subshells) behave exactly
+        // as written. (A `{ …; } 2>file` group doesn't: dash mishandles a
         // subshell's `2>&1` inside one.)
-        return 'exec 2>>' . escapeshellarg($target) . "\n" . $cmd;
+        return "exec 2>/dev/null\n" . $cmd;
     }
 
     /**
      * Arguments after `$command` for `Coroutine\System::exec()`: no native
      * timeout (App::exec() enforces its own) and `get_error_stream` on — the
-     * command's stderr is already redirected by stderrToWorker(), so the pipe
+     * command's stderr is already discarded by stderrDiscarded(), so the pipe
      * carries stdout only.
      *
      * @return list<bool|int>
