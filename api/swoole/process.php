@@ -6,7 +6,9 @@ if (!\ZealPHP\env_flag('ZEALPHP_TEST_ROUTES', false)) {
 }
 use OpenSwoole\Process;
 use OpenSwoole\Coroutine as co;
+// A debug endpoint: the result is a plain-text dump.
 $process = function(){
+    header('Content-Type: text/plain');
     // Serialize the task logic as a string
     $taskLogic = function ($data, $worker) {
         echo "Processing data: $data\n";
@@ -38,9 +40,7 @@ $process = function(){
         for ($i = 0; $i < 5; $i++) {
             $results[] = $channel->pop();
         }
-        echo "<pre>";
         print_r($results);
-        echo "</pre>";
         $_SESSION['test'] = "test";
 
         $worker->exit(1);

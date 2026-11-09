@@ -8,7 +8,9 @@ use Swoole\Coroutine as co;
 use Swoole\Coroutine\Channel;
 use ZealPHP\G;
 use function ZealPHP\elog;
+// A debug endpoint: the result is a plain-text dump.
 $sessleak = function(){
+    header('Content-Type: text/plain');
     $channel = new Channel(5);
     $g = G::instance();
     $g->session['test'] = 'test';
@@ -100,9 +102,8 @@ $sessleak = function(){
         // elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
     for($i = 0; $i < 5; $i++) {
         $data = $channel->pop();
-        echo "<br>\n<pre>";
         print_r($data ?? "Session leak detected $_POST[name]");
         print_r($_POST);
-        echo "</pre>";
+        echo "\n";
     }
 };
