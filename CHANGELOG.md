@@ -13,6 +13,18 @@ All notable changes to this project will be documented in this file. The format 
 - **CGI subprocess errors stay in the log.** Pool, proc and fork subprocesses sent stderr, exception messages and (proc) full stack traces to the client. The client now gets a plain status; details are logged, and shown only with `App::displayErrors()` on.
 - **`session_set_cookie_params()` no longer drops HttpOnly** on its first call.
 - **Outbound HTTPS verifies certificates.** `ZealPHP\HTTP` accepted self-signed, expired and wrong-host certificates (OpenSwoole's client doesn't verify by default).
+- **Logs, PID files and sessions no longer live in a shared `/tmp/zealphp`.** Any local user could create that directory first and read or redirect them. The default is now a per-user directory (`$XDG_RUNTIME_DIR/zealphp`, else `/tmp/zealphp-<uid>`), used only if it is owned by you, is not a symlink and is not group/world-writable (created `0700`). `ZEALPHP_LOG_DIR` still overrides it. After upgrading, stop a running server with the old release (or by its pid), since the new release looks for the PID file in the new directory.
+- **`start` never kills anything, and `stop`/`restart` only signal your own server.** Starting used to kill an orphaned server holding the port; now it refuses with a message. A pid from a PID file is signalled only when it is owned by you, runs `php … app.php` and listens on that port, and only the master pid is signalled, never a process group. A stale PID file is removed; a foreign one is reported and left alone. The PID directory is created `0700` (it was made world-writable). `scripts/zealphp.sh` follows the same rules.
+- **`setup.sh` builds ext-zealphp v0.4.1 and checks the commit.** The source build checks out the tag and refuses to build unless it is the pinned commit. An overridden `ZEALPHP_EXT_VERSION` is built unverified unless `ZEALPHP_EXT_COMMIT` is also set.
+- **CI:** the mutation-testing job that runs pull-request code no longer has a write token (the badge update moved to a separate master-only job), checkouts don't store the token in `.git/config`, and CI builds OpenSwoole and ext-zealphp only from pinned commits.
+- **`App::clientIp()` only returns valid IP addresses.** A non-IP `X-Forwarded-For` hop or `X-Real-IP` value (markup, CR/LF, `unknown`, `host:port`) is never returned; the socket peer is used instead.
+- **Middleware sees the overridden method.** With `X-HTTP-Method-Override`, the PSR-7 request given to middleware now reports the same method (PUT/PATCH/DELETE) the router dispatches on, so a method-based middleware check can't be bypassed with POST + override.
+- **Session files are created `0600`** by `FileSessionHandler` and `TableSessionHandler`, regardless of the umask.
+- **`session_abort()` no longer writes the session.** It reloaded the data and left the session open, so the end of the request wrote it back, and with a session handler (Table, Redis, File handler) it wiped the stored session. It now ends the session without writing, as PHP does.
+- **Fork-mode CGI (`cgiMode('fork')`) keeps session changes.** The child exits with SIGKILL, which skipped PHP's session write, so changes were lost and the session file stayed locked until the child was reaped. The child now writes the session before sending its response.
+- **`elog()` escapes control characters**, so logged request data can't forge log records or send terminal escape sequences.
+- **The Docker image runs as an unprivileged `zealphp` user** (uid 10001) instead of root.
+- `SECURITY.md` now describes ext-zealphp's `zealphp_override()` as the override mechanism (uopz is only a fallback).
 
 ## [0.4.19] - 2026-11-09
 
