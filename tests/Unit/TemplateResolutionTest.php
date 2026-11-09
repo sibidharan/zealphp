@@ -64,6 +64,26 @@ class TemplateResolutionTest extends TestCase
         $this->assertSame($component, $render, 'one rule, one file');
     }
 
+    /** @return iterable<string, array{array<string, string>, string}> server vars, expected */
+    public static function pages(): iterable
+    {
+        yield 'a nested page uses its full path' => [['SCRIPT_NAME' => '/admin/users.php'], 'nested-page row'];
+        yield 'then its basename folder (compatibility)' => [['SCRIPT_NAME' => '/other/users.php'], 'page-folder row'];
+        yield 'PATH_INFO does not pick the folder' => [['SCRIPT_NAME' => '/index.php', 'PHP_SELF' => '/index.php/users', 'PATH_INFO' => '/users'], 'top-level row'];
+        yield 'PHP_SELF alone: PATH_INFO dropped' => [['PHP_SELF' => '/index.php/users', 'PATH_INFO' => '/users'], 'top-level row'];
+        yield 'SCRIPT_NAME wins over PHP_SELF' => [['SCRIPT_NAME' => '/admin/users.php', 'PHP_SELF' => '/index.php'], 'nested-page row'];
+        yield 'not a .php script: no page' => [['SCRIPT_NAME' => '/users'], 'top-level row'];
+        yield 'dot-dot: no page' => [['SCRIPT_NAME' => '/../users.php'], 'top-level row'];
+    }
+
+    /** @param array<string, string> $server */
+    #[DataProvider('pages')]
+    public function testThePageFolderComesFromTheScriptPath(array $server, string $expected): void
+    {
+        RequestContext::instance()->server = $server;
+        $this->assertStringContainsString($expected, (string) App::component('row'));
+    }
+
     public function testMissingTemplatesNameEveryPlaceLooked(): void
     {
         self::page('/users.php');

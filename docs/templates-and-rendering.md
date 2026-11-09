@@ -102,8 +102,9 @@ To compose templates, use `<?= App::component(...) ?>`, or call `App::render()` 
 |------|--------------------|
 | `'/emails/welcome'` | `template/emails/welcome.php` — a leading `/` is absolute from `template/` |
 | `'header'` from `public/users.php` | nearest first: `template/users/header.php` (the page's folder), `template/users/components/header.php` (that page's components), `template/header.php`, `template/components/header.php` |
+| `'header'` from `public/admin/users.php` | `template/admin/users/header.php`, `template/admin/users/components/header.php`, then (compatibility) `template/users/…`, then `template/header.php`, `template/components/header.php` |
 
-Keep a component used by one page in that page's `components/` folder; move it to `template/components/` when another page needs it — no call changes. In each place `name.php` comes before the partial `_name.php`, and `'ui/button'` names a folder. A missing template's error lists every place it looked. A registered reactive component's name wins over templates in `component()`.
+The page's folder is the public file's path under the document root, without `.php` (`public/admin/users.php` → `template/admin/users/`), taken from `SCRIPT_NAME`, so a request's `PATH_INFO` (`/users.php/x`) never changes where names resolve. Before v0.4.20 only the basename was used (`template/users/`); a nested page still looks there after its own folders. Keep a component used by one page in that page's `components/` folder; move it to `template/components/` when another page needs it — no call changes. In each place `name.php` comes before the partial `_name.php`, and `'ui/button'` names a folder. A missing template's error lists every place it looked. A registered reactive component's name wins over templates in `component()`.
 
 ## `App::component()` — markup as a value
 

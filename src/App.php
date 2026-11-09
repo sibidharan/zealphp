@@ -7756,6 +7756,35 @@ class App
     }
 
     /**
+     * The page whose template folder a relative name is looked up in: the
+     * public file's path under the document root without `.php`
+     * (`public/learn/notes.php` -> `learn/notes`), or '' outside one.
+     *
+     * Read from SCRIPT_NAME, which the server sets, not PHP_SELF, which ends in
+     * the client's PATH_INFO: `/notes.php/x` used to make the page `x`, letting
+     * the client pick the folder under template/ that names resolved from.
+     */
+    private static function currentPage(): string
+    {
+        $server = RequestContext::instance()->server;
+        $script = $server['SCRIPT_NAME'] ?? null;
+        if (!is_string($script) || $script === '') {
+            // No SCRIPT_NAME (a caller that set only PHP_SELF): drop PATH_INFO.
+            $self = $server['PHP_SELF'] ?? '';
+            $info = $server['PATH_INFO'] ?? '';
+            $script = is_string($self) ? $self : '';
+            if (is_string($info) && $info !== '' && str_ends_with($script, $info)) {
+                $script = substr($script, 0, -strlen($info));
+            }
+        }
+        if (!str_ends_with($script, '.php')) {
+            return '';
+        }
+        $page = trim(substr($script, 0, -4), '/');
+        return str_contains('/' . $page . '/', '/../') ? '' : $page;
+    }
+
+    /**
      * Where a template name can live, in lookup order — the one rule shared by
      * `render()` and `component()`:
      *
@@ -7777,8 +7806,19 @@ class App
         $names = [$rel, $sub . '_' . basename($rel)];
         $places = [''];
         if (!$absolute) {
-            $page = self::getCurrentFile(null);
-            $places = $page !== '' ? [$page . '/', $page . '/components/', '', 'components/'] : ['', 'components/'];
+            $places = ['', 'components/'];
+            $page = self::currentPage();
+            if ($page !== '') {
+                $own = [$page . '/', $page . '/components/'];
+                // Compatibility: before the full path, a nested page used its
+                // basename's folder (public/learn/notes.php -> template/notes/).
+                // Still looked in, after the page's own folders.
+                $base = basename($page);
+                if ($base !== $page) {
+                    array_push($own, $base . '/', $base . '/components/');
+                }
+                $places = array_merge($own, $places);
+            }
         }
         $candidates = [];
         foreach ($places as $place) {
