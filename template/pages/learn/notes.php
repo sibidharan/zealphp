@@ -326,7 +326,7 @@ if (msg.type === 'note_changed') {
         'body'    => '<p>Sign in at <a href="#step-auth">step 3</a> to render the widget here.</p>',
       ]); ?>
     <?php else: ?>
-      <?php App::render('/components/_notes_widget', ['user' => $user]); ?>
+      <?= App::component('/learn/notes/components/notes_widget', ['user' => $user]) ?>
       <a class="lesson-popout-cta" href="/demo/view/notes/widget" target="_blank" rel="noopener">
         Open this widget in a new tab ↗
       </a>

@@ -859,7 +859,7 @@ $app->route('/demo/view/notes/widget', ['methods' => ['GET']], function () {
         'Same <code class="demo-inline">_notes_widget</code> partial that renders inline in the <a href="/learn/notes">Personal Notes lesson</a> — here in its own shell so you can open multiple windows for cross-tab WebSocket sync testing.',
         [
             ['heading' => 'Live widget',
-             'body'    => (string) App::component('notes_widget', ['user' => $u])],
+             'body'    => (string) App::component('/learn/notes/components/notes_widget', ['user' => $u])],
         ],
         'learn/notes', 'Personal Notes'
     );
@@ -883,7 +883,7 @@ $app->route('/demo/view/chat/widget', ['methods' => ['GET']], function () {
         'Same <code class="demo-inline">_chat_widget</code> partial that renders inline in the <a href="/learn/ai-chat">AI Chat lesson</a>. Try a prompt like <em>"create a note titled shopping list"</em> and watch the Event Log below the chat for live <span class="proto-badge sse">SSE</span> + <span class="proto-badge ws">WS</span> events.',
         [
             ['heading' => 'Live widget',
-             'body'    => (string) App::component('chat_widget', ['user' => $u])],
+             'body'    => (string) App::component('/learn/ai-chat/components/chat_widget', ['user' => $u])],
         ],
         'learn/ai-chat', 'AI Chat'
     );
@@ -898,7 +898,7 @@ $app->route('/demo/view/websocket/counter', ['methods' => ['GET']], function () 
         'Click <strong>+1</strong>. Open this URL in a second window — both update live via a WebSocket broadcast to every connected client. <a href="/learn/websocket">Read the build</a>.',
         [
             ['heading' => '',
-             'body'    => (string) App::component('ws_counter_widget', ['as_demo' => true])],
+             'body'    => (string) App::component('/learn/websocket/components/ws_counter_widget', ['as_demo' => true])],
         ],
         'learn/websocket', 'Real-Time Sync'
     );
@@ -924,7 +924,7 @@ $app->route('/demo/view/tictactoe/play', ['methods' => ['GET']], function () {
         'Same room ID = same game. First two players take X and O; rest are viewers. <code class="demo-inline">?view=1</code> forces viewer. <a href="/learn/tictactoe">Read the build</a>.',
         [
             ['heading' => '',  // empty heading; demo-shell-h:empty hides it via CSS
-             'body'    => (string) App::component('tictactoe_widget', ['user' => $u])],
+             'body'    => (string) App::component('/learn/tictactoe/components/tictactoe_widget', ['user' => $u])],
         ],
         'learn/tictactoe', 'Tic-Tac-Toe'
     );
@@ -948,7 +948,7 @@ $app->route('/demo/view/chatroom/widget', ['methods' => ['GET']], function () {
         'Same <code class="demo-inline">_chatroom_widget</code> partial that renders inline in the <a href="/learn/chatroom">lesson</a>. SQLite-backed history persists across reloads; open in two tabs to chat with yourself. <a href="/learn/chatroom">Read the build</a>.',
         [
             ['heading' => '',
-             'body'    => (string) App::component('chatroom_widget', ['user' => $u])],
+             'body'    => (string) App::component('/learn/chatroom/components/chatroom_widget', ['user' => $u])],
         ],
         'learn/chatroom', 'Multi-Room Group Chat'
     );

@@ -210,7 +210,7 @@ $app->ws('/ws/session-counter',
 $app->route('/api/learn/demo/session-bump', ['methods' => ['POST']], function () {
     $g = G::instance();
     $g->session['lesson_counter'] = (int) ($g->session['lesson_counter'] ?? 0) + 1;
-    $html = (string) App::component('session_counter', [
+    $html = (string) App::component('/learn/sessions/components/session_counter', [
         'n' => (int) $g->session['lesson_counter'],
     ]);
     $sid = $g->cookie['PHPSESSID'] ?? '';
@@ -229,7 +229,7 @@ $app->route('/demo/view/sessions/counter', ['methods' => ['GET']], function () {
         [
             ['heading' => 'Live counter', 'body' =>
                 '<div style="text-align:center;padding:1.25rem 0">' .
-                App::component('session_counter', ['n' => $n]) .
+                App::component('/learn/sessions/components/session_counter', ['n' => $n]) .
                 '<div data-session-counter-status class="ws-counter-status" style="margin-top:.85rem">starting…</div>' .
                 '</div>'
             ],
@@ -540,7 +540,7 @@ $app->route('/api/learn/demo/incr', ['methods' => ['POST', 'GET']], function () 
     $g = G::instance();
     $g->session['demo_counter'] = (int) ($g->session['demo_counter'] ?? 0) + 1;
     header('Content-Type: text/html; charset=utf-8');
-    return App::component('counter_button', ['n' => $g->session['demo_counter']]);
+    return App::component('/learn/htmx/components/counter_button', ['n' => $g->session['demo_counter']]);
 });
 
 $app->route('/api/learn/demo/timing', ['methods' => ['GET']], function () {
