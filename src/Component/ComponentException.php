@@ -11,21 +11,25 @@ namespace ZealPHP\Component;
  */
 final class ComponentException extends \RuntimeException
 {
+    /** @internal */
     public static function badRequest(string $message): self
     {
         return new self($message, 400);
     }
 
+    /** @internal */
     public static function forbidden(string $message): self
     {
         return new self($message, 403);
     }
 
+    /** @internal */
     public static function notFound(string $message): self
     {
         return new self($message, 404);
     }
 
+    /** @internal */
     public static function stale(string $message): self
     {
         return new self($message, 409);

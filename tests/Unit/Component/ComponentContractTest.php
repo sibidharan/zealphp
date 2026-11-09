@@ -232,14 +232,63 @@ class ComponentContractTest extends TestCase
         $this->assertStringContainsString('9|checked||checked|checked||checked|||</div>', (string) App::component('cmp-c'), 'a false bool matches the false option (radio)');
     }
 
-    public function testValueEscapesByDefault(): void
+    public function testValueEscapes(): void
     {
         $c = new class extends Component {
             public string $t = '"<x>';
-            public function render(): mixed { return $this->value('t') . '#' . $this->value('t', false); }
+            public function render(): mixed { return $this->value('t'); }
         };
         Registry::register($c::class, 'esc-c');
-        $this->assertStringContainsString('&quot;&lt;x&gt;#"<x></div>', (string) App::component('esc-c'));
+        $this->assertStringContainsString('&quot;&lt;x&gt;</div>', (string) App::component('esc-c'));
+    }
+
+    public function testUnescapedValueIsDeprecated(): void
+    {
+        $c = new class extends Component {
+            public string $t = '"<x>';
+            public function render(): mixed { return '[' . $this->value('t', false) . ']'; }
+        };
+        Registry::register($c::class, 'esc-raw');
+        [$html, $notices] = self::deprecations(static fn(): string => (string) App::component('esc-raw'));
+        $this->assertStringContainsString('["<x>]', $html);
+        $this->assertSame(['Component::value($prop, false) is deprecated: unescaped output goes in 1.0'], $notices);
+    }
+
+    public function testTagAccessorIsDeprecated(): void
+    {
+        $c = new class extends Component {
+            protected string $tag = 'section';
+            public function render(): mixed { return $this->tag(); }
+        };
+        Registry::register($c::class, 'tag-c');
+        [$html, $notices] = self::deprecations(static fn(): string => (string) App::component('tag-c'));
+        $this->assertStringContainsString('>section</section>', $html);
+        $this->assertSame(['Component::tag() is deprecated: use the $tag property; tag() goes in 1.0'], $notices);
+    }
+
+    /**
+     * Run $fn and collect the E_USER_DEPRECATED notices it raises. Through
+     * set_error_handler(), not PHPUnit's expectation: once a test has booted
+     * App, the framework's per-request override owns the native handler.
+     *
+     * @param \Closure(): string $fn
+     * @return array{string, list<string>}
+     */
+    private static function deprecations(\Closure $fn): array
+    {
+        $notices = [];
+        // An earlier test may have lowered this request's error_reporting.
+        $level = error_reporting(E_ALL);
+        set_error_handler(static function (int $no, string $msg) use (&$notices): bool {
+            $notices[] = $msg;
+            return true;
+        }, E_USER_DEPRECATED);
+        try {
+            return [$fn(), $notices];
+        } finally {
+            restore_error_handler();
+            error_reporting($level);
+        }
     }
 
     public function testFormBinderRootPostsToRefreshWithoutASubmitAction(): void

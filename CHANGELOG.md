@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added
+- **The components API is locked.** `tests/Unit/Component/PublicApiLockTest.php` compares the public API (the `Component` base class, the attributes, binders, `Tester`, `Validator`, `App::component*()`) with `tests/fixtures/api/components.txt`; any signature change fails CI until it's made on purpose with `make api-lock`. The policy, what's covered and what isn't, is in [`docs/components.md#api-stability`](docs/components.md#api-stability): no breaking change within a major version, deprecate before removing, and the binder interface doesn't grow.
+
+### Deprecated
+- **`Component::tag()`**: use the `$tag` property. Removed in 1.0.
+- **`$c->value('prop', false)`** (unescaped output): use `$c->value('prop')`; attribute values go through `$c->model()`. Removed in 1.0.
+
 ### Changed
+- **`$c->model()`'s second parameter is named `$value`** (was `$withValue`), so templates read `$c->model('plan', value: false)`. Positional calls are unaffected; a call that used the old name as a named argument must use `value:`.
+- **Framework plumbing marked `@internal`:** `App::componentKeyBootCheck()`, `ComponentException::badRequest()`/`forbidden()`/`notFound()`/`stale()`, `Validator::parse()`/`label()`, `ZealJsBinder::source()`. They keep working but aren't part of the stable API.
 - **Live updates need nothing in the layout.** When a page renders a component with `topics()`, the framework adds the push script before `</body>`, one per page. `App::componentPushRoot()` is now optional and can go anywhere, `<head>` included: it marks the spot and the script is filled in when the response is finished, so it lists components rendered after it too (before, it printed nothing when called before the components, and the page silently never connected). Calling it twice gives one script. Streamed pages get the script in the chunk that carries `</body>`; SSE, JSON, htmx fragments and other responses without `</body>` are untouched.
 
 ### Fixed

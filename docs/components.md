@@ -318,11 +318,11 @@ Only `#[Model]` properties accept input, and only those the last render printed 
 
 | Control | Template |
 |---|---|
-| `<textarea>` | `<textarea <?= $c->model('bio', false) ?>><?= $c->value('bio') ?></textarea>` |
-| `<select>` | `<select <?= $c->model('plan', false) ?>><option value="pro" <?= $c->selected('plan', 'pro') ?>>Pro</option></select>` |
+| `<textarea>` | `<textarea <?= $c->model('bio', value: false) ?>><?= $c->value('bio') ?></textarea>` |
+| `<select>` | `<select <?= $c->model('plan', value: false) ?>><option value="pro" <?= $c->selected('plan', 'pro') ?>>Pro</option></select>` |
 | checkbox (`bool`) | `<input type="checkbox" <?= $c->model('terms') ?> <?= $c->checked('terms') ?>>` |
 | checkbox group (`array`) | `<input type="checkbox" <?= $c->model('tags') ?> value="php" <?= $c->checked('tags', 'php') ?>>` |
-| radio | `<input type="radio" <?= $c->model('size', false) ?> value="l" <?= $c->checked('size', 'l') ?>>` |
+| radio | `<input type="radio" <?= $c->model('size', value: false) ?> value="l" <?= $c->checked('size', 'l') ?>>` |
 
 An unchecked checkbox sends nothing, so a missing `bool` field means `false` and a missing `array` field means `[]`. Checkbox groups get no `id` (it would repeat).
 
@@ -516,7 +516,7 @@ Every attribute is set on the element that needs it, so htmx 4's explicit attrib
 Some state never needs the server: a dropdown being open, a character counter, a tab. Keep that in the browser with htmx 4's `hx-live` (or Alpine.js) inside a component's template:
 
 ```html
-<textarea <?= $c->model('bio', false) ?>><?= $c->value('bio') ?></textarea>
+<textarea <?= $c->model('bio', value: false) ?>><?= $c->value('bio') ?></textarea>
 <small :text="q('previous textarea').value.length + ' / 280'"></small>
 ```
 
@@ -772,6 +772,42 @@ final class CartBadge extends Component
 ## Running in coroutine-legacy
 
 `App::components()` loads and reflects your component classes — and the framework's own component classes — in the master, before workers fork, so none of them is compiled cold under concurrency. Instances live for one request and are never stored in statics, so they need no isolation support.
+
+## API stability
+
+Components are built on HTTP, HTML forms and a signed snapshot, none of which change from year to year, and the API on top of them is meant to last as long. A component written today should keep working, unchanged, across every release of the same major version.
+
+### What's covered
+
+- **Everything in the [API lock](https://github.com/sibidharan/zealphp/blob/master/tests/fixtures/api/components.txt):** the `Component` base class (its public and protected methods, properties and constants: what you call and what you override), the attributes `#[Action]`, `#[Model]`, `#[On]` and `#[Reactive]`, the `ComponentBinder` interface and the shipped binders, `Tester`, `Validator::validate()`/`assertRules()`, `ValidationException`, `ComponentException`, `Outcome`, and `App::component()`, `components()`, `componentBinder()`, `componentPush()`, `componentPushRoot()`, `componentMaxAge()`.
+- **Template contract:** a component template gets its props as variables, `$c`, `$errors` and `$slot`.
+- **The validation rule syntax** and the rules listed in [Validation](#validation).
+- **The wire protocol a non-htmx client uses:** the endpoint URLs (`/_zeal/c/{name}/{action}`, `_update`, `_refresh`), the `_zc`, `_zc_args` and `_zc_trigger` fields, and the `Zeal-*` request and response headers.
+
+### What isn't
+
+- **Anything marked `@internal`:** the `zc*` methods, and `Push`, `Endpoint`, `Snapshot`, `Registry`, `Type` and the other internal classes. They change when the implementation needs them to.
+- **The snapshot's encoding.** A deploy that changes it, or a component's properties, makes old snapshots stale. The page reloads (`409` → `HX-Refresh`); state is never misread.
+- **The exact attributes a binder prints.** A binder follows its client, so a new htmx version can change the attribute set. Your component code doesn't change: `HtmxBinder(htmx: 4)` absorbed htmx 4 without one line of component code changing.
+- **The client scripts' internals** (`client.js`, `zeal.js`).
+
+### The rules
+
+1. **No breaking change within a major version.** Nothing in the lock is removed, renamed, or given an incompatible signature in 1.x. Additions are allowed: new methods, new attributes, new optional parameters at the end of a list.
+2. **Deprecate before removing.** A member that's going is marked `@deprecated`, triggers `E_USER_DEPRECATED` with its replacement, stays for the rest of that major version, and is removed only in the next one.
+3. **The binder interface doesn't grow.** Adding a method to `ComponentBinder` would break every custom binder, so new binder capabilities come as a separate, optional interface the framework checks with `instanceof`.
+4. **New `Component` methods are rare and announced.** A method added to the base class could clash with one of the same name in your component, so every addition is listed in the changelog.
+
+### How it's enforced
+
+`tests/Unit/Component/PublicApiLockTest.php` reflects over the public API and compares it with the lock file. Any change to a covered signature fails the build until the lock is updated, and that update shows up as a diff in review. To change the API on purpose: follow the rules above, run `make api-lock`, and commit the lock with the change.
+
+### Deprecated now, removed in 1.0
+
+| Deprecated | Use instead |
+|---|---|
+| `$c->tag()` | the `$tag` property |
+| `$c->value('prop', false)` (unescaped) | `$c->value('prop')`; attribute values go through `$c->model()` |
 
 ## Limits in this version
 
