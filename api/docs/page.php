@@ -7,6 +7,7 @@
 
 use ZealPHP\App;
 use ZealPHP\G;
+use ZealPHP\Site\LessonArticle;
 
 $page = function () {
     $g = G::instance();
@@ -35,9 +36,10 @@ $page = function () {
             'page'   => 'docs/index',
             'active' => 'docs',
         ]);
-        if (preg_match('/<article class="lesson-content[^"]*">.*?<\/article>/s', $html, $m)) {
+        $article = LessonArticle::extract($html);
+        if ($article !== null) {
             header('Content-Type: text/html; charset=utf-8');
-            $this->response($m[0], 200);
+            $this->response($article, 200);
             return;
         }
         $this->response($this->json(['error' => 'render_failed']), 500);
@@ -73,9 +75,10 @@ $page = function () {
         'body'    => $body,
     ]);
 
-    if (preg_match('/<article class="lesson-content[^"]*">.*?<\/article>/s', $html, $m)) {
+    $article = LessonArticle::extract($html);
+    if ($article !== null) {
         header('Content-Type: text/html; charset=utf-8');
-        $this->response($m[0], 200);
+        $this->response($article, 200);
         return;
     }
     $this->response($this->json(['error' => 'extract_failed']), 500);
