@@ -52,6 +52,27 @@ class ComponentPushRootTest extends TestCase
         $this->assertSame(['shared-likes-raw'], $this->scripts('/_test/push/raw-stream'));
     }
 
+    /**
+     * The <head> chunk (with the placeholder) is sent before the component
+     * renders, so the placeholder is emptied and the script rides in the
+     * </body> chunk: one script, no placeholder on the wire.
+     */
+    public function testARawRoutePlaceholderBeforeTheStreamLeavesOneScript(): void
+    {
+        $this->assertSame(['shared-likes-rawhead'], $this->scripts('/_test/push/raw-head'));
+        $body = $this->get('/_test/push/raw-head')['body'];
+        $this->assertStringContainsString('<head></head>', $body);
+        $this->assertMatchesRegularExpression('#</script></body></html>$#', $body);
+    }
+
+    public function testHeadReportsTheLengthGetSends(): void
+    {
+        $this->scripts('/_test/push/auto'); // skips when the routes or the demo are off
+        $get = $this->get('/_test/push/auto');
+        $head = $this->http('HEAD', '/_test/push/auto');
+        $this->assertSame((string) strlen($get['body']), $head['headers']['content-length'] ?? null);
+    }
+
     public function testAFragmentHasNone(): void
     {
         $this->assertSame([], $this->scripts('/_test/push/fragment'));

@@ -172,6 +172,24 @@ class PushRootTest extends TestCase
         $this->assertSame($response, Push::finish($response));
     }
 
+    public function testHeadBodyMatchesWhatGetWouldSend(): void
+    {
+        Push::deferRoot();
+        $this->assertSame('<body></body>', Push::headBody('<body></body>'), 'nothing rendered');
+        self::rendered('a');
+        $this->assertSame(['a'], self::scripts(Push::headBody('<body></body>')));
+    }
+
+    public function testHeadBodyLeavesNonHtmlAlone(): void
+    {
+        $wrapper = (new \ReflectionClass(ZealResponse::class))->newInstanceWithoutConstructor();
+        $wrapper->headersList = [['Content-Type', 'application/json']];
+        RequestContext::instance()->zealphp_response = $wrapper;
+        Push::deferRoot();
+        self::rendered('a');
+        $this->assertSame('{"x":"</body>"}', Push::headBody('{"x":"</body>"}'));
+    }
+
     public function testContentLengthFollowsTheNewBody(): void
     {
         Push::deferRoot();
