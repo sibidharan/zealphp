@@ -578,11 +578,12 @@ final class TableSessionHandler implements \SessionHandlerInterface
     private function writeFile(string $sessionId, string $data, array $deletedKeys = []): bool
     {
         $file = self::$savePath . '/sess_' . basename((string) $sessionId);
+        // Created 0600 from the start: 'c+' alone would use the process umask
+        // (typically 0644, readable by other local users).
+        \ZealPHP\Session\zeal_session_create_private_file($file);
         $fp = @fopen($file, 'c+');
         if (!$fp) return false;
-        // 0600 before any data is written: 'c+' creates the file with the
-        // process umask (typically 0644, readable by other local users).
-        @chmod($file, 0600);
+        @chmod($file, 0600);   // tightens files left 0644 by older releases
         try {
             if (!flock($fp, LOCK_EX)) return false;
             // #233 residual — read-merge-write under the lock. The Table path

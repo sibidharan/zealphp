@@ -98,14 +98,15 @@ class FileSessionHandler implements \SessionHandlerInterface
             return false;
         }
         $file = $this->savePath . '/sess_' . basename((string) $sessionId);
+        // Created 0600 from the start: fopen() alone would use the process
+        // umask (typically 0644 — readable by every local user when the save
+        // path is a shared directory).
+        \ZealPHP\Session\zeal_session_create_private_file($file);
         $fp = @fopen($file, 'c');
         if ($fp === false) {
             return false;
         }
-        // 0600 before any data goes in: fopen() creates the file with the
-        // process umask (typically 0644 — readable by every local user when
-        // the save path is a shared directory). Also tightens older files.
-        @chmod($file, 0600);
+        @chmod($file, 0600);   // tightens files left 0644 by older releases
         // Exclusive lock around truncate + write, so a concurrent read() (or
         // another write) never sees the file in between.
         try {
