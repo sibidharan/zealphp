@@ -40,7 +40,7 @@
       Restart the server after creating the route file.
     </div>
 
-    <?php App::render('/components/_ws_counter_widget'); ?>
+    <?= App::component('/learn/websocket/components/ws_counter_widget') ?>
 
     <p class="lws-subtitle">
       Open <a href="/learn/websocket" target="_blank">/learn/websocket</a> in a second tab. Click +1 here. Watch the second tab count up without reloading.

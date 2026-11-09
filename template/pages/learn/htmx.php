@@ -116,7 +116,7 @@ $g = \ZealPHP\G::instance();
 
     <?php App::render('/components/_tryit', ['title' => 'Click the counter', 'body' =>
       '<div class="lhx-center">' .
-      App::component('counter_button', ['n' => (int)($g->session['demo_counter'] ?? 0)]) .
+      App::component('/learn/htmx/components/counter_button', ['n' => (int)($g->session['demo_counter'] ?? 0)]) .
       '</div>' .
       '<p>Open DevTools → Network tab and watch each click: a POST goes out, an HTML fragment comes back, the button is replaced. No page reload. No JSON parsing. No client-side state management.</p>'
     ]); ?>

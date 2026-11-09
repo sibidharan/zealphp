@@ -259,7 +259,7 @@ if (msg.type === 'note_changed') {
         'body' => '<p><a href="/learn/auth">Register or log in</a> first — the chat needs to know whose notes to act on.</p>',
       ]); ?>
     <?php else: ?>
-      <?php App::render('/components/_chat_widget', ['user' => $user]); ?>
+      <?= App::component('/learn/ai-chat/components/chat_widget', ['user' => $user]) ?>
       <a class="lesson-popout-cta" href="/demo/view/chat/widget" target="_blank" rel="noopener">
         Open this chat in a new tab ↗
       </a>

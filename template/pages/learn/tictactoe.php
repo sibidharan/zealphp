@@ -375,7 +375,7 @@ Store::set('ws_tictactoe_rooms', $room, $update);   // one write</code></pre>
         'body'    => '<p><a href="/learn/auth">Register or log in</a> first, then come back here.</p>',
       ]); ?>
     <?php else: ?>
-      <?php App::render('/components/_tictactoe_widget', ['user' => $user]); ?>
+      <?= App::component('/learn/tictactoe/components/tictactoe_widget', ['user' => $user]) ?>
       <a class="lesson-popout-cta" href="/demo/view/tictactoe/play" target="_blank" rel="noopener">
         Open the game in a new tab ↗
       </a>

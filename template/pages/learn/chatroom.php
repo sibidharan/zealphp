@@ -339,7 +339,7 @@ function renderTyping() {
         'body'    => '<p><a href="/learn/auth">Register or log in</a> first, then come back here.</p>',
       ]); ?>
     <?php else: ?>
-      <?php App::render('/components/_chatroom_widget', ['user' => $user]); ?>
+      <?= App::component('/learn/chatroom/components/chatroom_widget', ['user' => $user]) ?>
       <a class="lesson-popout-cta" href="/demo/view/chatroom/widget" target="_blank" rel="noopener">
         Open the chat in a new tab ↗
       </a>

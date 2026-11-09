@@ -243,16 +243,16 @@ document.addEventListener('htmx:beforeSwap', (e) =&gt; {
 </div>'
     ]); ?>
 
-    <?php App::render('/components/_challenge', [
+    <?= App::component('/learn/auth/components/challenge', [
       'title' => 'Challenge 1: change password',
       'body'  => '<p>Build a "change password" feature. You\'ll need: a form with old password and new password fields, an endpoint that verifies the old password with <code>password_verify()</code>, then updates the hash with <code>password_hash()</code>.</p>',
       'hints' => [
         'Use a prepared UPDATE statement: <code>UPDATE users SET password_hash = ? WHERE id = ?</code>',
         'Always verify the old password first — never trust the client to send only valid requests',
       ],
-    ]); ?>
+    ]) ?>
 
-    <?php App::render('/components/_challenge', [
+    <?= App::component('/learn/auth/components/challenge', [
       'title' => 'Challenge 2: rate-limit failed logins',
       'body'  => '<p>Right now <code>/api/learn/login</code> happily accepts unlimited password guesses. Add a per-IP rate limit: after 5 failed attempts in 60 seconds, return 429 for that IP for the next 5 minutes. Use <code>Store</code> for the counter — see Foundations &rarr; <a href="/learn/store">Sharing State</a> for the table-allocation pattern.</p>',
       'hints' => [
@@ -260,9 +260,9 @@ document.addEventListener('htmx:beforeSwap', (e) =&gt; {
         'Key by <code>$request-&gt;server[\'REMOTE_ADDR\']</code>. Bump <code>count</code> only when the password check fails — never on success.',
         'On lockout, set the status and header separately (<code>status()</code> returns bool, not <code>$response</code>), then return an error body: <code>$response-&gt;status(429); $response-&gt;header(\'Retry-After\', \'300\'); return [\'error\' =&gt; \'Too many failed attempts\'];</code>',
       ],
-    ]); ?>
+    ]) ?>
 
-    <?php App::render('/components/_challenge', [
+    <?= App::component('/learn/auth/components/challenge', [
       'title' => 'Challenge 3: invalidate the session on logout',
       'body'  => '<p>The current <code>/api/learn/logout</code> probably just clears <code>$g-&gt;session[\'user_id\']</code>. That leaves the session file alive with whatever else was in it. Switch to <code>session_destroy()</code> and re-generate the session id on the user&rsquo;s next request, so the old <code>PHPSESSID</code> can\'t be replayed even if it leaked into a log.</p>',
       'hints' => [
@@ -270,9 +270,9 @@ document.addEventListener('htmx:beforeSwap', (e) =&gt; {
         'On login (not logout) call <code>session_regenerate_id(true)</code> — that\'s where session fixation attacks land; <code>true</code> deletes the old file.',
         'Set the <code>PHPSESSID</code> cookie\'s <code>Max-Age</code> to <code>0</code> in the logout response so the browser drops its copy too.',
       ],
-    ]); ?>
+    ]) ?>
 
-    <?php App::render('/components/_challenge', [
+    <?= App::component('/learn/auth/components/challenge', [
       'title' => 'Challenge 4: password reset via email (mocked)',
       'body'  => '<p>Build a password-reset flow. User enters an email; if it exists, you generate a single-use token, store it with a 30-min expiry, and "email" it (just log the URL for now). The reset link points at <code>/reset?token=...</code>. Submitting that page with a new password verifies the token, updates the hash, and invalidates the token.</p>',
       'hints' => [
@@ -281,7 +281,7 @@ document.addEventListener('htmx:beforeSwap', (e) =&gt; {
         '"Send the email" = <code>elog(\'Reset link: https://yourapp/reset?token=\' . $token)</code>. Wire real email later via <code>swiftmailer</code> or a transactional-mail API.',
         'Delete the token row the moment it\'s redeemed — never leave it around for replay.',
       ],
-    ]); ?>
+    ]) ?>
 
     <h2 id="wire-zealapi">Wire your auth into ZealAPI</h2>
     <p>
