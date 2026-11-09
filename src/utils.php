@@ -771,6 +771,33 @@ function zapi(): string {
 }
 
 /**
+ * Make text safe to embed in a debug-log record.
+ *
+ * Log messages often carry request-controlled data (paths, headers, parameter
+ * values). Without escaping, a CR/LF could start a forged `┌[tag] …` record and
+ * an ESC / C1 sequence could drive the terminal of whoever tails the log.
+ * C0 controls other than LF and TAB, DEL and the UTF-8 C1 controls
+ * (U+0080–U+009F, e.g. the 8-bit CSI) become a visible `\xHH` / `\u00HH`
+ * escape; CR becomes `\r`. A LF is kept — stack traces are multi-line — but
+ * every continuation line is indented, so it can never begin a new record.
+ */
+function log_escape(string $text): string
+{
+    $text = str_replace("\r", '\\r', $text);
+    $text = (string) preg_replace_callback(
+        '/[\x00-\x08\x0B-\x1F\x7F]/',
+        static fn (array $m): string => sprintf('\\x%02X', ord($m[0])),
+        $text
+    );
+    $text = (string) preg_replace_callback(
+        '/\xC2([\x80-\x9F])/',
+        static fn (array $m): string => sprintf('\\u00%02X', ord($m[1])),
+        $text
+    );
+    return str_replace("\n", "\n   ", $text);
+}
+
+/**
  * Log a debug message with caller location.
  *
  * Writes to the debug log (`debug.log`) when `debug_logging_enabled()` is
@@ -793,6 +820,8 @@ function elog($message, $tag = "*", $limit = 1): void {
     $date = date('d-m-Y H:i:s') . substr((string)microtime(), 1, 6);
     $relative_path = str_replace(App::$cwd, '', $caller['file'] ?? '(unknown)');
     $callerLine = $caller['line'] ?? 0;
+    $tag = log_escape((string) $tag);
+    $message = log_escape((string) $message);
     log_write("┌[$tag] $date $relative_path:$callerLine\n└❯ $message \n");
 }
 
