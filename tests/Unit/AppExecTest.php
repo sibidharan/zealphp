@@ -126,4 +126,103 @@ final class AppExecTest extends TestCase
     {
         $this->assertSame("ok\n", \ZealPHP\zeal_shell_exec('echo ok'));
     }
+
+    // ── #501: stderr must not be captured; timeouts must be enforced ──
+
+    public function testExecInCoroutineCapturesStdoutOnly(): void
+    {
+        // A CLI that logs to stderr and prints JSON on stdout (labsctl): the
+        // log lines used to land in front of the JSON.
+        $result = null;
+        \OpenSwoole\Coroutine::run(function () use (&$result) {
+            $result = App::exec('echo "DEBUG: starting" >&2; echo \'{"ok":true}\'; exit 3');
+        });
+        $this->assertIsArray($result);
+        $this->assertSame("{\"ok\":true}\n", $result['output']);
+        $this->assertSame(['ok' => true], json_decode($result['output'], true));
+        $this->assertSame(3, $result['code']);
+    }
+
+    public function testExplicitRedirectStillCapturesStderr(): void
+    {
+        $result2 = null;
+        \OpenSwoole\Coroutine::run(function () use (&$result2) {
+            $result2 = App::exec('(echo err >&2) 2>&1');
+        });
+        $this->assertSame("err\n", $result2['output']);
+    }
+
+    public function testHookedShellExecDoesNotCaptureStderr(): void
+    {
+        $out = null;
+        \OpenSwoole\Coroutine::run(function () use (&$out) {
+            $out = \ZealPHP\zeal_shell_exec('echo noise >&2; echo clean');
+        });
+        $this->assertSame("clean\n", $out);
+    }
+
+    public function testTimeoutStopsTheCommand(): void
+    {
+        if (!is_executable('/usr/bin/timeout') && !is_executable('/bin/timeout')) {
+            $this->markTestSkipped('coreutils timeout not installed');
+        }
+        $result = null;
+        $elapsed = 0.0;
+        \OpenSwoole\Coroutine::run(function () use (&$result, &$elapsed) {
+            $t = microtime(true);
+            $result = App::exec('sleep 5; echo late', 0.3);
+            $elapsed = microtime(true) - $t;
+        });
+        $this->assertIsArray($result);
+        $this->assertSame(124, $result['code'], 'coreutils timeout exit code');
+        $this->assertSame('', $result['output']);
+        $this->assertLessThan(2.0, $elapsed, 'stopped long before the command would finish');
+    }
+
+    public function testTimeoutStopsTheWholeProcessTreeAndNotTheCaller(): void
+    {
+        if (!is_executable('/usr/bin/timeout') && !is_executable('/bin/timeout')) {
+            $this->markTestSkipped('coreutils timeout not installed');
+        }
+        // A backgrounded grandchild must die too; and the signal must stay in
+        // the command's own session (this test process survives to assert).
+        $marker = 'sleep 9.' . random_int(100, 999);
+        $result = null;
+        \OpenSwoole\Coroutine::run(function () use (&$result, $marker) {
+            $result = App::exec("{$marker} & {$marker}; echo late", 0.3);
+        });
+        $this->assertIsArray($result);
+        $this->assertSame(124, $result['code']);
+        usleep(300000);
+        $left = (string) shell_exec('pgrep -f ' . escapeshellarg('^' . $marker . '$') . ' 2>/dev/null');
+        $this->assertSame('', trim($left), 'no process from the timed-out command is left running');
+    }
+
+    public function testTimeoutDoesNotChangeAFastCommandOrQuoting(): void
+    {
+        $result = null;
+        \OpenSwoole\Coroutine::run(function () use (&$result) {
+            $result = App::exec("printf '%s|' \"a b\" 'c\"d'; exit 2", 5);
+        });
+        $this->assertIsArray($result);
+        $this->assertSame('a b|c"d|', $result['output']);
+        $this->assertSame(2, $result['code']);
+    }
+
+    public function testTimeoutAppliesOutsideACoroutineToo(): void
+    {
+        if (!is_executable('/usr/bin/timeout') && !is_executable('/bin/timeout')) {
+            $this->markTestSkipped('coreutils timeout not installed');
+        }
+        $t = microtime(true);
+        $r = App::exec('sleep 5; echo late', 0.3);
+        $this->assertSame('', $r['output']);
+        $this->assertLessThan(2.0, microtime(true) - $t);
+    }
+
+    public function testNonPositiveTimeoutIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        App::exec('true', 0);
+    }
 }

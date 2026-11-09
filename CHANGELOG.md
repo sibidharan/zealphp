@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Fixed — `App::exec()` (labs-dashboard-web#501)
+- **stderr no longer leaks into the output.** OpenSwoole 26.2's `Coroutine\System::exec()` takes `bool $get_error_stream` as its second argument, not a timeout; `App::exec()` passed `-1`, which turned stderr capture on for every command. A CLI's log lines then landed in front of its JSON (every Code Arena Run on beta). Because the exec hook routes backticks, `shell_exec()`, `exec()`, `system()` and `passthru()` through `App::exec()` in coroutine mode, all of them were affected. Output is now stdout only; in a coroutine the command's stderr is discarded (writing into the worker's inherited stderr killed the process on OpenSwoole 25.2). Add `2>&1` to capture both.
+- **`$timeout` is enforced.** `System::exec()` has no timeout, so it was silently ignored. It's now applied with coreutils `timeout` (SIGTERM, then SIGKILL after 1 s; exit code 124), in and outside coroutines.
+
 ### Changed — one rendering API
 - **Two verbs.** `App::component()` produces markup (a component, or any template with a leading `/`); `App::render()` produces a page or response, now with options: `fragment:`, `htmx:` (+ `fullPage:`), `stream:` and `echo:`.
 - **Deprecated (still work until 1.0):** `App::renderToString()` → `App::component('/path', $args)`; `App::renderStream()` → `App::render(…, stream: true)`; `App::renderHtmx()` → `App::render(…, htmx: true)`. The site, docs and Learn lessons now use the new API.
