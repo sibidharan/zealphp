@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added — components without htmx
+- **`ZealJsBinder` and its bundled `zeal.js`**: components on pages without htmx. `App::componentBinder(new ZealJsBinder())` plus `<?= ZealJsBinder::script() ?>` in the layout. It speaks the plain protocol (`Zeal-Request`, `Zeal-Events` as DOM events, `Zeal-Redirect`, `Zeal-Reload`, 422 for validation), swaps in place keeping the field being typed in, and keeps the no-JS form markup. See [Without htmx](docs/components.md#without-htmx-zealjsbinder).
+
 ### Added — component dev tools
 - **`ZealPHP\Component\Tester`** drives a reactive component through the real endpoint in a unit test: `Tester::render(Counter::class)->call('increment')->assertSet('count', 1)`, `->set('email', …)->assertHasErrors('email')`, plus `assertSee`, `assertDispatched`, `assertRedirect` and `assertStatus`. No server or browser needed. Guide: [Testing components](docs/components.md#testing-components).
 - **`php app.php make:component Name [--stateless]`** writes a component class and its template (or just a template), in your `src/` namespace, never overwriting.

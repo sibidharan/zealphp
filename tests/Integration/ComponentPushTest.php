@@ -42,6 +42,16 @@ class ComponentPushTest extends TestCase
         $this->assertStringContainsString('EventSource', $r['body']);
     }
 
+    public function testVanillaClientIsServed(): void
+    {
+        $this->page(); // skips when the demo (and so the component routes) is disabled
+        $r = $this->get('/_zeal/c/zeal.js');
+        $this->assertStatus(200, $r);
+        $this->assertStringContainsString('javascript', $r['headers']['content-type'] ?? '');
+        $this->assertStringContainsString('immutable', $r['headers']['cache-control'] ?? '');
+        $this->assertStringContainsString("'Zeal-Request': '1'", $r['body']);
+    }
+
     public function testStreamRefusesBadTokens(): void
     {
         $this->assertStatus(400, $this->get('/_zeal/c/stream?t=nope'));

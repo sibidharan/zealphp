@@ -341,7 +341,28 @@ The endpoint speaks plain HTTP. A **binder** decides which attributes `action()`
 |---|---|---|
 | `HtmxBinder` (default) | `hx-post`, `hx-target`, `hx-include`, `hx-sync`, `hx-preserve`, plus the plain-form attributes | Pages with htmx 2 |
 | `FormBinder` | Plain-form attributes only | Pages with no JavaScript |
-| your own | anything — implement `ZealPHP\Component\ComponentBinder` | Alpine, Datastar, a custom `fetch()` client |
+| `ZealJsBinder` | Plain-form attributes plus `data-zc-*` markers, for the bundled `zeal.js` | Pages without htmx |
+| your own | anything — implement `ZealPHP\Component\ComponentBinder` | Alpine, Datastar, another client |
+
+### Without htmx: `ZealJsBinder`
+
+A small bundled script makes components interactive on pages that don't load htmx:
+
+```php
+App::componentBinder(new ZealJsBinder());   // before App::run()
+```
+```php
+<?= \ZealPHP\Component\ZealJsBinder::script() ?>   <!-- in the layout's <head>, once -->
+```
+
+It speaks the plain protocol below:
+- Actions and live (debounced) or on-blur fields post to the endpoint with `Zeal-Request: 1`.
+- The re-rendered component replaces the old one in place, keeping the value, focus and cursor of the field being typed in.
+- An action replaces a live update still in flight on the same component, and the clicked button is disabled until its response arrives.
+- `Zeal-Events` are dispatched as bubbling DOM `CustomEvent`s on the component (`detail` = the event's detail).
+- `Zeal-Redirect` and `Zeal-Reload` navigate.
+
+The markup is the same working form `FormBinder` renders, so the page still works with JavaScript off. The script URL is versioned by its content and cached as immutable.
 
 ### htmx 2 and htmx 4
 
