@@ -1326,57 +1326,39 @@ function zeal_session_cache_expire($cache_expire = null): int
 }
 
 /**
- * Discard in-memory session changes and reload session data from the file.
+ * End the session WITHOUT saving it — PHP's `session_abort()`.
  *
- * Mirrors PHP's `session_abort()`: any writes to `$g->session` or
- * `$_SESSION` since the last `session_start()` are thrown away, and the
- * session data is re-read from the session file on disk. Returns `true` always.
+ * Nothing is written to the store: changes made since `session_start()` are
+ * discarded there, and the stored data stays as it was. The handler's
+ * `close()` runs (so it can release what it holds for this request, e.g. the
+ * Table handler's read snapshot) but `write()` never does. The session is
+ * marked inactive — `session_status()` reports `PHP_SESSION_NONE` and the
+ * request-end close skips the write — exactly as after
+ * `session_write_close()`; a later `session_start()` reloads the stored data.
+ *
+ * Returns `false` when no session is active (as native PHP does).
  */
 function zeal_session_abort(): bool
 {
+    if (zeal_session_status() !== PHP_SESSION_ACTIVE) {
+        return false;
+    }
     $g = RequestContext::instance();
 
-    // Discard session changes
-    // isset() runtime-checks uninitialized typed slot (unset() may have been called)
-    /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
-    if (isset($g->session)) {
-        // Get session ID
-        $session_id = zeal_session_id();
+    zeal_session_close_handler();
 
-        // Read session data from file (same defensive handling as zeal_session_start —
-        // empty/corrupted files must not crash the worker).
-        $save_path = $g->session_params['save_path'] ?? '';
-        assert(is_string($save_path));
-        $session_file = $save_path . '/sess_' . basename((string)$session_id);
-        if (file_exists($session_file)) {
-            /** @var array<string, mixed> $session_data */
-            $session_data = [];
-            $contents = @file_get_contents($session_file);
-            if (is_string($contents) && $contents !== '') {
-                // #372: session files are written in the native `php`
-                // serialize-handler format (`key|serialized;…`) — raw
-                // unserialize() can't parse it, returned false, and the
-                // "restored" session became [] which the manager's close then
-                // PERSISTED, wiping the store. Use the session decoder.
-                $session_data = php_session_decode_to_array($contents);
-            }
-            $g->session = $session_data;
-            // #379 superglobals modes: the canonical store is the live
-            // $GLOBALS['_SESSION'] — restore through it too.
-            if (\ZealPHP\App::$superglobals) {
-                $GLOBALS['_SESSION'] = $session_data;
-            }
-            if (\ZealPHP\App::$superglobals) {
-                $GLOBALS['_SESSION'] = $session_data;
-            }
-        } else {
-            $g->session = [];
-            if (\ZealPHP\App::$superglobals) {
-                $GLOBALS['_SESSION'] = [];
-            }
-        }
+    // The managers' request-end close is gated on `_session_started`; with it
+    // false and the store slot gone, nothing writes this session back.
+    $g->_session_started = false;
+    $g->session_loaded_keys = [];
+    $g->session_loaded_digest = [];
+    $g->_session_persisted_hash = null;
+    if (\ZealPHP\App::$superglobals) {
+        $GLOBALS['_SESSION'] = [];
+        unset($GLOBALS['_SESSION']);
+    } else {
+        unset($g->session);
     }
-
     return true;
 }
 

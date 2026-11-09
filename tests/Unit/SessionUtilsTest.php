@@ -25,6 +25,8 @@ use function ZealPHP\Session\zeal_session_commit;
 use function ZealPHP\Session\zeal_session_write_close;
 use function ZealPHP\Session\zeal_session_create_id;
 use function ZealPHP\Session\php_session_decode_to_array;
+use function ZealPHP\Session\php_session_encode_from_array;
+use function ZealPHP\Session\zeal_session_digest;
 
 /**
  * Coverage for the zeal_session_* family in src/Session/utils.php not already
@@ -303,56 +305,89 @@ class SessionUtilsTest extends TestCase
 
     // ── abort ────────────────────────────────────────────────────
     //
-    // zeal_session_abort()'s restore-from-disk path is guarded by
-    // isset($g->session) on the DECLARED typed slot. In superglobals(true)
-    // operation that slot is intentionally left uninitialized (it aliases
-    // $_SESSION via __get/__set), so the guard is false and abort is a no-op
-    // — which is the real production behaviour for that mode. We therefore
-    // exercise the restore logic in coroutine mode (superglobals(false)),
-    // where the typed slot IS the canonical store and the guard fires.
-    // These two tests own the mode switch and restore it.
+    // session_abort() ends the session WITHOUT writing: the store keeps what
+    // it had, the session becomes inactive, and the request-end close (gated
+    // on _session_started) writes nothing. Exercised in coroutine mode, where
+    // the typed $g->session slot is the canonical store; each test restores
+    // the slot (coroutine-mode __set re-initialises it) and the mode.
 
-    public function testAbortRestoresFromFile(): void
+    public function testAbortEndsSessionWithoutWriting(): void
     {
         App::superglobals(false);
         $g = RequestContext::instance();
-        // coroutine-mode instance() may be the static singleton in unit
-        // context; ensure a clean, initialized typed session slot.
-        $prop = new \ReflectionProperty(RequestContext::class, 'session');
-        $prop->setValue($g, []);
-        $g->session_params = ['name' => 'PHPSESSID', 'save_path' => $this->savePath];
-        $g->cookie = ['PHPSESSID' => 'abort-id'];
-        // Pin the session id so zeal_session_abort() reads OUR file, not a
-        // stale id leaked from an earlier test in the full-suite ordering.
-        zeal_session_id('abort-id');
+        try {
+            $g->session = [];
+            $g->session_params = ['name' => 'PHPSESSID', 'save_path' => $this->savePath, 'session_id' => 'abort-id'];
+            $g->cookie = ['PHPSESSID' => 'abort-id'];
+            zeal_session_id('abort-id');
 
-        $sessionFile = $this->savePath . '/sess_abort-id';
-        file_put_contents($sessionFile, serialize(['persisted' => 'disk-value']));
-        // In-memory diverges from disk.
-        $g->session = ['persisted' => 'memory-value', 'extra' => 'dropped'];
+            $sessionFile = $this->savePath . '/sess_abort-id';
+            $stored = php_session_encode_from_array(['persisted' => 'disk-value']);
+            file_put_contents($sessionFile, $stored);
+            $g->_session_started = true;
+            $g->session_loaded_keys = ['persisted'];
+            $g->session_loaded_digest = zeal_session_digest(['persisted' => 'disk-value']);
+            // In-memory changes that must never reach the store.
+            $g->session = ['persisted' => 'memory-value', 'extra' => 'dropped'];
 
-        $this->assertTrue(zeal_session_abort());
-        // Abort discards in-memory changes, reloading the disk snapshot.
-        $this->assertSame(['persisted' => 'disk-value'], $g->session);
+            $this->assertTrue(zeal_session_abort());
+            $this->assertSame(PHP_SESSION_NONE, zeal_session_status());
+            $this->assertFalse($g->_session_started);
+            $this->assertSame($stored, file_get_contents($sessionFile));
 
-        App::superglobals(true);
+            // The manager's request-end close must not write either.
+            zeal_session_write_close();
+            $this->assertSame($stored, file_get_contents($sessionFile));
+        } finally {
+            $g->session = [];
+            App::superglobals(true);
+        }
     }
 
-    public function testAbortWithNoFileResetsToEmpty(): void
+    public function testAbortClosesHandlerButNeverWritesIt(): void
     {
         App::superglobals(false);
         $g = RequestContext::instance();
-        $prop = new \ReflectionProperty(RequestContext::class, 'session');
-        $prop->setValue($g, []);
-        $g->session_params = ['name' => 'PHPSESSID', 'save_path' => $this->savePath];
-        $g->cookie = ['PHPSESSID' => 'abort-nofile-id'];
-        zeal_session_id('abort-nofile-id');
-        $g->session = ['will' => 'be-cleared'];
+        $handler = new class implements \SessionHandlerInterface {
+            public int $closed = 0;
+            public int $written = 0;
+            public function open(string $path, string $name): bool { return true; }
+            public function close(): bool { $this->closed++; return true; }
+            public function read(string $id): string { return 'k|s:1:"v";'; }
+            public function write(string $id, string $data): bool { $this->written++; return true; }
+            public function destroy(string $id): bool { return true; }
+            public function gc(int $max): int { return 0; }
+        };
+        try {
+            $g->session = ['k' => 'changed'];
+            $g->session_params = [
+                'name' => 'PHPSESSID', 'save_path' => $this->savePath, 'session_id' => 'abort-h',
+                'handler' => $handler, 'handler_opened' => true,
+            ];
+            $g->_session_started = true;
 
-        $this->assertTrue(zeal_session_abort());
-        $this->assertSame([], $g->session);
+            $this->assertTrue(zeal_session_abort());
+            zeal_session_write_close();
+            $this->assertSame(1, $handler->closed, 'close() releases the handler\'s per-request state');
+            $this->assertSame(0, $handler->written, 'abort must not write');
+        } finally {
+            $g->session = [];
+            $g->session_params = ['name' => 'PHPSESSID', 'save_path' => $this->savePath];
+            App::superglobals(true);
+        }
+    }
 
-        App::superglobals(true);
+    public function testAbortReturnsFalseWithoutAnActiveSession(): void
+    {
+        App::superglobals(false);
+        $g = RequestContext::instance();
+        try {
+            unset($g->session);
+            $this->assertFalse(zeal_session_abort());
+        } finally {
+            $g->session = [];
+            App::superglobals(true);
+        }
     }
 
     // ── unset ────────────────────────────────────────────────────
