@@ -1,0 +1,11 @@
+/* Page-scoped styles for /learn/first-page — relocated from inline style= attrs. */
+
+.lfp-compare {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.lfp-compare-col {
+  flex: 1;
+}
