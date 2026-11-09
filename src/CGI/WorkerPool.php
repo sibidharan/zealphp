@@ -217,7 +217,7 @@ final class WorkerPool
             $this->returnToIdle($idx);
             return [
                 'status'  => 502,
-                'body'    => 'WorkerPool: protocol error from subprocess (' . $io['error'] . ')',
+                'body'    => '502 Bad Gateway',
                 'headers' => [],
                 'cookies' => [],
             ];
@@ -234,7 +234,6 @@ final class WorkerPool
         // respawn to avoid dispatching to a zombie). A timed-out exchange
         // also respawns: the subprocess may be mid-write, and the next
         // request must not read the tail of this one.
-        $err = $resp === null ? $io['stderr'] : '';
         $exitFlag = is_array($resp) && !empty($resp['_exit']);
 
         if ($resp === null || $exitFlag || $served >= $this->maxRequestsPerWorker || !$this->isAlive($w)) {
@@ -260,12 +259,14 @@ final class WorkerPool
 
         if ($resp === null) {
             $status = $alive ? 504 : 500;
-            $msg = $status === 504
-                ? 'WorkerPool: subprocess timed out after ' . $timeout . 's'
-                : 'WorkerPool: subprocess died mid-request — response not received. Stderr: ' . $err;
+            // The subprocess's stderr was logged above; it can hold paths and
+            // secrets, so the client only gets the status line.
+            \ZealPHP\elog($status === 504
+                ? 'WorkerPool: subprocess ' . $w['pid'] . ' timed out after ' . $timeout . 's'
+                : 'WorkerPool: subprocess ' . $w['pid'] . ' died mid-request, no response', 'error');
             return [
                 'status'  => $status,
-                'body'    => $msg,
+                'body'    => $status === 504 ? '504 Gateway Timeout' : '500 Internal Server Error',
                 'headers' => [],
                 'cookies' => [],
             ];

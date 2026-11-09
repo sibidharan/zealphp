@@ -212,16 +212,17 @@ final class WorkerPoolTest extends TestCase
         }
     }
 
-    public function testWorkerCrashReturns500WithStderr(): void
+    public function testWorkerCrashReturnsAPlain500(): void
     {
         // posix_kill(SIGKILL) kills the subprocess before it can send a
-        // response frame — exercises the stderr-capture + null-response path.
-        $file = $this->fixture('crash.php', 'posix_kill(getmypid(), 9);');
+        // response frame — exercises the null-response path. Its stderr is
+        // logged, never sent to the client (it can hold paths and secrets).
+        $file = $this->fixture('crash.php', 'fwrite(STDERR, "secret-path /srv/app\\n"); posix_kill(getmypid(), 9);');
         $pool = new WorkerPool(size: 1);
         try {
             $resp = $pool->dispatch(['file' => $file]);
             $this->assertSame(500, $resp['status']);
-            $this->assertStringContainsString('response not received', $resp['body']);
+            $this->assertSame('500 Internal Server Error', $resp['body']);
         } finally {
             $pool->close();
         }
@@ -243,10 +244,14 @@ final class WorkerPoolTest extends TestCase
         $file = $this->fixture('boom.php', 'throw new \RuntimeException("kaboom");');
         $pool = new WorkerPool(size: 1);
         try {
+            // The exception's details reach the client only with display_errors.
             $resp = $pool->dispatch(['file' => $file]);
             $this->assertSame(500, $resp['status']);
-            $this->assertIsString($resp['body']);
-            $this->assertStringContainsString('kaboom', $resp['body']);
+            $this->assertSame('500 Internal Server Error', $resp['body']);
+            $shown = $pool->dispatch(['file' => $file, 'display_errors' => true]);
+            $this->assertSame(500, $shown['status']);
+            $this->assertIsString($shown['body']);
+            $this->assertStringContainsString('RuntimeException: kaboom', $shown['body']);
         } finally {
             $pool->close();
         }

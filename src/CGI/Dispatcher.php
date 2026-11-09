@@ -510,6 +510,8 @@ class Dispatcher
             'cookie' => $g->cookie,
             'files'  => $g->files,
             'env'    => $g->env ?? $_ENV,
+            // The subprocess shows exception details only when this is on.
+            'display_errors' => App::displayErrors(),
         ], JSON_UNESCAPED_SLASHES);
 
         $ctx = is_string($ctx) ? $ctx : '{}';
@@ -1351,6 +1353,8 @@ class Dispatcher
             'cookies' => $g->cookie,
             'files'   => $g->files,
             'body'    => $rawBody,
+            // The subprocess shows exception details only when this is on.
+            'display_errors' => App::displayErrors(),
         ];
     }
 

@@ -56,6 +56,7 @@ foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php
 }
 
 use ZealPHP\CGI\IPC;
+use ZealPHP\CGI\SubprocessError;
 
 // Bridge php://input to the request's raw body (REST/JSON payloads) for legacy
 // code in this pooled subprocess — mirrors \ZealPHP\IOStreamWrapper (in-process
@@ -771,11 +772,12 @@ function pool_reset_session(array $baseline): void
  */
 function pool_prepare_request(array $req): array
 {
+    $GLOBALS['__pw_display_errors'] = SubprocessError::displayRequested($req);
     $file = isset($req['file']) && is_string($req['file']) ? $req['file'] : '';
     if ($file === '' || !is_file($file)) {
         return ['__error' => [
             'status'     => 404,
-            'body'       => "pool_worker: file not found: $file",
+            'body'       => '404 Not Found',
             'headers'    => [],
             'cookies'    => [],
             'rawcookies' => [],
@@ -827,13 +829,15 @@ function pool_finish_request(mixed $result, ?\Throwable $error, mixed $prevCwd):
     if ($error !== null) {
         while (ob_get_level() > 0) { ob_end_clean(); }
         if (is_string($prevCwd)) chdir($prevCwd);
+        // Details to the server log (this process's stderr, drained by the
+        // pool); to the client only with display_errors on.
+        SubprocessError::log($error, 'pool_worker');
         return [
             'status'     => 500,
-            'body'       => 'pool_worker fatal: ' . $error->getMessage(),
+            'body'       => SubprocessError::body($error, ($GLOBALS['__pw_display_errors'] ?? false) === true),
             'headers'    => [],
             'cookies'    => [],
             'rawcookies' => [],
-            'stderr'     => $error->getTraceAsString(),
         ];
     }
     if (is_string($prevCwd)) chdir($prevCwd);

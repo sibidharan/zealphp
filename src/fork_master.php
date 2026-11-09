@@ -50,6 +50,7 @@ foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php
 }
 
 use ZealPHP\CGI\IPC;
+use ZealPHP\CGI\SubprocessError;
 
 require_once __DIR__ . '/CGI/CgiInputStream.php';
 
@@ -407,7 +408,8 @@ while ($__fm_running) {
                 $__fm_file = fork_prepare_request($__fm_req);
             }
         } catch (\Throwable $e) {
-            $__fm_resp = ['status' => 500, 'body' => 'fork_master child: ' . $e->getMessage(), 'headers' => [], 'cookies' => [], 'rawcookies' => []];
+            SubprocessError::log($e, 'fork_master');
+            $__fm_resp = ['status' => 500, 'body' => SubprocessError::GENERIC, 'headers' => [], 'cookies' => [], 'rawcookies' => []];
         }
 
         if ($__fm_file !== null) {
@@ -435,7 +437,8 @@ while ($__fm_running) {
                     $__fm_result = null;   // streamed output captured into the body
                 }
             } catch (\Throwable $e) {
-                $__fm_resp = ['status' => 500, 'body' => 'fork_master: ' . $e->getMessage(), 'headers' => [], 'cookies' => [], 'rawcookies' => []];
+                SubprocessError::log($e, 'fork_master');
+                $__fm_resp = ['status' => 500, 'body' => SubprocessError::body($e, SubprocessError::displayRequested($__fm_req ?? null)), 'headers' => [], 'cookies' => [], 'rawcookies' => []];
                 while (ob_get_level() > 0) { ob_end_clean(); }
                 $__fm_file = null;
             }
