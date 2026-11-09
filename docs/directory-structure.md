@@ -30,7 +30,29 @@ zealphp/
 - **`public/`** – ZealPHP's **document root** (the Apache `DocumentRoot` equivalent): the directory every implicit route and the built-in static handler resolve against. It **defaults to `public/`** — override it with `App::documentRoot('…')` before `App::init()` (see [routing.md](routing.md)). Contains PHP scripts and assets served via implicit routing: a request to `/foo/bar` resolves to `public/foo/bar.php` (without requiring `.php` in the URL). Index files are handled automatically (`public/index.php`, `public/foo/index.php`). Use this directory for traditional PHP pages, SPA bootstraps, or static fallbacks.
 - **`route/`** – Optional route injection point. All files in this directory are included before implicit routes are registered, allowing teams to register additional explicit routes without editing `app.php`. Each file typically calls `$app = App::instance();` followed by `$app->route(...)`, `nsRoute(...)`, or `patternRoute(...)`.
 - **`api/`** – Implicit API router. Files inside `api/` become callable via `/api/<path>`. Subdirectories map to namespaces: `api/device/list.php` is accessible as `/api/device/list`. Each file returns a closure stored in a variable whose name matches the file base name; `ZealAPI` binds that closure into the API context at runtime.
-- **`template/`** – Houses reusable view fragments loaded via `App::render()`. The default template root is `template/`; `App::render()` may descend into a subdirectory (e.g. `template/home/`) when the current page name matches one. Keep presentation-only PHP here to support dynamic HTML streaming.
+- **`template/`** – Views: page templates and components, rendered with `App::render()` (a page) and `App::component()` (markup inside a page). A page's templates sit in its own folder, named after the public file (`public/invoices.php` → `template/invoices/`, its components in `template/invoices/components/`); components several pages share go in `template/components/`. See [Where code goes](#where-code-goes).
+
+## Where code goes
+
+These are rules, not suggestions. The demo app follows them and `tests/Unit/ArchitectureRulesTest.php` enforces them, because both people and AI assistants copy what a codebase does more than what its docs say.
+
+```text
+app.php                                  bootstrap: config, middleware, run()
+public/invoices.php                      a page: App::render('invoices', $data)
+template/invoices/invoices.php           its template: lays the page out from components
+template/invoices/components/row.php     a component only this page uses
+template/components/card.php             a component several pages use
+route/invoices.php                       wiring: $app->route(...) → a src/ class → a response
+api/invoices/list.php                    wiring: one closure → a src/ class → data
+src/Billing/Invoices.php                 the logic
+```
+
+1. **Routes and APIs are wiring.** A handler reads its input, calls a `src/` class, and returns a status, data (an array becomes JSON), or `App::render()` / `App::component()`. No markup in `route/` or `api/`: no HTML strings, heredocs or echoed tags. An htmx endpoint returns a component, not a string it built.
+2. **Build pages from components.** A page template arranges components; any self-contained piece of UI (a card, a form, a list row, a widget, the fragment an endpoint returns) is a component with props, not markup copied between pages or a block inside a long page template.
+3. **Components live next to the page that uses them,** in its `components/` folder. Move one to `template/components/` when a second page needs it; the call doesn't change (names resolve nearest first). A route or API has no page, so it names a page's component in full: `App::component('/invoices/components/row', $props)`.
+4. **Templates are views.** No function or class declarations, no queries or business logic, no inline `<script>` or `style=` (JS in `public/js/`, CSS in `public/css/`).
+5. **Logic lives in `src/` classes**, autoloaded (PSR-4). No top-level functions in `route/`, `api/` or `template/`: they can't be re-declared, which also breaks [route hot-reload](hot-reload.md).
+6. **State that changes on the page is a reactive component** (`App::components()`), not markup a handler rebuilds by hand. See [Components](components.md).
 
 ## Background Execution
 
