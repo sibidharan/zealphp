@@ -37,7 +37,8 @@ $app->route('/api/chat', ['methods' => ['POST']], function($request, $response) 
                 $response->sse(function($emit) use ($threadId, $existing, $now) {
                     $emit(json_encode(['thread_id' => $threadId]), 'thread');
                     $mins = ceil(($existing['reset'] - $now) / 60);
-                    $emit(json_encode(['token' => "<p>Rate limit reached (60 questions/hour). Try again in ~{$mins} minutes.</p>"]), 'token');
+                    $notice = trim((string) App::component('/index/components/chat_rate_limited', ['minutes' => $mins]));
+                    $emit(json_encode(['token' => $notice]), 'token');
                     $emit(json_encode(['done' => true]), 'done');
                 });
                 return;
@@ -58,14 +59,7 @@ $app->route('/api/chat', ['methods' => ['POST']], function($request, $response) 
     if (!$apiKey) {
         $response->sse(function($emit) use ($threadId, $message) {
             $emit(json_encode(['thread_id' => $threadId]), 'thread');
-            $fallback = "<p>I'm a demo running on ZealPHP's SSE streaming. "
-                . "This response is being streamed token-by-token using "
-                . "<code>\$response->sse()</code>.</p>"
-                . "<p>To enable real AI responses, set the <code>OPENAI_API_KEY</code> "
-                . "environment variable. The backend uses the <strong>OpenAI Agents SDK</strong> "
-                . "with <code>SQLiteSession</code> for conversation threads — "
-                . "the SDK remembers your entire conversation automatically.</p>"
-                . "<p>ZealPHP makes this a 5-line feature, not a 50-line infrastructure project.</p>";
+            $fallback = trim((string) App::component('/index/components/chat_demo_reply'));
             foreach (explode(' ', $fallback) as $word) {
                 usleep(60000);
                 $emit(json_encode(['token' => $word . ' ']), 'token');
