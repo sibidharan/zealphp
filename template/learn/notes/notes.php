@@ -189,7 +189,8 @@ class Notes
       In Lesson 13 (<a href="/learn/components">Layouts &amp; Components</a>), you learned
       <code>App::render()</code> which echoes HTML. But htmx sent a POST and expects HTML back as the
       <em>response body</em>. You need the HTML as a value, not echoed to the page. That's
-      <code>App::component()</code>: it renders a component from <code>template/components/</code>
+      <code>App::component()</code>: it renders a component &mdash; looked up like <code>render()</code>,
+      nearest first from the page, with shared ones in <code>template/components/</code> &mdash;
       and returns the markup without echoing it.
     </p>
     <p><strong>Create <code>api/learn/notes.php</code></strong> &mdash; this is the endpoint htmx talks to:</p>
