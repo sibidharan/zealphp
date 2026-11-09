@@ -23,10 +23,7 @@ $app->route('/http/redirect/{code}', ['methods' => ['GET']], function($code, $re
 });
 
 $app->route('/http/redirect-target', ['methods' => ['GET']], function() {
-    $g = G::instance();
-    echo '<h2>Redirect landed here ✓</h2>';
-    echo '<p>from=' . htmlspecialchars($g->get['from'] ?? '?') . '</p>';
-    echo '<p><a href="/http">← Back</a></p>';
+    return App::component('/demos/http/redirect-target', ['from' => G::instance()->get['from'] ?? '?']);
 });
 
 // ---------------------------------------------------------------------------
@@ -78,7 +75,7 @@ $app->route('/http/etag-test', ['methods' => ['GET']], function() {
 $app->route('/http/compress-test', ['methods' => ['GET']], function() {
     // ~4KB of compressible text — well above the 1KB threshold
     $lorem = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. ';
-    echo '<html><body><pre>' . str_repeat($lorem, 72) . '</pre></body></html>';
+    return App::component('/demos/http/compress-test', ['text' => str_repeat($lorem, 72)]);
 });
 
 // ---------------------------------------------------------------------------
@@ -91,8 +88,7 @@ $app->route('/http/cookie-test', ['methods' => ['GET']], function($response) {
     // Via Response::cookie() — always had SameSite
     $response->cookie('modern_cookie', 'value', 0, '/', '', false, true, 'Lax');
 
-    echo '<h2>Cookies set ✓</h2>';
-    echo '<p>Check response headers for Set-Cookie with SameSite attribute.</p>';
+    return App::component('/demos/http/cookie-test');
 });
 
 // ---------------------------------------------------------------------------

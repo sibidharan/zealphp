@@ -85,7 +85,7 @@ $app->route('/timers/sse', ['methods' => ['GET']], function($response) use ($tic
 $app->route('/timers/oneshot', ['methods' => ['GET']], function($response) use ($requestCounter) {
     $requestCounter->increment();
     $response->stream(function($write) {
-        $write('<html><body><pre>');
+        $write((string) App::component('/demos/timers/oneshot-open'));
         $write("Scheduling a one-shot task in 3 seconds...\n");
 
         $result = new \OpenSwoole\Coroutine\Channel(1);
@@ -97,7 +97,7 @@ $app->route('/timers/oneshot', ['methods' => ['GET']], function($response) use (
         $write("Waiting for App::after(3000, ...) to fire...\n");
         $data = $result->pop(5);   // wait up to 5s
         $write($data ? json_encode($data, JSON_PRETTY_PRINT) . "\n" : "timed out\n");
-        $write("</pre></body></html>");
+        $write((string) App::component('/demos/timers/oneshot-close'));
     });
 });
 
