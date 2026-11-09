@@ -1300,14 +1300,14 @@ To compose templates, use `<?= App::component(...) ?>`, or call `App::render()` 
 
 ### Path resolution
 
-| Call | Resolves to | When |
-|------|-------------|------|
-| `App::render('home')` | `template/home.php` | Top-level template |
-| `App::render('/components/_card')` | `template/components/_card.php` | Leading `/` = absolute from `template/` |
-| `App::render('header')` from `public/users.php` | `template/users/header.php` | Auto-namespaces by current public file |
-| `App::render('header')` (fallback) | `template/header.php` | If the namespaced path does not exist |
-| `App::component('card')` | `template/components/card.php`, else `template/components/_card.php` | A component name |
-| `App::component('/emails/welcome')` | `template/emails/welcome.php` | Leading `/` = any template, absolute from `template/` |
+`render()` and `component()` resolve a name by the same rule:
+
+| Name | Looks in, in order |
+|------|--------------------|
+| `'/emails/welcome'` | `template/emails/welcome.php` — a leading `/` is absolute from `template/` |
+| `'header'` from `public/users.php` | nearest first: `template/users/header.php` (the page's folder), `template/users/components/header.php` (that page's components), `template/header.php`, `template/components/header.php` |
+
+Keep a component used by one page in that page's `components/` folder; move it to `template/components/` when another page needs it — no call changes. In each place `name.php` comes before the partial `_name.php`, and `'ui/button'` names a folder. A missing template's error lists every place it looked. A registered reactive component's name wins over templates in `component()`.
 
 ## Templates and Rendering — `App::component()` — markup as a value
 
@@ -1315,7 +1315,18 @@ To compose templates, use `<?= App::component(...) ?>`, or call `App::render()` 
 public static function component(string $component, array $props = [], ?string $key = null): SafeHtml
 ```
 
-`App::component()` returns the rendered markup and never echoes it. A name without a leading `/` is a component under `template/components/` (or a reactive component registered with `App::components()`); a leading `/` renders any template, absolute from `template/`. The props become template variables. Whatever the template returns is turned into markup: Generators are consumed and concatenated, Closures are invoked with parameter injection, arrays/objects are JSON-encoded, scalars are cast.
+`App::component()` returns the rendered markup and never echoes it. The name resolves by the [same rule as `render()`](#path-resolution) (a registered reactive component's name wins). The props become template variables.
+
+**A component follows the content half of the return contract only, by design.** It's a piece of someone else's response, so it can't set that response's status or turn it into JSON:
+
+| The template… | `component()` gives |
+|---|---|
+| echoes, returns a string, `SafeHtml` or any `Stringable` | that markup (echo first, then the return, in order) |
+| returns a Generator | its chunks, concatenated |
+| returns a Closure | the Closure called with its parameters injected by name from the props, then the same rules |
+| returns an `int` status, an array, a `ResponseInterface` or any other value | a `LogicException` naming what came back — return those from the route or page that owns the response |
+
+When a component *is* the whole response (`return App::component(...)` from a route), the route owns the response and the full contract applies to that return: the `SafeHtml` is sent as HTML.
 
 ```php
 <!-- in a template -->
@@ -1597,7 +1608,7 @@ ZealPHP builds pages from components, and one call renders both kinds:
 <?= App::component(Counter::class, ['count' => 5]) ?>     // reactive: state, actions, input binding
 ```
 
-- A **stateless component** is a PHP template in `template/components/`. Same props in, same HTML out — like a React function component without hooks.
+- A **stateless component** is a template rendered with `App::component()`: props in, markup out — like a React function component without hooks. Names resolve like `render()`'s, nearest first: the page's folder, the page's `components/`, `template/`, then `template/components/` (a leading `/` is absolute).
 - A **reactive component** is a PHP class. Public properties are its **state**, `#[Action]` methods are what buttons **call**, and `#[Model]` properties **bind** to form inputs, with validation. The server owns the state and renders HTML; the browser swaps it in. There's no client-side framework and no JSON API to keep in sync, and pages still work with JavaScript turned off.
 
 Start stateless; make a component reactive when it needs to respond to the user. Live demo: [`/components`](/components). For `App::render()`, streaming and fragments, see [Templates and Rendering](templates-and-rendering.md).
@@ -1614,17 +1625,25 @@ Put a template in `template/components/` and render it by name:
 </article>
 ```
 
+Then call it from any page or template — here a page rendered by `public/invoices.php` (`App::render('invoices-page')`):
+
 ```php
-<?= App::component('card', [
-    'title' => 'Invoices',
-    'slot'  => App::component('ui/button', ['text' => 'New invoice']),
-]) ?>
+<?php /* template/invoices-page.php */ use ZealPHP\App; ?>
+<main>
+  <h1>Billing</h1>
+  <?= App::component('card', [
+      'title' => 'Invoices',
+      'slot'  => App::component('ui/button', ['text' => 'New invoice']),
+  ]) ?>
+</main>
 ```
 
-- **Lookup:** `'card'` renders `components/card.php`, else `components/_card.php` (so existing underscore partials work as they are). `'ui/button'` looks in `components/ui/`. Names are lowercase letters, digits, `-` and `_`, with `/` for folders.
+A stateless component needs nothing else: no registration, no key, no script.
+
+- **Lookup:** the [same rule as `render()`](templates-and-rendering.md#path-resolution), nearest first: the page's folder, the page's `components/`, `template/`, then `template/components/`; `card.php` before the partial `_card.php` in each (so existing underscore partials work as they are). `'ui/button'` names a folder.
 - **Any template:** a leading `/` renders any template, absolute from `template/`: `App::component('/emails/welcome', ['user' => $u])`. This is how you get markup from a template that isn't a component; it replaces the deprecated `App::renderToString()`.
 - **Props** become template variables; `$props` holds them all. Pass child markup as `slot` — an `App::component()` result or `Escape::raw()` is printed as-is, anything else should go through `e()`.
-- **Returns markup, never echoes**, so `<?= ?>` is correct. A route can `return App::component(...)` too: the response is the HTML. `App::render()` is for whole pages; see [Templates and Rendering](templates-and-rendering.md).
+- **Returns markup, never echoes**, so `<?= ?>` is correct. A route can `return App::component(...)` too: the response is the HTML. A component returns content only — markup, a Generator or a Closure; a status code or JSON throws, because those belong to the route or page that owns the response ([why](templates-and-rendering.md#appcomponent--markup-as-a-value)).
 - **Registered names win.** If a reactive component is registered as `card`, `App::component('card')` renders that.
 - Stateless components can be used anywhere, including inside reactive components. They have no state, so they need no key and no `ZEALPHP_APP_KEY`.
 
@@ -1689,10 +1708,76 @@ final class Counter extends Component
 <button <?= $c->action('add', ['by' => 10]) ?>>+10</button>
 ```
 
-Put it on a page:
+### Putting it on a page, end to end
+
+Four files, plus the counter's template above. This exact set runs as-is:
+
+```
+route/components.php           registers the component (once, at boot)
+src/Components/Counter.php     the class above (Composer autoloads App\ from src/)
+template/components/counter.php   its view, above
+public/counter.php             the URL /counter
+template/counter-page.php      the page that renders it
+```
+
+**1. Register it** — `route/components.php` (route files load at boot):
 
 ```php
-<?= App::component(Counter::class, ['count' => 5], key: 'main') ?>
+<?php
+use ZealPHP\App;
+use App\Components\Counter;
+
+App::components([Counter::class]);
+```
+
+**2. Add a page** — `public/counter.php` serves `/counter` and renders a page template:
+
+```php
+<?php
+use ZealPHP\App;
+
+App::render('counter-page', ['title' => 'Counter']);
+```
+
+**3. Render the component in the page** — `template/counter-page.php`. The component is one line, `<?= App::component(...) ?>`, anywhere in the HTML; the page only has to load htmx:
+
+```php
+<?php
+use ZealPHP\App;
+use App\Components\Counter;
+use function ZealPHP\e;
+?>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title><?= e($title) ?></title>
+  <script src="https://unpkg.com/htmx.org@2.0.10" defer></script>
+</head>
+<body>
+  <h1><?= e($title) ?></h1>
+  <?= App::component(Counter::class, ['count' => 5], key: 'main') ?>
+</body>
+</html>
+```
+
+Start the server with a key (`ZEALPHP_APP_KEY=… php app.php`) and open `/counter`: the buttons update the count in place. A route works the same way as the public file:
+
+```php
+$app->route('/counter', fn() => App::render('counter-page', ['title' => 'Counter']));
+```
+
+In a site with a shared layout, put the htmx `<script>` in the layout's `<head>` once and call `App::component()` from any page template, partial or other component's template. Two optional extras also go in the layout once: `<?= App::componentPushRoot() ?>` before `</body>` for [live updates](#live-updates-push), and `ZealJsBinder::script()` instead of htmx for [pages without htmx](#without-htmx-zealjsbinder).
+
+The browser receives the component already rendered:
+
+```html
+<form method="post" action="/_zeal/c/counter/_refresh" id="counter-main" data-zc="counter">
+  <input type="hidden" name="_zc" value="eyJjIjoiY291bnRlciIs…">   <!-- the signed state -->
+  <span>5</span>
+  <button type="submit" formaction="/_zeal/c/counter/add" hx-post="/_zeal/c/counter/add" …>+1</button>
+  <button type="submit" formaction="/_zeal/c/counter/add" value="{&quot;by&quot;:10}" …>+10</button>
+</form>
 ```
 
 The template is only the inside of the component. The framework wraps it in the `$tag` element (with `id="counter-main"` and `data-zc="counter"`) and adds a hidden `_zc` input holding the signed snapshot.
@@ -1708,6 +1793,7 @@ The template is only the inside of the component. The framework wraps it in the 
 | each public property | its current value (`$count`) |
 | `$c` | the component, for the helpers below |
 | `$errors` | `field => message` validation errors |
+| `$slot` | markup the parent passed as the `slot` prop (`SafeHtml`), or `null` |
 | anything in `$extra` | as given |
 
 The template path is always absolute from `template/`, so the page and the endpoint render the same file.
@@ -1931,7 +2017,28 @@ The endpoint speaks plain HTTP. A **binder** decides which attributes `action()`
 |---|---|---|
 | `HtmxBinder` (default) | `hx-post`, `hx-target`, `hx-include`, `hx-sync`, `hx-preserve`, plus the plain-form attributes | Pages with htmx 2 |
 | `FormBinder` | Plain-form attributes only | Pages with no JavaScript |
-| your own | anything — implement `ZealPHP\Component\ComponentBinder` | Alpine, Datastar, a custom `fetch()` client |
+| `ZealJsBinder` | Plain-form attributes plus `data-zc-*` markers, for the bundled `zeal.js` | Pages without htmx |
+| your own | anything — implement `ZealPHP\Component\ComponentBinder` | Alpine, Datastar, another client |
+
+### Without htmx: `ZealJsBinder`
+
+A small bundled script makes components interactive on pages that don't load htmx:
+
+```php
+App::componentBinder(new ZealJsBinder());   // before App::run()
+```
+```php
+<?= \ZealPHP\Component\ZealJsBinder::script() ?>   <!-- in the layout's <head>, once -->
+```
+
+It speaks the plain protocol below:
+- Actions and live (debounced) or on-blur fields post to the endpoint with `Zeal-Request: 1`.
+- The re-rendered component replaces the old one in place, keeping the value, focus and cursor of the field being typed in.
+- An action replaces a live update still in flight on the same component, and the clicked button is disabled until its response arrives.
+- `Zeal-Events` are dispatched as bubbling DOM `CustomEvent`s on the component (`detail` = the event's detail).
+- `Zeal-Redirect` and `Zeal-Reload` navigate.
+
+The markup is the same working form `FormBinder` renders, so the page still works with JavaScript off. The script URL is versioned by its content and cached as immutable.
 
 ### htmx 2 and htmx 4
 
@@ -1974,8 +2081,11 @@ For writing a binder or a client.
 | `_zc` | the snapshot from the component's hidden input |
 | `_zc_args` | action arguments as a JSON object (`{"by": 2}`); omit for none |
 | `#[Model]` fields | as a form would send them (`tags[]` for arrays) — send **every** bound control in the component, not just the changed one: a missing `bool` means unchecked and a missing `array` means empty, so a partial post clears them |
+| `_zc_kids[{id}]` | the current snapshot of each component nested inside this one, so a re-render rebuilds them from their state (each is verified, and used only for its own id) |
 
-`{action}` is an `#[Action]` method name, `_update` (apply input and validate changed fields), or `_refresh` (apply input, re-render). For `_update`, name the field that changed in a `_zc_trigger` form field (the htmx binder does this); a `Zeal-Trigger` or `HX-Trigger-Name` header also works. Scripted clients send `Zeal-Request: 1`.
+Everything a component sends is in its own form: the outer element when `$tag` is `'form'`, otherwise an empty `<form id="{id}-zc">` it renders first; every control and button joins it with `form="{id}-zc"`. Post that form's `FormData` and nothing else — never the fields of a component nested inside it.
+
+`{action}` is an `#[Action]` method name, `_update` (apply input and validate changed fields), `_refresh` (apply input, re-render), or `_on` (run the component's `#[On]` methods for the event named in a `_zc_event` field, then re-render; 404 if it doesn't listen for that event). For `_update`, name the field that changed in a `_zc_trigger` form field (the htmx binder does this); a `Zeal-Trigger` or `HX-Trigger-Name` header also works. Scripted clients send `Zeal-Request: 1`.
 
 **Response:**
 
@@ -2069,6 +2179,135 @@ Topic names are 1–128 characters of letters, digits, `:`, `_`, `.` and `-` (`c
 - `Component::invalidate()` is server-side only; clients can't trigger one.
 - **Capacity.** `maxConnections` is per worker, and a page's token can be reused for many connections. On a public site, cap connections per client in front of ZealPHP (your proxy's per-IP connection limit on `/_zeal/c/ws` and `/_zeal/c/stream`).
 
+## Components — Generating a component
+
+```bash
+php app.php make:component LikeButton            # src/Components/LikeButton.php + template/components/like-button.php
+php app.php make:component user-card --stateless # template/components/user-card.php only
+```
+
+The class lands in your `src/` namespace (from `composer.json`'s PSR-4 map), with a counter to start from. The command never overwrites a file and prints the line that registers the component.
+
+## Components — Testing components
+
+`ZealPHP\Component\Tester` drives a component through the real endpoint, without a server or a browser, so snapshots, validation, `authorize()`, hooks, events and redirects behave as in production:
+
+```php
+use ZealPHP\Component\Tester;
+
+Tester::render(Counter::class, ['count' => 1])
+    ->call('increment', ['by' => 2])        // click an action
+    ->assertSet('count', 3)
+    ->assertSee('3');
+
+Tester::render(SignupForm::class)
+    ->set('username', 'ab')                 // type into a #[Model] field
+    ->assertStatus(422)
+    ->assertHasErrors('username')
+    ->set('username', 'alice')
+    ->set('email', 'alice@example.com')
+    ->call('save')
+    ->assertHasNoErrors()
+    ->assertDispatched('signed-up');
+```
+
+| Step | Does |
+|---|---|
+| `Tester::render($classOrName, $props, $key)` | Render (registering the class if needed) |
+| `call($action, $args)` | Run an `#[Action]` |
+| `set($prop, $value)` | Change a `#[Model]` field: validates it and runs `updated{Prop}()`; the other bound fields are sent with their current values, as a browser would |
+| `refresh()` | Re-render with the current state |
+
+Read with `html()`, `status()`, `get($prop)`, `errors()`, `events()` and `redirectedTo()`. Assert with `assertSee()`/`assertDontSee()` (text is HTML-escaped first; pass `false` to match markup), `assertSet()`, `assertHasErrors(...$fields)`, `assertHasNoErrors()`, `assertDispatched()`, `assertRedirect(?$to)` and `assertStatus()`. A refused request (403 from `authorize()`, 404 for an unknown action) sets the status and leaves the markup as it was. Assertions go through PHPUnit when it's installed and throw `\AssertionError` otherwise. Without `ZEALPHP_APP_KEY` the tester signs with a random key for the process.
+
+## Components — Nesting components
+
+A reactive component can render other reactive components. Give each child a `key:` — it's how the child keeps its state:
+
+```php
+final class TodoList extends Component
+{
+    public array $items = ['Milk', 'Bread'];
+    public string $filter = '';
+
+    public function render(): mixed
+    {
+        return $this->view('components/todo-list');
+    }
+}
+
+final class TodoRow extends Component
+{
+    #[Reactive]
+    public string $label = '';       // follows the parent
+    public bool $done = false;       // the row's own state
+    #[Model]
+    public string $note = '';
+
+    #[Action]
+    public function toggle(): void
+    {
+        $this->done = !$this->done;
+    }
+
+    public function render(): mixed
+    {
+        return $this->view('components/todo-row');
+    }
+}
+```
+
+```php
+<?php /* template/components/todo-list.php */ use ZealPHP\App; ?>
+<?php foreach ($items as $i => $item): ?>
+  <?= App::component(TodoRow::class, ['label' => $item], key: (string) $i) ?>
+<?php endforeach; ?>
+```
+
+- **Each component sends only its own fields.** Every component posts its own form, so a row's button never sends the list's fields and the list's actions never send the rows'. This works the same with htmx 2, htmx 4, `ZealJsBinder` and without JavaScript.
+- **Children keep their state when the parent re-renders.** Each child's current snapshot travels in its parent's form; when the parent re-renders, every child is rebuilt from its own state — a row stays `done`, keeps what was typed in its note — instead of being mounted again from the props. A snapshot is only used for the child id it was issued to.
+- **`#[Reactive]` properties follow the parent.** Props seed a child when it first mounts; after that, only properties marked `#[Reactive]` take the parent's new values. The rest belong to the child.
+- **Keys are required inside a parent**, and only need to be unique within it: a child's id is scoped by its parent's (`todo-list-main-todo-row-0`). Use the item's stable id rather than its position if rows can be reordered, so state follows the item.
+- **Slots.** A parent can pass markup into a reactive child as the `slot` prop — `App::component(Modal::class, ['slot' => App::component('/partials/terms')], key: 'terms')` — and the child prints it with `<?= $slot ?>` (or `$this->slot()`). The slot is kept in the child's snapshot, so the child's own updates re-render it; when the parent re-renders, the new slot replaces it. A slot can't contain reactive components (their state would be frozen inside it): render those in the parent. Stateless markup is fine.
+- **Limits:** nesting goes 8 levels deep. A component with `$tag = 'form'` can't contain reactive children, and a nested component can't use `$tag = 'form'` (forms can't nest) — keep the default `div`.
+
+## Components — Events between components
+
+One component's action can make others on the page update — the cart badge after "add to cart":
+
+```php
+final class ProductCard extends Component
+{
+    public int $productId = 0;
+
+    #[Action]
+    public function add(): void
+    {
+        Cart::add($this->productId);
+        $this->dispatch('cart-updated');
+    }
+    // ...
+}
+
+final class CartBadge extends Component
+{
+    public int $count = 0;
+
+    #[On('cart-updated')]
+    public function sync(): void
+    {
+        $this->count = Cart::count();
+    }
+    // ...
+}
+```
+
+- Every component on the page with an `#[On('cart-updated')]` method runs it and re-renders, through its own snapshot and session like any other request. Events carry no data to listeners; a listener reads what it needs.
+- A component doesn't hear its own events: it already re-rendered after its action.
+- `#[On]` takes one or more event names (letters, digits, `:`, `_`, `.`, `-`) and is repeatable; the method is public and takes no arguments. `authorize()` is called with the listener's method name.
+- htmx delivers events through the response's `HX-Trigger` header (`hx-trigger="… from:body"` on a hidden element per event); `ZealJsBinder` does the same from `Zeal-Events`. Without JavaScript events aren't delivered — the next page load shows current data.
+- For other tabs and visitors, pair it with [push](#live-updates-push): `Component::invalidate('cart')` after the write.
+
 ## Components — Running in coroutine-legacy
 
 `App::components()` loads and reflects your component classes — and the framework's own component classes — in the master, before workers fork, so none of them is compiled cold under concurrency. Instances live for one request and are never stored in statics, so they need no isolation support.
@@ -2076,13 +2315,12 @@ Topic names are 1–128 characters of letters, digits, `:`, `_`, `.` and `-` (`c
 ## Components — Limits in this version
 
 - **Push needs the root on the page.** Pages that don't include `App::componentPushRoot()` render components normally but never receive updates.
-- **No reactive nesting.** A reactive component inside another reactive component's render throws: the parent's requests would carry the child's snapshot too. Stateless components nest freely.
 - **Dev hot-reload** (`--dev`) re-registers components from `route/*.php`, but the endpoint route and the key check are set up at boot: if a reload adds the *first* component, restart. Removed components stay registered until restart.
 - **Behind a proxy that rewrites `Host`**, the `Origin` fallback and the no-JS back-link compare against the rewritten host. Modern browsers send `Sec-Fetch-Site`, which isn't affected; the back-link falls back to `/`.
 
 ## Components — What's next
 
-Planned in [the design doc](architecture/2026-11-06-server-driven-components.md): a bundled vanilla-JS client for actions and input binding, nested components, and benchmarks against `render(…, htmx: true)` fragments.
+Composition is complete ([design](architecture/2026-11-09-component-composition.md)): nesting, `#[Reactive]` props, events and slots. Next: a benchmark of component actions against `render(…, htmx: true)` fragments.
 
 ## Streaming
 
@@ -5200,6 +5438,7 @@ server in the foreground on the configured port (8080 by default).
 | `status` | Report whether the instance is running (prints pid + port). |
 | `logs` | Tail the log files (Ctrl+C to stop). Combine with the log filters below to tail specific logs. |
 | `key:generate` | Print a new `ZEALPHP_APP_KEY=base64:…` line and exit, without starting a server. The key signs [reactive component](components.md) state; see [environment variables](environment-variables.md). |
+| `make:component Name [--stateless]` | Create a [component](components.md#generating-a-component): `src/Components/Name.php` (namespace from your `composer.json` PSR-4 map for `src/`) and `template/components/name.php`; `--stateless` writes only the template. Never overwrites; prints how to register and render it. |
 
 ## CLI reference — Options
 
@@ -5533,7 +5772,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.4.18 .
+docker build -t zealphp:0.4.19 .
 ```
 
 The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
@@ -5545,7 +5784,7 @@ versions with the build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg ZEALPHP_EXT_VERSION=v0.3.33 \
-    -t zealphp:0.4.18 .
+    -t zealphp:0.4.19 .
 ```
 
 ### Run (single container)
@@ -5557,7 +5796,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.4.18
+    zealphp:0.4.19
 ```
 
 ### Production compose
@@ -5568,7 +5807,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.4.18
+    image: registry.example.com/zealphp-app:0.4.19
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"

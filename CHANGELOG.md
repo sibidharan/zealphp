@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.4.19] - 2026-11-09
+
 ### Added — slots for reactive components (#509 phase 4)
 - **A parent can pass markup into a reactive child as the `slot` prop**; the child prints `<?= $slot ?>` (or `$this->slot()`). It's kept in the child's signed snapshot, so the child's own updates re-render it, and a parent re-render replaces it. A slot can't contain reactive components (refused: their state would be frozen inside). Guide: [Nesting components](docs/components.md#nesting-components).
 - `slot` is now a reserved component property name.
@@ -33,6 +35,10 @@ All notable changes to this project will be documented in this file. The format 
 ### Added — component dev tools
 - **`ZealPHP\Component\Tester`** drives a reactive component through the real endpoint in a unit test: `Tester::render(Counter::class)->call('increment')->assertSet('count', 1)`, `->set('email', …)->assertHasErrors('email')`, plus `assertSee`, `assertDispatched`, `assertRedirect` and `assertStatus`. No server or browser needed. Guide: [Testing components](docs/components.md#testing-components).
 - **`php app.php make:component Name [--stateless]`** writes a component class and its template (or just a template), in your `src/` namespace, never overwriting.
+
+### Documentation
+- **Components, end to end** (#524): the guide now walks one component from class to template to registration to the page that renders it, and shows the HTML the browser gets.
+- **Docs-site headings get GitHub-style ids** (#522), so `#anchor` links from the guides and the README land on the right section.
 
 ## [0.4.18] - 2026-11-09
 
