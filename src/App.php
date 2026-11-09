@@ -4015,13 +4015,14 @@ class App
             $cmd = self::withTimeout($cmd, $timeout);
         }
         if (\OpenSwoole\Coroutine::getCid() >= 0) {
-            // System::exec()'s second parameter differs between OpenSwoole builds:
-            // 26.2 is (string $command, bool $get_error_stream); others take a
-            // float timeout first. The old `$timeout ?? -1` was truthy on 26.2 and
-            // merged stderr into every output (a CLI's DEBUG lines landed in front
-            // of its JSON); a bare `false` would be a 0 s timeout on the others.
-            // Pass the stderr-off arguments for whichever signature is loaded.
-            $r = \OpenSwoole\Coroutine\System::exec($cmd, ...self::systemExecArgs());
+            // Keep stderr out of the captured output (a CLI's DEBUG lines used to
+            // land in front of its JSON) by redirecting it in the shell, and let
+            // OpenSwoole's pipe carry stdout only. Not via get_error_stream=false:
+            // on OpenSwoole 25.2 that path takes the calling process group down
+            // (SIGTERM) when the command writes to stderr. The truthy argument has
+            // always been safe; the redirect sends stderr to this process's own
+            // stderr (the server log), as shell_exec() would.
+            $r = \OpenSwoole\Coroutine\System::exec(self::stderrToWorker($cmd), ...self::systemExecArgs());
             if (is_array($r)) {
                 $output = $r['output'] ?? '';
                 $code = $r['code'] ?? 0;
@@ -4064,8 +4065,25 @@ class App
     private static ?bool $exec_second_is_timeout = null;
 
     /**
+     * Wrap a command so its stderr goes to this process's stderr (Linux
+     * `/proc/<pid>/fd/2`), or is discarded where that path doesn't exist.
+     */
+    private static function stderrToWorker(string $cmd): string
+    {
+        $own = '/proc/' . getmypid() . '/fd/2';
+        $target = file_exists($own) ? $own : '/dev/null';
+        // `exec 2>>…` re-points the shell's own stderr before the command runs,
+        // so the command's own redirects (`2>&1`, subshells) behave exactly as
+        // written. (A `{ …; } 2>>file` group doesn't: dash mishandles a
+        // subshell's `2>&1` inside one.)
+        return 'exec 2>>' . escapeshellarg($target) . "\n" . $cmd;
+    }
+
+    /**
      * Arguments after `$command` for `Coroutine\System::exec()`: no native
-     * timeout (App::exec() enforces its own) and stderr not captured.
+     * timeout (App::exec() enforces its own) and `get_error_stream` on — the
+     * command's stderr is already redirected by stderrToWorker(), so the pipe
+     * carries stdout only.
      *
      * @return list<bool|int>
      */
@@ -4080,7 +4098,7 @@ class App
                 || ($type instanceof \ReflectionNamedType && in_array($type->getName(), ['float', 'int'], true))
             );
         }
-        return self::$exec_second_is_timeout ? [-1, false] : [false];
+        return self::$exec_second_is_timeout ? [-1, true] : [true];
     }
 
     /** Paths of coreutils `timeout` and util-linux `setsid` ('' when absent), found once per worker. */

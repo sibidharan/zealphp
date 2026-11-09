@@ -15,7 +15,7 @@ parameters:
         # between builds: 26.2 is (bool $get_error_stream), others take a float
         # timeout first. The ide-helper stub (22.0.1) declares only the bool
         # form. App::exec() reads the loaded signature by reflection
-        # (systemExecArgs()) and spreads the matching stderr-off arguments.
+        # (systemExecArgs()) and spreads the matching arguments.
         -
             message: '#^Parameter \#2 \$get_error_stream of static method OpenSwoole\\Coroutine\\System::exec\(\) expects bool, bool\|int given\.$#'
             path: src/App.php

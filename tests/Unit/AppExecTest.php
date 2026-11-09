@@ -131,7 +131,6 @@ final class AppExecTest extends TestCase
 
     public function testExecInCoroutineCapturesStdoutOnly(): void
     {
-        self::diag('testExecInCoroutineCapturesStdoutOnly');
         // A CLI that logs to stderr and prints JSON on stdout (labsctl): the
         // log lines used to land in front of the JSON.
         $result = null;
@@ -146,7 +145,6 @@ final class AppExecTest extends TestCase
 
     public function testExplicitRedirectStillCapturesStderr(): void
     {
-        self::diag('testExplicitRedirectStillCapturesStderr');
         $result2 = null;
         \OpenSwoole\Coroutine::run(function () use (&$result2) {
             $result2 = App::exec('(echo err >&2) 2>&1');
@@ -156,7 +154,6 @@ final class AppExecTest extends TestCase
 
     public function testHookedShellExecDoesNotCaptureStderr(): void
     {
-        self::diag('testHookedShellExecDoesNotCaptureStderr');
         $out = null;
         \OpenSwoole\Coroutine::run(function () use (&$out) {
             $out = \ZealPHP\zeal_shell_exec('echo noise >&2; echo clean');
@@ -166,7 +163,6 @@ final class AppExecTest extends TestCase
 
     public function testTimeoutStopsTheCommand(): void
     {
-        self::diag('testTimeoutStopsTheCommand');
         if (!is_executable('/usr/bin/timeout') && !is_executable('/bin/timeout')) {
             $this->markTestSkipped('coreutils timeout not installed');
         }
@@ -185,7 +181,6 @@ final class AppExecTest extends TestCase
 
     public function testTimeoutStopsTheWholeProcessTreeAndNotTheCaller(): void
     {
-        self::diag('testTimeoutStopsTheWholeProcessTreeAndNotTheCaller');
         if (!is_executable('/usr/bin/timeout') && !is_executable('/bin/timeout')) {
             $this->markTestSkipped('coreutils timeout not installed');
         }
@@ -205,7 +200,6 @@ final class AppExecTest extends TestCase
 
     public function testTimeoutDoesNotChangeAFastCommandOrQuoting(): void
     {
-        self::diag('testTimeoutDoesNotChangeAFastCommandOrQuoting');
         $result = null;
         \OpenSwoole\Coroutine::run(function () use (&$result) {
             $result = App::exec("printf '%s|' \"a b\" 'c\"d'; exit 2", 5);
@@ -217,7 +211,6 @@ final class AppExecTest extends TestCase
 
     public function testTimeoutAppliesOutsideACoroutineToo(): void
     {
-        self::diag('testTimeoutAppliesOutsideACoroutineToo');
         if (!is_executable('/usr/bin/timeout') && !is_executable('/bin/timeout')) {
             $this->markTestSkipped('coreutils timeout not installed');
         }
@@ -229,16 +222,7 @@ final class AppExecTest extends TestCase
 
     public function testNonPositiveTimeoutIsRefused(): void
     {
-        self::diag('testNonPositiveTimeoutIsRefused');
         $this->expectException(\InvalidArgumentException::class);
         App::exec('true', 0);
-    }
-
-    /** TEMP CI diagnostic for the exit-143 hunt — removed once found. */
-    private static function diag(string $test): void
-    {
-        $m = new \ReflectionMethod(\OpenSwoole\Coroutine\System::class, 'exec');
-        $sig = implode(', ', array_map(fn($p) => $p->getType() . ' $' . $p->getName(), $m->getParameters()));
-        fwrite(STDERR, "[diag] {$test} | openswoole " . phpversion('openswoole') . " | exec({$sig}) | pid " . getmypid() . " pgid " . (function_exists('posix_getpgid') ? posix_getpgid(0) : '?') . "\n");
     }
 }
