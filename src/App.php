@@ -7608,7 +7608,9 @@ class App
         } catch (\Throwable $e) {
             // PHP 8.4+: exit()/die() throw \ExitException instead of
             // terminating the process. Treat as clean halt — worker survives.
-            // @codeCoverageIgnoreStart — ExitException only exists on PHP 8.4+ / OpenSwoole
+            // Not coverable: ExitException only exists on PHP 8.4+ / OpenSwoole.
+            // (Keep the marker below bare: php-code-coverage only matches it exactly.)
+            // @codeCoverageIgnoreStart
             if (($e instanceof \OpenSwoole\ExitException || $e::class === 'ExitException')
                 && method_exists($e, 'getStatus')) {
                 $status = $e->getStatus();
@@ -7931,6 +7933,28 @@ class App
         return $result;
     }
 
+    /** @var array<string, true> call sites already warned about, per worker */
+    private static array $deprecation_warned = [];
+
+    /**
+     * In dev mode (`--dev` / `ZEALPHP_DEV=1`), log once per call site that a
+     * deprecated rendering helper was used, with its replacement. Silent in
+     * production. The helpers keep working until 1.0.
+     */
+    private static function deprecatedHelper(string $old, string $new): void
+    {
+        if (!self::devReload()) {
+            return;
+        }
+        $frame = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3)[1] ?? [];
+        $site = str_replace(self::$cwd . '/', '', (string) ($frame['file'] ?? '?')) . ':' . (string) ($frame['line'] ?? '?');
+        if (isset(self::$deprecation_warned[$old . '@' . $site])) {
+            return;
+        }
+        self::$deprecation_warned[$old . '@' . $site] = true;
+        elog("[deprecated] {$old} at {$site} — use {$new}; it will be removed in 1.0", 'warn');
+    }
+
     /**
      * Pick the template and fragment for an htmx-aware render.
      *
@@ -8217,6 +8241,7 @@ class App
      */
     public static function renderHtmx(string $template, array $args = [], ?string $fragmentName = null, ?string $fullPageTemplate = null): mixed
     {
+        self::deprecatedHelper('App::renderHtmx()', 'App::render($template, $args, htmx: true)');
         return self::render($template, $args, fragment: $fragmentName, htmx: true, fullPage: $fullPageTemplate);
     }
 
@@ -8234,6 +8259,7 @@ class App
      */
     public static function renderToString(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): string
     {
+        self::deprecatedHelper('App::renderToString()', "App::component('/path', \$args)");
         $path = self::resolveTemplatePath($__template_file, $__default_template_dir);
         $result = self::executeFile($path, $__args);
         return self::coerceToString($result);
@@ -8261,6 +8287,7 @@ class App
      */
     public static function renderStream(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): \Generator
     {
+        self::deprecatedHelper('App::renderStream()', 'App::render($template, $args, stream: true)');
         $path = self::resolveTemplatePath($__template_file, $__default_template_dir);
         $result = self::executeFile($path, $__args);
         yield from self::coerceToStream($result);
@@ -10180,7 +10207,9 @@ class App
         // loaded AND superglobals mode is on with coroutines. ext-zealphp
         // v0.3.2+ chains its callbacks with OpenSwoole's PHPCoroutine hooks
         // (EG/CG context switch) so PHP state remains consistent.
-        // @codeCoverageIgnoreStart — requires running OpenSwoole server
+        // Not coverable: requires a running OpenSwoole server.
+        // (Keep the marker below bare: php-code-coverage only matches it exactly.)
+        // @codeCoverageIgnoreStart
         if (App::$superglobals && $enableCoroutine
             && \extension_loaded('zealphp')
             && \function_exists('zealphp_coroutine_superglobals')
