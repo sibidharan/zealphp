@@ -174,7 +174,7 @@ final class Push
             's' => Snapshot::currentBinding(),
             't' => time(),
             'c' => $subs,
-        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        ], JSON_THROW_ON_ERROR);
         $mac = hash_hmac('sha256', $json, AppKey::derive(self::PURPOSE), true);
         return self::b64($json) . '.' . self::b64($mac);
     }
@@ -320,16 +320,24 @@ final class Push
     /** Send the batched topics to the node's other workers and to other nodes. */
     public static function sendOutbox(): void
     {
+        $payload = self::drainOutbox();
+        if ($payload !== null) {
+            self::fanOutToWorkers($payload);
+            self::fanOutToNodes($payload);
+        }
+    }
+
+    /** Empty the outbox into one message, or null when nothing is waiting. */
+    public static function drainOutbox(): ?string
+    {
         $state = self::state();
         $topics = array_map('strval', array_keys($state->outbox));
         $state->outbox = [];
         $state->outboxScheduled = false;
         if ($topics === []) {
-            return;
+            return null;
         }
-        $payload = (string) json_encode(['topics' => $topics, 'origin' => self::origin()]);
-        self::fanOutToWorkers($payload);
-        self::fanOutToNodes($payload);
+        return json_encode(['topics' => $topics, 'origin' => self::origin()], JSON_THROW_ON_ERROR);
     }
 
     /**
@@ -403,9 +411,15 @@ final class Push
             self::flush($connId);
             return;
         }
-        \OpenSwoole\Timer::after((int) max(1, round(self::$coalesce * 1000)), static function () use ($connId): void {
+        \OpenSwoole\Timer::after(self::delayMs(self::$coalesce), static function () use ($connId): void {
             self::flush($connId);
         });
+    }
+
+    /** A coalesce window in whole milliseconds for Timer::after(), at least 1. */
+    public static function delayMs(float $seconds): int
+    {
+        return max(1, (int) round($seconds * 1000));
     }
 
     private static function fanOutToWorkers(string $payload): void
@@ -478,10 +492,8 @@ final class Push
 
     private static function unb64(string $s): ?string
     {
-        if (preg_match('/^[A-Za-z0-9_-]+$/D', $s) !== 1) {
-            return null;
-        }
+        // Strict mode refuses anything outside the alphabet; the MAC decides the rest.
         $raw = base64_decode(strtr($s, '-_', '+/'), true);
-        return $raw === false ? null : $raw;
+        return $raw === false || $raw === '' ? null : $raw;
     }
 }

@@ -21,8 +21,8 @@
   var base = '/_zeal/c';
   var ready = false;   // a connection has been accepted before
   var closed = false;
-  var inflight = {};   // id → true while its refresh is running
-  var again = {};      // id → true when it went stale again meanwhile
+  var inflight = new Set(); // ids whose refresh is running
+  var again = new Set();    // ids that went stale again meanwhile
 
   // hx-boost swaps the body without a page load, so a previous page's
   // connection may still be open: close it before opening ours.
@@ -84,9 +84,9 @@
   function refresh(id) {
     var el = document.getElementById(id);
     if (!el || !el.hasAttribute('data-zc')) return;
-    if (inflight[id]) { again[id] = true; return; }
+    if (inflight.has(id)) { again.add(id); return; }
     if (busy(el)) { setTimeout(function () { refresh(id); }, 300); return; }
-    inflight[id] = true;
+    inflight.add(id);
     var v = htmxVersion();
     var headers = v ? { 'HX-Request': 'true' } : { 'Zeal-Request': '1' };
     if (v >= 4) headers['HX-Request-Type'] = 'partial';
@@ -106,8 +106,8 @@
       var now = document.getElementById(id); // the element may have been swapped meanwhile
       if (html && now) swap(now, html);
     }).catch(function () { /* offline or navigating away */ }).then(function () {
-      inflight[id] = false;
-      if (again[id]) { again[id] = false; refresh(id); }
+      inflight.delete(id);
+      if (again.delete(id)) refresh(id);
     });
   }
 

@@ -231,6 +231,9 @@ jobs:
           # segfaults inside the unit pass under OpenSwoole + uopz on PHP 8.3,
           # which silently drops the unit.cov payload (codecov/patch then
           # plateaus on integration-only signal).
+          # The harness starts its own servers: give them a key too, or the
+          # components demo (and component push) is disabled and never covered.
+          export ZEALPHP_APP_KEY="base64:$(php -r 'echo base64_encode(random_bytes(32));')"
           bash scripts/coverage_full.sh
           mkdir -p build/logs
           cp /tmp/zcov/clover.xml build/logs/clover.xml

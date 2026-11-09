@@ -247,6 +247,17 @@ class EndpointTest extends TestCase
         $this->assertSame(400, Endpoint::handle('counter', 'increment', ['_zc' => $wire], self::HTMX)['status']);
     }
 
+    public function testSnapshotWithSurroundingWhitespaceIs400(): void
+    {
+        // Strict base64_decode() skips whitespace, so the wire format is checked first.
+        $wire = self::wire((string) App::component(Counter::class, [], 'ws'));
+        [$payload, $mac] = explode('.', $wire);
+        foreach (["{$payload}\n.{$mac}", " {$payload}.{$mac}", "{$payload}.{$mac}\n"] as $padded) {
+            $this->assertSame(400, Endpoint::handle('counter', 'increment', ['_zc' => $padded], self::HTMX)['status'], json_encode($padded) ?: '');
+        }
+        $this->assertSame(200, Endpoint::handle('counter', 'increment', ['_zc' => $wire], self::HTMX)['status']);
+    }
+
     public function testSnapshotSignedWithAnotherKeyIs400(): void
     {
         $html = (string) App::component(Counter::class, [], 'k');

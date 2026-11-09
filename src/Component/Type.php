@@ -84,7 +84,7 @@ final class Type
                 if (is_int($value)) {
                     return $value;
                 }
-                if (is_string($value) && preg_match('/^\s*-?\d{1,18}\s*$/D', $value) === 1) {
+                if (is_string($value) && preg_match('/^\s*-?\d{1,18}\s*$/', $value) === 1) {
                     return (int) trim($value);
                 }
                 throw new \InvalidArgumentException('must be a whole number');

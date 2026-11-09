@@ -73,6 +73,7 @@ class TypeTest extends TestCase
         yield 'null for non-nullable' => ['int', null];
         yield 'int enum from non-numeric string' => [Priority::class, 'high'];
         yield 'int enum unknown' => [Priority::class, '5'];
+        yield 'int enum trailing newline' => [Priority::class, "9\n"];
         yield 'invalid utf-8 string' => ['string', "\xC3\x28"];
         yield 'array with invalid utf-8' => ['array', ["\xFF"]];
         yield 'array with invalid utf-8 key' => ['array', ["\xFF" => 'a']];

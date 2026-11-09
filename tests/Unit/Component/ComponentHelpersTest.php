@@ -75,6 +75,17 @@ class ComponentHelpersTest extends TestCase
         App::component('tag');
     }
 
+    public function testTagWithATrailingNewlineIsRefused(): void
+    {
+        $c = new class extends Component {
+            protected string $tag = "div\n";
+            public function render(): mixed { return ''; }
+        };
+        Registry::register($c::class, 'nltag');
+        $this->expectException(\LogicException::class);
+        App::component('nltag');
+    }
+
     public function testSubmitMustNameAnAction(): void
     {
         $c = new class extends Component {
