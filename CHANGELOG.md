@@ -4,7 +4,11 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Changed
+- **A nested page's templates resolve from its full path.** `public/admin/users.php` looks in `template/admin/users/` (and its `components/`), where it used to use the basename's folder (`template/users/`), so two pages named alike in different folders shared one. The basename folder is still checked after the page's own, so existing templates keep resolving.
+
 ### Security
+- **The client no longer picks which template folder names resolve from.** The page was taken from `PHP_SELF`, which ends in the request's `PATH_INFO`: `/index.php/users` made `render('row')` look in `template/users/`. It now comes from `SCRIPT_NAME`.
 - **Uploads no longer fill `/tmp`.** Every multipart request left its `swoole.upfile.*` temp files on disk for good: the request wrapper held OpenSwoole's `tmpfiles` list by reference, which hides it from OpenSwoole's cleanup, and a cycle between the request context and the response kept each request alive until PHP's cycle collector ran. Both fixed; temp files are deleted when the request ends.
 - **`compat/g.php` no longer hands one visitor's `$g` to the next.** Under ZealPHP the shim stored the first request's context in `$GLOBALS['g']`, which every later (and concurrent) request in the worker then read and wrote, session included. `$GLOBALS['g']` is now a proxy that resolves the current request on every access. If you keep a copy of the shim (the docs' `load.php` pattern, `examples/lamp-scaffold/bootstrap/g.php`), update it from `compat/g.php`.
 - **Superglobals with coroutines needs the coroutine-legacy stack.** With ext-zealphp, `superglobals(true)` plus `enableCoroutine(true)` or `hookAll()` was accepted by hand, but concurrent requests still shared statics and globals. `App::run()` now refuses it unless the isolation stack is on; use `App::mode(App::MODE_COROUTINE_LEGACY)`. Request paths that `assert()`ed an App instance (compiled out in production) now fall back cleanly.
