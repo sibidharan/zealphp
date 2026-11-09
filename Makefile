@@ -16,7 +16,7 @@ PORT      ?= 8080
 
 .PHONY: help install serve start restart stop status logs \
         test unit integration stan check coverage coverage-full infection \
-        docs docs-rebuild agent-reference bench perf-smoke valkey-up valkey-down
+        docs docs-rebuild agent-reference bench perf-smoke valkey-up valkey-down api-lock
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -57,6 +57,9 @@ stan: ## PHPStan static analysis (level 10, zero errors)
 	$(PHPSTAN) analyse --no-progress
 
 check: unit stan ## Pre-commit gate: unit tests + PHPStan
+
+api-lock: ## Rewrite the components API lock after a deliberate, policy-following change
+	ZEALPHP_UPDATE_API_LOCK=1 $(PHPUNIT) --filter PublicApiLockTest
 
 coverage: ## Patch coverage for the unit suite (pcov)
 	bash scripts/coverage.sh

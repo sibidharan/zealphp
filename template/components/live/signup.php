@@ -12,7 +12,7 @@
   <?= $c->error('email') ?>
 
   <label for="<?= e($c->id()) ?>-plan">Plan</label>
-  <select <?= $c->model('plan', false) ?>>
+  <select <?= $c->model('plan', value: false) ?>>
     <option value="free" <?= $c->selected('plan', 'free') ?>>Free</option>
     <option value="pro" <?= $c->selected('plan', 'pro') ?>>Pro</option>
   </select>

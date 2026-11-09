@@ -1,0 +1,133 @@
+# The components public API. Generated; see tests/Unit/Component/PublicApiLockTest.php.
+
+#[Attribute(4)] final class ZealPHP\Component\Action
+
+abstract class ZealPHP\Component\Component
+  const ENDPOINT = '/_zeal/c'
+  const UPDATE = '_update'
+  const REFRESH = '_refresh'
+  const ON = '_on'
+  protected string $tag = 'div'
+  protected ?string $submit = null
+  protected array $attributes = []
+  public function action(string $action, array $args = []): ZealPHP\SafeHtml
+  public function actionUrl(string $action): string
+  protected function addError(string $field, string $message): void
+  public function authorize(string $action): bool
+  public function checked(string $prop, mixed $option = true): string
+  protected function clearErrors(?string $field = null): void
+  protected function dispatch(string $event, mixed $detail = null): void
+  public function error(string $field): ZealPHP\SafeHtml
+  public function errors(): array
+  public function formId(): string
+  public function hasError(string $field): bool
+  protected function hydrate(): void
+  public function id(): string
+  public static function invalidate(string ...$topics): void
+  protected function messages(): array
+  public function model(string $prop, bool $value = true): ZealPHP\SafeHtml
+  protected function mount(): void
+  public function name(): string
+  protected function redirect(string $url): void
+  abstract public function render(): mixed
+  protected function rules(): array
+  public function selected(string $prop, mixed $option): string
+  public function slot(): ?ZealPHP\SafeHtml
+  public function tag(): string  @deprecated
+  public function topics(): array
+  protected function validate(?array $only = null): void
+  public function value(string $prop, bool $escape = true): string
+  protected function view(string $template, array $vars = []): ZealPHP\SafeHtml
+
+interface ZealPHP\Component\ComponentBinder
+  public function actionAttributes(ZealPHP\Component\Component $component, string $url, string $argsJson): array
+  public function isAsync(array $server): bool
+  public function listenerAttributes(ZealPHP\Component\Component $component, string $event, string $url): array
+  public function modelAttributes(ZealPHP\Component\Component $component, string $prop, ZealPHP\Component\Model $model, string $updateUrl, bool $preserve): array
+  public function refusalHeaders(): array
+  public function response(ZealPHP\Component\Outcome $outcome, array $events, ?string $redirect): array
+  public function rootAttributes(ZealPHP\Component\Component $component, ?string $submitUrl): array
+  public function triggerField(array $server): ?string
+
+final class ZealPHP\Component\ComponentException extends RuntimeException
+
+class ZealPHP\Component\FormBinder implements ZealPHP\Component\ComponentBinder
+  public function actionAttributes(ZealPHP\Component\Component $component, string $url, string $argsJson): array
+  public function isAsync(array $server): bool
+  public function listenerAttributes(ZealPHP\Component\Component $component, string $event, string $url): array
+  public function modelAttributes(ZealPHP\Component\Component $component, string $prop, ZealPHP\Component\Model $model, string $updateUrl, bool $preserve): array
+  public function refusalHeaders(): array
+  public function response(ZealPHP\Component\Outcome $outcome, array $events, ?string $redirect): array
+  public function rootAttributes(ZealPHP\Component\Component $component, ?string $submitUrl): array
+  public function triggerField(array $server): ?string
+
+class ZealPHP\Component\HtmxBinder extends ZealPHP\Component\FormBinder
+  public function __construct(promoted bool $morph = false, promoted int $htmx = 2)
+  public function actionAttributes(ZealPHP\Component\Component $component, string $url, string $argsJson): array
+  public function isAsync(array $server): bool
+  public function listenerAttributes(ZealPHP\Component\Component $component, string $event, string $url): array
+  public function modelAttributes(ZealPHP\Component\Component $component, string $prop, ZealPHP\Component\Model $model, string $updateUrl, bool $preserve): array
+  public function refusalHeaders(): array
+  public function response(ZealPHP\Component\Outcome $outcome, array $events, ?string $redirect): array
+  public function rootAttributes(ZealPHP\Component\Component $component, ?string $submitUrl): array
+  public function triggerField(array $server): ?string
+
+#[Attribute(8)] final class ZealPHP\Component\Model
+  public readonly string $rules
+  public readonly bool $live
+  public readonly bool $blur
+  public readonly int $debounce
+  public function __construct(promoted string $rules = '', promoted bool $live = false, promoted bool $blur = false, promoted int $debounce = 300)
+
+#[Attribute(68)] final class ZealPHP\Component\On
+  public readonly array $events
+  public function __construct(string ...$events)
+
+enum ZealPHP\Component\Outcome
+  case Ok = 'ok'
+  case Invalid = 'invalid'
+  case Stale = 'stale'
+
+#[Attribute(8)] final class ZealPHP\Component\Reactive
+
+final class ZealPHP\Component\Tester
+  public function assertDispatched(string $event): self
+  public function assertDontSee(string $text, bool $escape = true): self
+  public function assertHasErrors(string ...$fields): self
+  public function assertHasNoErrors(): self
+  public function assertRedirect(?string $to = null): self
+  public function assertSee(string $text, bool $escape = true): self
+  public function assertSet(string $prop, mixed $expected): self
+  public function assertStatus(int $status): self
+  public function call(string $action, array $args = []): self
+  public function errors(): array
+  public function events(): array
+  public function get(string $prop): mixed
+  public function html(): string
+  public function redirectedTo(): ?string
+  public function refresh(): self
+  public static function render(string $component, array $props = [], ?string $key = null): self
+  public function set(string $prop, mixed $value): self
+  public function status(): int
+
+final class ZealPHP\Component\ValidationException extends RuntimeException
+  public readonly array $errors
+  public function __construct(promoted array $errors)
+
+final class ZealPHP\Component\Validator
+  public static function assertRules(array|string $rules, string $field): void
+  public static function validate(array $values, array $rules, array $messages = []): array
+
+final class ZealPHP\Component\ZealJsBinder extends ZealPHP\Component\FormBinder
+  const SCRIPT = '/_zeal/c/zeal.js'
+  public function actionAttributes(ZealPHP\Component\Component $component, string $url, string $argsJson): array
+  public function modelAttributes(ZealPHP\Component\Component $component, string $prop, ZealPHP\Component\Model $model, string $updateUrl, bool $preserve): array
+  public static function script(): ZealPHP\SafeHtml
+
+methods of ZealPHP\App
+  public static function component(string $component, array $props = [], ?string $key = null): ZealPHP\SafeHtml
+  public static function componentBinder(?ZealPHP\Component\ComponentBinder $binder = null): ZealPHP\Component\ComponentBinder
+  public static function componentMaxAge(?int $seconds = null): int
+  public static function componentPush(?string $transport = null, ?int $maxConnections = null, ?float $coalesce = null): string
+  public static function componentPushRoot(): ZealPHP\SafeHtml
+  public static function components(array $components): void

@@ -71,6 +71,8 @@ final class Validator
     /**
      * @param string|list<string|\Closure> $rules
      * @return list<string|\Closure>
+     *
+     * @internal
      */
     public static function parse(string|array $rules): array
     {
@@ -259,7 +261,11 @@ final class Validator
         };
     }
 
-    /** `first_name` / `firstName` → `First name`. */
+    /**
+     * `first_name` / `firstName` → `First name`.
+     *
+     * @internal
+     */
     public static function label(string $field): string
     {
         $words = strtolower(trim((string) preg_replace('/([a-z])([A-Z])|[_-]+/', '$1 $2', $field)));

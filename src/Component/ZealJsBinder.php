@@ -39,7 +39,11 @@ final class ZealJsBinder extends FormBinder
         return new SafeHtml('<script src="' . self::SCRIPT . '?v=' . self::version() . '" defer></script>');
     }
 
-    /** The client script's source, served at {@see self::SCRIPT}. */
+    /**
+     * The client script's source, served at {@see self::SCRIPT}.
+     *
+     * @internal
+     */
     public static function source(): string
     {
         return (string) file_get_contents(__DIR__ . '/zeal.js');

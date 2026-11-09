@@ -198,7 +198,7 @@ PHP]) ?>
 <input <?= $c->model('username') ?>>
 <?= $c->error('username') ?>
 
-<select <?= $c->model('plan', false) ?>>
+<select <?= $c->model('plan', value: false) ?>>
   <option value="free" <?= $c->selected('plan', 'free') ?>>Free</option>
   <option value="pro"  <?= $c->selected('plan', 'pro') ?>>Pro</option>
 </select>
@@ -287,6 +287,9 @@ PHP]) ?>
   <li><strong>Read state:</strong> yes. Snapshots are signed, not encrypted — keep ids in state, not secrets.</li>
   <li><strong>Post from another site:</strong> no. Cross-origin requests are refused using <code>Sec-Fetch-Site</code> / <code>Origin</code>.</li>
 </ul>
+
+<h2 id="stability" class="lc-mt-2">A stable API</h2>
+<p>Components rest on HTTP, HTML forms and a signed snapshot, none of which change from year to year. The API on top is held to the same standard: within a major version nothing you call or override is removed or changed incompatibly, a member that's going is deprecated (with a runtime notice naming its replacement) for the rest of that version, and a test compares the public API with a <a href="https://github.com/sibidharan/zealphp/blob/master/tests/fixtures/api/components.txt">checked-in lock file</a>, so no change slips through. A new htmx version is absorbed by the binder (<code>HtmxBinder(htmx: 4)</code>), not by your components. <a href="/docs/guide/components#api-stability">API stability</a> has what's covered and what isn't.</p>
 
 <h2 id="clients" class="lc-mt-2">htmx is first-class, not required</h2>
 <p>The endpoint speaks plain HTTP: form fields in, HTML out. A <em>binder</em> decides which attributes the template helpers print. <code>HtmxBinder</code> (the default) emits <code>hx-*</code> attributes on top of plain-form markup; <code>FormBinder</code> emits only the plain forms; you can write your own for another client.</p>

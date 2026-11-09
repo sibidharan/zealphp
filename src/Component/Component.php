@@ -187,8 +187,12 @@ abstract class Component
         return $this->meta()->name;
     }
 
+    /**
+     * @deprecated The `$tag` property is the API; this accessor goes in 1.0.
+     */
     public function tag(): string
     {
+        trigger_error('Component::tag() is deprecated: use the $tag property; tag() goes in 1.0', E_USER_DEPRECATED);
         return $this->tag;
     }
 
@@ -218,11 +222,11 @@ abstract class Component
 
     /**
      * Attributes that bind a form control to a `#[Model]` property: `name`,
-     * `id`, the current `value` (unless `$withValue` is false — for
-     * `<textarea>`, `<select>`, checkbox groups), ARIA error state, and the
-     * binder's live/blur attributes.
+     * `id`, the current `value`, ARIA error state, and the binder's live/blur
+     * attributes. Pass `value: false` for controls that don't carry their
+     * value in a `value` attribute: `<textarea>`, `<select>`, radios.
      */
-    public function model(string $prop, bool $withValue = true): SafeHtml
+    public function model(string $prop, bool $value = true): SafeHtml
     {
         $model = $this->meta()->models[$prop] ?? null;
         if ($model === null) {
@@ -236,8 +240,8 @@ abstract class Component
         $attrs = $type->kind === 'array'
             ? ['name' => $prop . '[]', 'form' => $this->formId()]
             : ['name' => $prop, 'id' => $this->zcId . '-' . $prop, 'form' => $this->formId()];
-        if ($withValue && $type->kind !== 'array') {
-            $attrs['value'] = $type->kind === 'bool' ? '1' : $this->value($prop, false);
+        if ($value && $type->kind !== 'array') {
+            $attrs['value'] = $type->kind === 'bool' ? '1' : $this->rawValue($prop);
         }
         if (isset($this->zcErrors[$prop])) {
             $attrs['aria-invalid'] = 'true';
@@ -249,23 +253,34 @@ abstract class Component
     }
 
     /**
-     * A property's value as a string, HTML-escaped by default — for
-     * `<textarea>` content or display.
+     * A property's value as an HTML-escaped string, for `<textarea>` content
+     * or display. After a value that didn't convert, it's what the user typed.
+     *
+     * @param bool $escape deprecated: `false` (unescaped output) goes in 1.0
      */
     public function value(string $prop, bool $escape = true): string
     {
+        if (!$escape) {
+            trigger_error('Component::value($prop, false) is deprecated: unescaped output goes in 1.0', E_USER_DEPRECATED);
+            return $this->rawValue($prop);
+        }
+        return Escape::html($this->rawValue($prop));
+    }
+
+    /** The value as a string, unescaped (Attr::render() escapes attributes). */
+    private function rawValue(string $prop): string
+    {
         if (isset($this->zcRaw[$prop])) {
             // Show back what the user typed when it didn't convert.
-            return $escape ? Escape::html($this->zcRaw[$prop]) : $this->zcRaw[$prop];
+            return $this->zcRaw[$prop];
         }
         $v = $this->propValue($prop);
-        $s = match (true) {
+        return match (true) {
             $v instanceof \BackedEnum => (string) $v->value,
             is_bool($v) => $v ? '1' : '',
             is_scalar($v) => (string) $v,
             default => '',
         };
-        return $escape ? Escape::html($s) : $s;
     }
 
     /**

@@ -8455,6 +8455,7 @@ class App
      * components; in dev mode a missing key becomes a per-boot random one;
      * otherwise a missing key refuses to boot.
      *
+     * @internal called by run(); public for tests
      * @return string|null an advisory to log
      * @throws \RuntimeException when components are registered without a key outside dev mode
      */
