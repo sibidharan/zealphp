@@ -236,7 +236,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.4.19 .
+docker build -t zealphp:0.4.20 .
 ```
 
 The shipped `Dockerfile` is PHP-cli on `bookworm` with OpenSwoole and
@@ -250,7 +250,7 @@ commit-checked):
 docker build \
     --build-arg OPENSWOOLE_VERSION=26.2.0 \
     --build-arg ZEALPHP_EXT_VERSION=v0.4.1 \
-    -t zealphp:0.4.19 .
+    -t zealphp:0.4.20 .
 ```
 
 ### Run (single container)
@@ -262,7 +262,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.4.19
+    zealphp:0.4.20
 ```
 
 ### Production compose
@@ -273,7 +273,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.4.19
+    image: registry.example.com/zealphp-app:0.4.20
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.4.20] - 2026-11-09
+
 ### Added
 - **Where code goes, as rules.** [`docs/directory-structure.md#where-code-goes`](docs/directory-structure.md#where-code-goes) states the structure: routes and APIs are wiring (no markup), pages are built from components, components live next to their page until another page needs them, templates are views, logic lives in `src/`. The README's design principles, `/why-zealphp`, the project-structure lesson and CLAUDE.md say the same, and `tests/Unit/ArchitectureRulesTest.php` holds the demo site to it.
 - **`/llms.txt` and `/llms-full.txt`** at the site root: an index for AI assistants (what ZealPHP is, the structure rules, a link per guide) and the full reference, generated from the docs by `make docs-rebuild`.

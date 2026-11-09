@@ -133,7 +133,7 @@ CADDY
     'code'  => <<<'YAML'
 services:
   app:
-    image: zealphp:0.4.19
+    image: zealphp:0.4.20
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
