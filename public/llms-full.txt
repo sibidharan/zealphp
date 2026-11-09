@@ -1239,8 +1239,8 @@ This guide covers each of them, the htmx-style fragment pattern, and SSR streami
 
 | Method | Path resolved from | Returns | Use when |
 |--------|--------------------|---------|----------|
-| `App::render($tpl, $args, …options)` | `template/` (with `.php` suffix) | `mixed` — full return contract. A string result is also echoed (`echo: true`, the default), so `App::render('_master', …)` statements in `public/*.php` keep working. | A page, or a route's response. Options: `fragment:`, `htmx:`, `fullPage:`, `stream:`, `echo:` |
-| `App::component($name, $props)` | `template/components/` for a name (`'card'`); `template/` for a leading `/` (`'/emails/welcome'`) | `ZealPHP\SafeHtml` — markup, never echoed. Cast with `(string)` where a plain string is required. | Markup inside a page, an htmx partial, an email body, anything you compose |
+| `App::render($tpl, $args, …options)` | `template/`, by the [one lookup rule](#path-resolution) | `mixed` — full return contract. A string result is also echoed (`echo: true`, the default), so `App::render('_master', …)` statements in `public/*.php` keep working. | A page, or a route's response. Options: `fragment:`, `htmx:`, `fullPage:`, `stream:`, `echo:` |
+| `App::component($name, $props)` | the same [lookup rule](#path-resolution); a registered reactive component's name first | `ZealPHP\SafeHtml` — markup, never echoed. Cast with `(string)` where a plain string is required. | Markup inside a page, an htmx partial, an email body, anything you compose |
 | `App::include($publicPath, $args = [])` | `public/` (Apache document-root convention — leading `/` optional) | `mixed` — full return contract, never echoed. Auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, `SCRIPT_FILENAME`. | Apache-style rewrites — serve `public/new.php` from a different route URL in-process |
 | `App::fragment($name, $fn)` *(v0.2.24)* | N/A — called *inside* a template | `void`. The closure's return rides the full return contract when extracted. | htmx-style template-fragment pattern — one file, two responses |
 
@@ -1271,7 +1271,7 @@ public static function render(
 ): mixed
 ```
 
-Paths resolve relative to `template/`. A leading `/` makes the path absolute from `template/`; otherwise the current public file's basename auto-namespaces the lookup (e.g. `App::render('header')` from `public/users.php` looks for `template/users/header.php` first, then `template/header.php`).
+Names resolve under `template/` by the [lookup rule](#path-resolution) shared with `component()`: a leading `/` is absolute; otherwise the request's page folder is searched first (`App::render('header')` from `public/users.php` tries `template/users/header.php`, then `template/users/components/header.php`, `template/header.php`, `template/components/header.php`).
 
 Templates receive each key of `$__args` as a local variable via `extract()`. No magic syntax — just PHP.
 
@@ -1331,6 +1331,74 @@ To compose templates, use `<?= App::component(...) ?>`, or call `App::render()` 
 | `'header'` from `public/admin/users.php` | `template/admin/users/header.php`, `template/admin/users/components/header.php`, then (compatibility) `template/users/…`, then `template/header.php`, `template/components/header.php` |
 
 The page's folder is the public file's path under the document root, without `.php` (`public/admin/users.php` → `template/admin/users/`), taken from `SCRIPT_NAME`, so a request's `PATH_INFO` (`/users.php/x`) never changes where names resolve. Before v0.4.20 only the basename was used (`template/users/`); a nested page still looks there after its own folders. Keep a component used by one page in that page's `components/` folder; move it to `template/components/` when another page needs it — no call changes. In each place `name.php` comes before the partial `_name.php`, and `'ui/button'` names a folder. A missing template's error lists every place it looked. A registered reactive component's name wins over templates in `component()`.
+
+## Templates and Rendering — From a public file to the page: render, then components
+
+`render()` serves the page; everything inside the page is a component. One request, end to end:
+
+```text
+GET /invoices
+  → public/invoices.php                    App::render('invoices', ['invoices' => $list])
+    → template/invoices/invoices.php        the page's own template, found in the page's folder
+      → App::component('row', $invoice)     → template/invoices/components/row.php   (this page only)
+      → App::component('card', [...])       → template/components/card.php           (shared)
+```
+
+```php
+<?php // public/invoices.php — the page: load data, render
+use ZealPHP\App;
+App::render('invoices', ['invoices' => Billing\Invoices::open()]);
+```
+
+```php
+<?php // template/invoices/invoices.php — lays the page out from components
+use ZealPHP\App;
+?>
+<h1>Invoices</h1>
+<?= App::component('card', ['title' => 'Open', 'slot' => App::component('total', ['invoices' => $invoices])]) ?>
+<table>
+  <?php foreach ($invoices as $invoice): ?>
+    <?= App::component('row', ['invoice' => $invoice]) ?>
+  <?php endforeach; ?>
+</table>
+```
+
+```php
+<?php // template/invoices/components/row.php — a component: props in, markup out
+use function ZealPHP\e;
+?>
+<tr><td><?= e($invoice->number) ?></td><td><?= e($invoice->amount) ?></td></tr>
+```
+
+With a shared layout, the public file renders the layout and names the page; the layout renders the page's template the same way:
+
+```php
+<?php // public/invoices.php
+App::render('_master', ['title' => 'Invoices', 'page' => 'invoices', 'invoices' => $list]);
+```
+
+```php
+<!-- template/_master.php -->
+<?= App::component('/_nav') ?>
+<main><?= App::component("/$page/" . basename($page), get_defined_vars()) ?></main>  <!-- template/invoices/invoices.php -->
+```
+
+### Where components can be used
+
+Relative names resolve from the **request's page** — the public file being served — not from the file that makes the call. That decides what to write where:
+
+| You're in | Write | Resolves |
+|---|---|---|
+| A page template, or a component it renders | `App::component('row', $p)` | page folder → its `components/` → `template/` → `template/components/` |
+| A layout (`_master.php`) | `App::component("/$page/" . basename($page))` for the page body, `'/_nav'` for its own parts | absolute: the layout serves every page |
+| A route or API handler (no public file, so no page) | `return App::component('/invoices/components/row', $p)` or a shared name (`'card'`) | absolute; or `template/`, `template/components/` |
+| An htmx endpoint returning a fragment | `return App::component('/invoices/components/row', $p)` — or `App::render('/invoices/invoices', $args, fragment: 'rows')` for a region of the page | the same file the page rendered, so the swap matches |
+| A streaming page | `yield App::component('row', $p);` inside the Generator, or `yield from App::render('/invoices/rows', $a, stream: true)` | as a page template |
+| A reactive component's `render()` | `$this->view('/invoices/components/counter')`; inside that view, `App::component('card', …)` for stateless parts | absolute: the component re-renders from `/_zeal/c/…`, where there is no page |
+| A page's component that a route also renders | name its own children in full too (`App::component('/invoices/components/cell', …)`) | a route has no page, so a relative child isn't found |
+| A component used on several pages **and** by a route | put it in `template/components/` and use its bare name | found from anywhere |
+
+A stateless component can contain components (`slot`, or calls in its template). A reactive component can render stateless components anywhere, and reactive children with a `key:` (see [Nesting components](components.md#nesting-components)). A component returns content only; status codes, arrays and responses belong to the route or page that owns the response ([why](#appcomponent--markup-as-a-value)).
 
 ## Templates and Rendering — `App::component()` — markup as a value
 
@@ -1672,6 +1740,7 @@ Then call it by name from the page (or any template it renders):
 
 A stateless component needs nothing else: no registration, no key, no script.
 
+- **End to end:** [From a public file to the page](templates-and-rendering.md#from-a-public-file-to-the-page-render-then-components) walks one request through `render()` and its components, and [Where components can be used](templates-and-rendering.md#where-components-can-be-used) says what to write in a page, a layout, a route, an htmx endpoint, a stream or a reactive view.
 - **Lookup:** the [same rule as `render()`](templates-and-rendering.md#path-resolution), nearest first: the page's folder (the public file's path: `public/admin/users.php` → `template/admin/users/`), the page's `components/`, `template/`, then `template/components/`; `card.php` before the partial `_card.php` in each (so existing underscore partials work as they are). `'ui/button'` names a folder.
 - **Any template:** a leading `/` renders any template, absolute from `template/`: `App::component('/emails/welcome', ['user' => $u])`. This is how you get markup from a template that isn't a component; it replaces the deprecated `App::renderToString()`.
 - **Props** become template variables; `$props` holds them all. Pass child markup as `slot` — an `App::component()` result or `Escape::raw()` is printed as-is, anything else should go through `e()`.

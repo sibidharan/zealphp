@@ -84,6 +84,42 @@ class TemplateResolutionTest extends TestCase
         $this->assertStringContainsString($expected, (string) App::component('row'));
     }
 
+    /**
+     * The docs' walkthrough (templates-and-rendering.md, "From a public file
+     * to the page"): the page's template is found in its folder, its own
+     * components in its components/, shared ones in template/components/,
+     * and a component inside a component resolves from the request's page.
+     */
+    public function testAPageRendersItsTemplateAndComponents(): void
+    {
+        RequestContext::instance()->server = ['SCRIPT_NAME' => '/invoices.php'];
+        $html = (string) App::render('invoices', ['invoices' => [
+            ['number' => 'A-1', 'amount' => 10],
+            ['number' => 'A-2', 'amount' => 5],
+        ]], echo: false);
+        $this->assertStringContainsString('<h1>Invoices</h1>', $html);
+        $this->assertStringContainsString('<article class="card"><h3>Open</h3><p>total 15</p>', $html, 'shared card, page component as its slot');
+        $this->assertStringContainsString('<tr><td>A-1</td><td class="amount">10</td></tr>', $html, 'row, and the cell it renders, from the page\'s components/');
+    }
+
+    /**
+     * A route has no page: a page's component needs its full name, shared
+     * ones resolve by name. A component a route renders names its own
+     * children in full too (row.php does), since relative names resolve from
+     * the request's page, and a route has none.
+     */
+    public function testFromARouteAPagesComponentNeedsItsFullName(): void
+    {
+        RequestContext::instance()->server = [];
+        $props = ['invoice' => ['number' => 'B-9', 'amount' => 1]];
+        $this->assertStringContainsString('<td>B-9</td>', (string) App::component('/invoices/components/row', $props));
+        $this->assertStringContainsString('<article class="card">', (string) App::component('card', ['title' => 't']));
+        // Only in the page's components/: not found without the page.
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('looked in template/total.php, template/_total.php, template/components/total.php');
+        App::component('total', ['invoices' => []]);
+    }
+
     public function testMissingTemplatesNameEveryPlaceLooked(): void
     {
         self::page('/users.php');
