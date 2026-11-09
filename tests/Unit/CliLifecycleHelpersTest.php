@@ -227,20 +227,46 @@ class CliLifecycleHelpersTest extends TestCase
         $this->assertFileDoesNotExist($pidFile);
     }
 
-    public function testStartBlockerRefusesForeignPidFileWithoutTouchingIt(): void
+    /**
+     * A PID file naming a live process that isn't our server (a recycled pid)
+     * is stale for `start`: it is removed and the start proceeds — it used to
+     * wedge every start. The process itself is never signalled.
+     */
+    public function testStartBlockerTreatsForeignPidFileAsStale(): void
     {
         $pidFile = sys_get_temp_dir() . '/zealphp_59985.pid';
         $sleeper = $this->spawnSleeper();
         file_put_contents($pidFile, (string) $sleeper);
         try {
+            ob_start();
             $blocker = CLI::startBlocker($pidFile, 59985);
-            $this->assertNotNull($blocker);
-            $this->assertSame(1, $blocker[0]);
-            $this->assertStringContainsString('not your ZealPHP server', $blocker[1]);
-            $this->assertFileExists($pidFile);
+            $out = (string) ob_get_clean();
+            $this->assertNull($blocker);
+            $this->assertStringContainsString('Removing stale PID file', $out);
+            $this->assertFileDoesNotExist($pidFile);
             $this->assertTrue(posix_kill($sleeper, 0), 'start must not signal the pid');
         } finally {
             $this->reap($sleeper);
+            @unlink($pidFile);
+        }
+    }
+
+    /**
+     * Docker: `php app.php` is PID 1, so after an unclean stop the restarted
+     * master finds its OWN pid in the leftover PID file. That must read as
+     * stale, not "foreign" — otherwise the container exits 1 on every start.
+     */
+    public function testStartBlockerTreatsOwnPidAsStale(): void
+    {
+        $pidFile = sys_get_temp_dir() . '/zealphp_59989.pid';
+        file_put_contents($pidFile, (string) getmypid());
+        try {
+            ob_start();
+            $blocker = CLI::startBlocker($pidFile, 59989);
+            ob_end_clean();
+            $this->assertNull($blocker);
+            $this->assertFileDoesNotExist($pidFile);
+        } finally {
             @unlink($pidFile);
         }
     }

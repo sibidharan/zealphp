@@ -82,12 +82,12 @@ used, since any local user could create it first. Resolution is deterministic, s
 location set **`ZEALPHP_LOG_DIR=/path`** (or `ZEALPHP_PID_FILE` / the
 `--pid-file` flag for just the PID file) — an explicit value always wins.
 
-**Process safety.** `start` never stops anything: it refuses when the server is
-already running, when the PID file names a live process that isn't your ZealPHP
-server, or when the port is taken. `stop`/`restart` signal a pid only if it is
-owned by you, runs `php … app.php` and listens on that port — the master pid
-alone, never a process group. A stale PID file is removed; a foreign one is
-reported and left alone.
+**Process safety.** `start` never stops anything: it refuses when your server is
+already running or the port is taken; any other PID file (dead pid, its own pid
+after a container restart, a recycled pid) is removed as stale. `stop`/`restart`
+signal a pid only if it is owned by you, runs `php … app.php` and listens on that
+port — the master pid alone, never a process group. For them a stale PID file is
+removed; a foreign one is reported and left alone.
 
 > `php app.php restart` (no `-p`) only restarts the **default** instance. If you
 > run a second instance on, say, `:9501`, restart it explicitly:
