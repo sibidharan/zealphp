@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Changed — gates and dev feedback
+- **~2,900 lines of `src/App.php` were invisible to coverage.** Two `// @codeCoverageIgnoreStart — reason` markers had trailing text, which php-code-coverage doesn't recognise; its parser then treated the next `@codeCoverageIgnoreEnd` as the start of a region running to the following End, silently excluding `render()`, `component()`, `run()` and more from coverage and from Codecov's patch gate. The markers are bare now, and `CoverageMarkersTest` fails on any marker with trailing text or unbalanced Start/End.
+- **`src/Component` is in the mutation gate** (`infection.json5`), at 93% covered MSI.
+- **Deprecated render helpers warn in dev mode.** With `--dev` / `ZEALPHP_DEV=1`, `renderToString()`, `renderStream()` and `renderHtmx()` log one warning per call site naming the replacement. Silent in production.
+- **`Component::mount()` / `hydrate()` / `addError()` / `clearErrors()` are `protected`.** They're for use inside a component; subclasses that declare them `public` keep working.
+
 ### Added — htmx 4 request/response surface
 - **Request accessors for htmx 4.** `htmxTarget()` and `htmxTrigger()` return the element id for both versions (htmx 4 sends `tag#id`; `HX-Trigger` became `HX-Source`). New: `htmxSource()`, `htmxRequestType()` and `htmxVersion()` (4 when `HX-Request-Type` is present, 2 for other htmx requests).
 - **`render(…, htmx: true)` works on htmx 4.** It derived the fragment from the raw `HX-Target`, so htmx 4's `div#main` selected no region and answered 404.

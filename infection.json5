@@ -16,7 +16,8 @@
             "src/Middleware",
             "src/HTTP",
             "src/Input",
-            "src/Diagnostics"
+            "src/Diagnostics",
+            "src/Component"
         ]
     },
     "logs": {

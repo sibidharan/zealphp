@@ -1,0 +1,1 @@
+<?php echo "[", count($errors), "|", $c->hasError("name") ? "has" : "no", "|", $c->value("name"), "]";

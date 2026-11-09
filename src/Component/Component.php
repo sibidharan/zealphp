@@ -73,12 +73,12 @@ abstract class Component
     abstract public function render(): mixed;
 
     /** Called once when the component is first placed on a page, after initial props are set. */
-    public function mount(): void
+    protected function mount(): void
     {
     }
 
     /** Called on every endpoint request, after state is restored and before input is applied. */
-    public function hydrate(): void
+    protected function hydrate(): void
     {
     }
 
@@ -279,12 +279,12 @@ abstract class Component
         }
     }
 
-    public function addError(string $field, string $message): void
+    protected function addError(string $field, string $message): void
     {
         $this->zcErrors[$field] = $message;
     }
 
-    public function clearErrors(?string $field = null): void
+    protected function clearErrors(?string $field = null): void
     {
         if ($field === null) {
             $this->zcErrors = [];
