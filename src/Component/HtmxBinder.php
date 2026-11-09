@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ZealPHP\Component;
 
+use ZealPHP\RequestContext;
+
 /**
  * The first-class binder: makes components interactive with htmx (2.x)
  * attributes on top of the plain-form markup, so pages still work without JS.
@@ -26,7 +28,12 @@ namespace ZealPHP\Component;
  * - Validation errors come back as 200 (htmx doesn't swap 4xx by default);
  *   a snapshot from an older deploy answers `HX-Refresh: true`.
  *
- * `htmx: 2` (default) or `htmx: 4` picks the attribute dialect:
+ * `htmx: 2` (default) or `htmx: 4` picks the attribute dialect for pages.
+ * A component request tells the binder which htmx sent it (htmx 4 adds
+ * `HX-Request-Type`), so its response always uses that version's dialect,
+ * whatever the setting; the setting only decides the first page render.
+ *
+ * The dialects:
  *
  * - **htmx 4** always swaps with its built-in `outerMorph`. Morphing keeps the
  *   DOM nodes, and htmx 4 never overwrites the value of the focused input, so
@@ -54,10 +61,23 @@ class HtmxBinder extends FormBinder
         }
     }
 
+    /**
+     * The htmx version to write attributes for: the one that sent the current
+     * request, else the configured one (a page render has no htmx request).
+     */
+    private function dialect(): int
+    {
+        $req = RequestContext::instance()->zealphp_request;
+        if ($req instanceof \ZealPHP\HTTP\Request && $req->isHtmx()) {
+            return $req->htmxVersion() ?? $this->htmx;
+        }
+        return $this->htmx;
+    }
+
     public function rootAttributes(Component $component, ?string $submitUrl): array
     {
         $attrs = parent::rootAttributes($component, $submitUrl);
-        if ($this->morph && $this->htmx === 2) {
+        if ($this->morph && $this->dialect() === 2) {
             $attrs['hx-ext'] = 'morph';
         }
         if ($submitUrl !== null && $component->tag() === 'form') {
@@ -78,7 +98,7 @@ class HtmxBinder extends FormBinder
             'hx-include' => self::TARGET,
             'hx-vals' => (string) json_encode(['_zc_args' => $argsJson], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             'hx-sync' => self::TARGET . ':replace',
-            ($this->htmx === 4 ? 'hx-disable' : 'hx-disabled-elt') => 'this',
+            ($this->dialect() === 4 ? 'hx-disable' : 'hx-disabled-elt') => 'this',
         ]);
     }
 
@@ -98,7 +118,7 @@ class HtmxBinder extends FormBinder
             // version (htmx 4 doesn't send HX-Trigger-Name).
             'hx-vals' => (string) json_encode(['_zc_trigger' => $prop], JSON_UNESCAPED_SLASHES),
             // htmx 4 morphs, which already keeps the focused field.
-            'hx-preserve' => $preserve && $this->htmx === 2 ? 'true' : null,
+            'hx-preserve' => $preserve && $this->dialect() === 2 ? 'true' : null,
         ];
     }
 
@@ -135,7 +155,7 @@ class HtmxBinder extends FormBinder
 
     private function swap(): string
     {
-        if ($this->htmx === 4) {
+        if ($this->dialect() === 4) {
             return 'outerMorph';
         }
         return $this->morph ? 'morph:outerHTML' : 'outerHTML';

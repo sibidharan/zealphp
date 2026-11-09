@@ -124,21 +124,79 @@ class Request extends \OpenSwoole\HTTP\Request
         return ($this->header['hx-history-restore-request'] ?? '') === 'true';
     }
 
-    /** Returns the `HX-Target` element id, or null if absent. */
+    /**
+     * The target element's id, or null if absent or the target has no id.
+     *
+     * htmx 2 sends the bare id (`main`); htmx 4 sends `tag#id` (`div#main`), or
+     * just the tag when the element has no id. Both come back as `main`.
+     */
     public function htmxTarget(): ?string
     {
-        $v = $this->header['hx-target'] ?? null;
-        return is_string($v) && $v !== '' ? $v : null;
+        return $this->elementId($this->header['hx-target'] ?? null);
     }
 
-    /** Returns the `HX-Trigger` element id, or null if absent. */
+    /**
+     * The triggering element's id, or null if absent or it has no id: htmx 2's
+     * `HX-Trigger`, else the id part of htmx 4's `HX-Source`.
+     */
     public function htmxTrigger(): ?string
     {
         $v = $this->header['hx-trigger'] ?? null;
+        if (is_string($v) && $v !== '' && $this->htmxVersion() !== 4) {
+            return $v;
+        }
+        return $this->elementId($this->header['hx-source'] ?? null);
+    }
+
+    /** The raw `HX-Source` header (htmx 4): the triggering element as `tag#id`, or null. */
+    public function htmxSource(): ?string
+    {
+        $v = $this->header['hx-source'] ?? null;
         return is_string($v) && $v !== '' ? $v : null;
     }
 
-    /** Returns the `HX-Trigger-Name` element name, or null if absent. */
+    /**
+     * The `HX-Request-Type` header (htmx 4): `'full'` when the response
+     * replaces the body (or uses hx-select), `'partial'` otherwise; null when
+     * absent.
+     */
+    public function htmxRequestType(): ?string
+    {
+        $v = $this->header['hx-request-type'] ?? null;
+        return $v === 'full' || $v === 'partial' ? $v : null;
+    }
+
+    /**
+     * Which htmx sent the request: 4 when it carries `HX-Request-Type` (only
+     * htmx 4 sends it), 2 for any other htmx request, null for a non-htmx one.
+     */
+    public function htmxVersion(): ?int
+    {
+        if (!$this->isHtmx()) {
+            return null;
+        }
+        return isset($this->header['hx-request-type']) ? 4 : 2;
+    }
+
+    /**
+     * The id in an htmx element identifier: `main` (htmx 2) or `div#main`
+     * (htmx 4) → `main`; a bare tag from htmx 4 (`div`, element without id) → null.
+     */
+    private function elementId(mixed $v): ?string
+    {
+        if (!is_string($v) || $v === '') {
+            return null;
+        }
+        $hash = strpos($v, '#');
+        if ($hash !== false) {
+            $id = rawurldecode(substr($v, $hash + 1));
+            return $id !== '' ? $id : null;
+        }
+        // No '#': htmx 2 sent a bare id; htmx 4 sent a tag name (no id).
+        return $this->htmxVersion() === 4 ? null : $v;
+    }
+
+    /** Returns the `HX-Trigger-Name` element name (htmx 2 only), or null if absent. */
     public function htmxTriggerName(): ?string
     {
         $v = $this->header['hx-trigger-name'] ?? null;

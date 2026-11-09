@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added — htmx 4 request/response surface
+- **Request accessors for htmx 4.** `htmxTarget()` and `htmxTrigger()` return the element id for both versions (htmx 4 sends `tag#id`; `HX-Trigger` became `HX-Source`). New: `htmxSource()`, `htmxRequestType()` and `htmxVersion()` (4 when `HX-Request-Type` is present, 2 for other htmx requests).
+- **`render(…, htmx: true)` works on htmx 4.** It derived the fragment from the raw `HX-Target`, so htmx 4's `div#main` selected no region and answered 404.
+- **`HtmxResponse::partial($target, $html, $swap)`** updates extra elements from one response: `<hx-partial>` on htmx 4, an `hx-swap-oob` wrapper on htmx 2, chosen by the request's version.
+- **`HtmxBinder` answers in the requesting version's dialect**; the `htmx:` setting only decides the first page render.
+- `triggerAfterSwap()` / `triggerAfterSettle()` are documented as htmx 2 only (htmx 4 ignores those headers).
+
 ### Fixed — `App::exec()` (labs-dashboard-web#501)
 - **stderr no longer leaks into the output.** OpenSwoole 26.2's `Coroutine\System::exec()` takes `bool $get_error_stream` as its second argument, not a timeout; `App::exec()` passed `-1`, which turned stderr capture on for every command. A CLI's log lines then landed in front of its JSON (every Code Arena Run on beta). Because the exec hook routes backticks, `shell_exec()`, `exec()`, `system()` and `passthru()` through `App::exec()` in coroutine mode, all of them were affected. Output is now stdout only; in a coroutine the command's stderr is discarded (writing into the worker's inherited stderr killed the process on OpenSwoole 25.2). Add `2>&1` to capture both.
 - **`$timeout` is enforced.** `System::exec()` has no timeout, so it was silently ignored. It's now applied with coreutils `timeout` (SIGTERM, then SIGKILL after 1 s; exit code 124), in and outside coroutines.

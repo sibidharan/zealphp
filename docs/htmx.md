@@ -50,16 +50,19 @@ With `hx-boost="true"` on `<body>`, **every** `<a>` and `<form>` on the page is 
 
 ## Reading the request
 
-`ZealPHP\HTTP\Request` (the `$request` injected into every handler) exposes eight accessors, one per htmx request header. Each reads the lower-cased header from the OpenSwoole request and returns `null` (or `false`, for the booleans) when absent.
+`ZealPHP\HTTP\Request` (the `$request` injected into every handler) exposes one accessor per htmx request header, for htmx 2 and htmx 4. Each returns `null` (or `false`, for the booleans) when the header is absent.
 
 | Accessor | Reads header | Returns | Meaning |
 |----------|--------------|---------|---------|
 | `isHtmx()` | `HX-Request` | `bool` | The request came from htmx (`HX-Request: true`). |
 | `isBoosted()` | `HX-Boosted` | `bool` | The request was issued by `hx-boost` (a boosted link/form). |
 | `isHistoryRestoreRequest()` | `HX-History-Restore-Request` | `bool` | htmx is restoring a history-cache miss (re-fetching a page it couldn't restore from cache). |
-| `htmxTarget()` | `HX-Target` | `?string` | The `id` of the target element (the `hx-target`). |
-| `htmxTrigger()` | `HX-Trigger` | `?string` | The `id` of the triggering element. |
-| `htmxTriggerName()` | `HX-Trigger-Name` | `?string` | The `name` attribute of the triggering element. |
+| `htmxTarget()` | `HX-Target` | `?string` | The `id` of the target element. htmx 4 sends `div#main`; this returns `main` for both versions, and `null` when the target has no id. |
+| `htmxTrigger()` | `HX-Trigger` (2) / `HX-Source` (4) | `?string` | The `id` of the triggering element. |
+| `htmxTriggerName()` | `HX-Trigger-Name` | `?string` | The `name` attribute of the triggering element (htmx 2 only). |
+| `htmxSource()` | `HX-Source` | `?string` | htmx 4: the triggering element as sent, `tag#id` (`button#save`). |
+| `htmxRequestType()` | `HX-Request-Type` | `?string` | htmx 4: `'full'` (the response replaces the body, or uses `hx-select`) or `'partial'`. |
+| `htmxVersion()` | `HX-Request-Type` | `?int` | `4` for htmx 4 (only it sends `HX-Request-Type`), `2` for any other htmx request, `null` when not htmx. |
 | `htmxCurrentUrl()` | `HX-Current-URL` | `?string` | The browser's current URL at request time. |
 | `htmxPrompt()` | `HX-Prompt` | `?string` | The user's response to an `hx-prompt` dialog. |
 
@@ -119,8 +122,8 @@ $response->htmx()
 | Method | Header | Effect |
 |--------|--------|--------|
 | `trigger(string $events)` | `HX-Trigger` | Trigger client events after the swap. Single name, comma-list, or a JSON object for events with detail. |
-| `triggerAfterSwap(string $events)` | `HX-Trigger-After-Swap` | Same, fired after the swap step. |
-| `triggerAfterSettle(string $events)` | `HX-Trigger-After-Settle` | Same, fired after the settle step. |
+| `triggerAfterSwap(string $events)` | `HX-Trigger-After-Swap` | Same, fired after the swap step. **htmx 2 only** — htmx 4 ignores it; use `trigger()`. |
+| `triggerAfterSettle(string $events)` | `HX-Trigger-After-Settle` | Same, fired after the settle step. **htmx 2 only** — htmx 4 ignores it; use `trigger()`. |
 | `triggerJSON(string $event, array $detail)` | `HX-Trigger` | Trigger a single named event with a structured detail payload — without hand-encoding the JSON. |
 
 `triggerJSON('showMessage', ['level' => 'info', 'message' => 'Saved!'])` is shorthand for `trigger('{"showMessage":{"level":"info","message":"Saved!"}}')`. The browser receives `event.detail` = the decoded array.
@@ -252,6 +255,31 @@ $app->route('/cart/add', function ($request) {
 
 The `id` and swap value are HTML-escaped; the tag is sanitised to alphanumerics (falling back to `div`).
 
+### Updating several elements — `HtmxResponse::partial()`
+
+`partial()` targets any CSS selector with any swap style, and writes the right markup for the htmx that sent the request: htmx 4's `<hx-partial>`, or htmx 2's `hx-swap-oob` wrapper.
+
+```php
+public static function partial(
+    string $target,                 // CSS selector, e.g. '#cart'
+    string|\Stringable $html,       // markup to swap in (not escaped)
+    string $swap = 'innerHTML',     // innerHTML, outerHTML, beforeend, …
+    ?int $htmx = null               // default: the version that sent the request
+): string
+```
+
+```php
+// One action, three regions updated.
+return App::component(Cart::class, …)
+     . HtmxResponse::partial('#cart-count', (string) $cart->count)
+     . HtmxResponse::partial('#toasts', App::component('toast', ['text' => 'Added']), 'beforeend');
+```
+
+| htmx | Emits |
+|---|---|
+| 4 | `<hx-partial hx-target="#cart-count" hx-swap="innerHTML">3</hx-partial>` |
+| 2 | `<div hx-swap-oob="innerHTML:#cart-count">3</div>` — htmx 2 swaps the wrapper's children into the target, for every swap style |
+
 ## The boosting model
 
 `hx-boost="true"` (set on `<body>` in the demo) turns ordinary `<a>` and `<form>` elements into AJAX navigations:
@@ -303,9 +331,12 @@ if (!Auth::check()) {
 | `isHtmx()` | reads `HX-Request` |
 | `isBoosted()` | reads `HX-Boosted` |
 | `isHistoryRestoreRequest()` | reads `HX-History-Restore-Request` |
-| `htmxTarget()` | reads `HX-Target` |
-| `htmxTrigger()` | reads `HX-Trigger` |
-| `htmxTriggerName()` | reads `HX-Trigger-Name` |
+| `htmxTarget()` | reads `HX-Target` (id; normalises htmx 4's `tag#id`) |
+| `htmxTrigger()` | reads `HX-Trigger`, or the id in htmx 4's `HX-Source` |
+| `htmxTriggerName()` | reads `HX-Trigger-Name` (htmx 2) |
+| `htmxSource()` | reads `HX-Source` (htmx 4) |
+| `htmxRequestType()` | reads `HX-Request-Type` (htmx 4) |
+| `htmxVersion()` | 4 if `HX-Request-Type` is present, 2 for other htmx requests |
 | `htmxCurrentUrl()` | reads `HX-Current-URL` |
 | `htmxPrompt()` | reads `HX-Prompt` |
 | **Response — `$response->htmx()->`** | |
@@ -318,9 +349,10 @@ if (!Auth::check()) {
 | `reselect($selector)` | sets `HX-Reselect` |
 | `refresh($bool)` | sets `HX-Refresh` |
 | `trigger($events)` | sets `HX-Trigger` |
-| `triggerAfterSwap($events)` | sets `HX-Trigger-After-Swap` |
+| `triggerAfterSwap($events)` | sets `HX-Trigger-After-Swap` (htmx 2 only) |
 | `triggerAfterSettle($events)` | sets `HX-Trigger-After-Settle` |
 | `triggerJSON($event, $detail)` | sets `HX-Trigger` (JSON-encoded detail) |
+| `HtmxResponse::partial($target, $html, $swap)` | `<hx-partial>` (htmx 4) or `hx-swap-oob` wrapper (htmx 2) |
 | `oob($id, $html, $swap, $tag)` | builds an `hx-swap-oob` element (static) |
 | `response()` | returns the parent `Response` (chain back) |
 | **Rendering — `App::`** | |

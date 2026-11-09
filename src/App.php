@@ -7962,10 +7962,13 @@ class App
         if ($fullPage !== null) {
             return [$template, null];
         }
-        // Single-template form: derive the region from HX-Target (leading '#'
-        // stripped), else HX-Trigger-Name; neither → the whole template.
+        // Single-template form: derive the region from the target's id, else
+        // HX-Trigger-Name (htmx 2), else the triggering element's id (htmx 4,
+        // which sends no HX-Trigger-Name); none → the whole template.
+        // htmxTarget() already reduces htmx 4's `div#main` to `main`.
         $target = $req->htmxTarget();
-        $derived = $target !== null ? ltrim($target, '#') : $req->htmxTriggerName();
+        $derived = $target !== null ? ltrim($target, '#')
+            : ($req->htmxTriggerName() ?? ($req->htmxVersion() === 4 ? $req->htmxTrigger() : null));
         return [$template, ($derived !== null && $derived !== '') ? $derived : null];
     }
 
