@@ -119,7 +119,10 @@ class CounterTest extends TestCase
         $pid = pcntl_fork();
         if ($pid === 0) {
             $c->increment(5);
-            exit(0);
+            // Not exit(): with ext-zealphp's exit interception armed by an
+            // earlier test, exit() doesn't end the child, which then ran the
+            // parent's assertions ("0 is greater than 0").
+            posix_kill(posix_getpid(), SIGKILL);
         }
         $this->assertGreaterThan(0, $pid);
         pcntl_waitpid($pid, $status);
