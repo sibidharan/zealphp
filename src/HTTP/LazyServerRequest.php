@@ -20,10 +20,17 @@ class LazyServerRequest implements ServerRequestInterface
 {
     private \OpenSwoole\Http\Request $native;
     private ?ServerRequestInterface $hydrated = null;
+    private ?string $method;
 
-    public function __construct(\OpenSwoole\Http\Request $native)
+    /**
+     * @param string|null $method The effective request method when it differs
+     *        from the wire method (an honoured X-HTTP-Method-Override), so the
+     *        middleware stack sees the same method the router dispatches on.
+     */
+    public function __construct(\OpenSwoole\Http\Request $native, ?string $method = null)
     {
         $this->native = $native;
+        $this->method = $method;
     }
 
     private function hydrate(): ServerRequestInterface
@@ -31,7 +38,7 @@ class LazyServerRequest implements ServerRequestInterface
         if ($this->hydrated === null) {
             $hydrated = \OpenSwoole\Core\Psr\ServerRequest::from($this->native);
             assert($hydrated instanceof ServerRequestInterface);
-            $this->hydrated = $hydrated;
+            $this->hydrated = $this->method !== null ? $hydrated->withMethod($this->method) : $hydrated;
         }
         return $this->hydrated;
     }
@@ -41,6 +48,7 @@ class LazyServerRequest implements ServerRequestInterface
     public function getMethod(): string
     {
         if ($this->hydrated) return $this->hydrated->getMethod();
+        if ($this->method !== null) return $this->method;
         $server = $this->native->server ?? [];
         assert(is_array($server));
         $method = $server['request_method'] ?? 'GET';

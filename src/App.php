@@ -11371,7 +11371,13 @@ class App
                 }
             }
 
-            $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest($request->parent);
+            // The PSR request carries the EFFECTIVE method (an honoured
+            // X-HTTP-Method-Override), so middleware and the router agree:
+            // a guard keyed on DELETE can't be bypassed by POST + override.
+            $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest(
+                $request->parent,
+                is_string($srvFinal['REQUEST_METHOD'] ?? null) ? $srvFinal['REQUEST_METHOD'] : null
+            );
 
             try {
                 // #227: prefer the registration-time capture (immune to a
