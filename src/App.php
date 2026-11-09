@@ -10733,6 +10733,12 @@ class App
             // Push: the client script, the SSE stream and the WebSocket. The push
             // token rides in the URL (EventSource and WebSocket can't send
             // headers); it lists the page's component ids and topics.
+            // The htmx-free client (ZealJsBinder).
+            $this->route(Component\ZealJsBinder::SCRIPT, ['methods' => ['GET']], function (\ZealPHP\HTTP\Response $response) {
+                $response->header('Content-Type', 'text/javascript; charset=utf-8');
+                $response->header('Cache-Control', 'public, max-age=31536000, immutable'); // the URL is versioned
+                return Component\ZealJsBinder::source();
+            });
             $this->route(Component\Push::CLIENT, ['methods' => ['GET']], function (\ZealPHP\HTTP\Response $response) {
                 $response->header('Content-Type', 'text/javascript; charset=utf-8');
                 $response->header('Cache-Control', 'public, max-age=3600');
