@@ -14,20 +14,29 @@ Start stateless; make a component reactive when it needs to respond to the user.
 
 ## Stateless components
 
-Put a template in `template/components/` and render it by name:
+Keep a component next to the page that uses it, in that page's `components/` folder, and move it to `template/components/` when several pages share it. The call doesn't change: names are looked up from the page outward.
+
+```
+public/invoices.php                      App::render('invoices')
+template/invoices/invoices.php           the page
+template/invoices/components/card.php    a component only this page uses
+template/components/ui/button.php        shared by several pages
+```
+
+A component is a template that takes props:
 
 ```php
-<?php /* template/components/card.php */ use function ZealPHP\e; ?>
+<?php /* template/invoices/components/card.php */ use function ZealPHP\e; ?>
 <article class="card">
   <h3><?= e($title) ?></h3>
   <?= $slot ?? '' ?>
 </article>
 ```
 
-Then call it from any page or template — here a page rendered by `public/invoices.php` (`App::render('invoices-page')`):
+Then call it by name from the page (or any template it renders):
 
 ```php
-<?php /* template/invoices-page.php */ use ZealPHP\App; ?>
+<?php /* template/invoices/invoices.php */ use ZealPHP\App; ?>
 <main>
   <h1>Billing</h1>
   <?= App::component('card', [
@@ -195,7 +204,7 @@ The template is only the inside of the component. The framework wraps it in the 
 | `$slot` | markup the parent passed as the `slot` prop (`SafeHtml`), or `null` |
 | anything in `$extra` | as given |
 
-The template path is always absolute from `template/`, so the page and the endpoint render the same file.
+The template path is always absolute from `template/`, so the page and the endpoint render the same file: the endpoint request has no page to look outward from. The template can still live next to its page, named in full: `$this->view('/invoices/components/counter')`.
 
 ### Keys and ids
 
