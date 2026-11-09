@@ -148,31 +148,33 @@ final class SessionClusterHardeningTest extends TestCase
         $this->assertFalse($cp['httponly']);
     }
 
-    // ── #372: session_abort() restores, never empties+persists ──────
-    public function testAbortRestoresLoadedStateNotEmpty(): void
+    // ── #372: session_abort() never empties+persists the store ──────
+    // abort ends the session WITHOUT writing (PHP semantics): the stored data
+    // stays exactly as loaded, the in-request mutation never reaches it, and
+    // the request-end close writes nothing. (It used to reload the file into
+    // memory and leave the session open — the end-of-request write then put
+    // it back, and with a handler-backed store wiped it.)
+    public function testAbortKeepsStoredStateAndWritesNothing(): void
     {
         App::$session_save_path = $this->savePath;
         $sid = 'clu-sid';
+        $file = $this->savePath . '/sess_' . $sid;
         // Native-format session file (key|serialized;) with prior data.
-        file_put_contents(
-            $this->savePath . '/sess_' . $sid,
-            'kept|s:5:"value";count|i:7;'
-        );
+        file_put_contents($file, 'kept|s:5:"value";count|i:7;');
         $g = RequestContext::instance();
         $g->session_params = ['save_path' => $this->savePath, 'session_id' => $sid];
         $g->session = ['kept' => 'value', 'count' => 7];
         $GLOBALS['_SESSION'] = ['kept' => 'value', 'count' => 7];
+        $g->_session_started = true;
         // In-request mutation that abort must DISCARD.
         $GLOBALS['_SESSION']['count'] = 999;
 
         $this->assertTrue(zeal_session_abort());
+        $this->assertArrayNotHasKey('_SESSION', $GLOBALS, 'the session is closed');
+        $this->assertFalse($g->_session_started, 'the request-end close is skipped');
 
-        $restored = $GLOBALS['_SESSION'] ?? [];
-        $this->assertSame('value', $restored['kept'] ?? null,
-            '#372: abort must restore the loaded state (native decoder), not empty it');
-        $this->assertSame(7, $restored['count'] ?? null,
-            '#372: the in-request mutation is discarded, the stored value restored');
-        // And the on-disk file is untouched (abort does not write).
-        $this->assertStringContainsString('count|i:7', (string)file_get_contents($this->savePath . '/sess_' . $sid));
+        zeal_session_write_close();
+        $this->assertSame('kept|s:5:"value";count|i:7;', (string) file_get_contents($file),
+            '#372: the stored session is neither emptied nor overwritten');
     }
 }
