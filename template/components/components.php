@@ -271,6 +271,7 @@ PHP]) ?>
     'code'  => <<<'HTML'
 <?= App::componentPushRoot() ?>
 HTML]) ?>
+<p>Only push needs this line; the counter and signup form above work without it. It prints a <code>&lt;script&gt;</code> only on a page that rendered a component with <code>topics()</code>, and nothing elsewhere, so it can sit in a shared layout. Keep it after the components: it reads the topics they recorded while rendering, so in <code>&lt;head&gt;</code> it would print nothing. <a href="/docs/guide/components#live-updates-push">Live updates (push)</a> has the details.</p>
   </div>
 </div>
 

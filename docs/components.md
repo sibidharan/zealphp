@@ -588,7 +588,9 @@ Add the push root once to your layout, after the components:
 </body>
 ```
 
-It renders a `<script>` only when the page rendered a component with topics. Call `Component::invalidate()` from anywhere that changes the data — an action, an API handler, a task worker, a sidecar process, a timer.
+It's needed only for push. Components without `topics()` work without it, like the counter in [Putting it on a page, end to end](#putting-it-on-a-page-end-to-end). It prints a `<script>` only when the page rendered a component with topics, and nothing otherwise, so a shared layout can include it on every page at no cost.
+
+**Put it after the components**, at the end of `<body>`. It reads the topics each component recorded while it rendered, so placed in `<head>` (before the page body renders) it prints nothing and the page never connects. Call `Component::invalidate()` from anywhere that changes the data — an action, an API handler, a task worker, a sidecar process, a timer.
 
 ### How it works
 
@@ -766,7 +768,7 @@ final class CartBadge extends Component
 
 ## Limits in this version
 
-- **Push needs the root on the page.** Pages that don't include `App::componentPushRoot()` render components normally but never receive updates.
+- **Push needs the root on the page, after the components.** Pages that don't include `App::componentPushRoot()`, or call it before the components render, show them normally but never receive updates.
 - **Dev hot-reload** (`--dev`) re-registers components from `route/*.php`, but the endpoint route and the key check are set up at boot: if a reload adds the *first* component, restart. Removed components stay registered until restart.
 - **Behind a proxy that rewrites `Host`**, the `Origin` fallback and the no-JS back-link compare against the rewritten host. Modern browsers send `Sec-Fetch-Site`, which isn't affected; the back-link falls back to `/`.
 
