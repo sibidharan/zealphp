@@ -40,6 +40,9 @@ final class Push
     public const PIPE_TYPE = 'zc.invalidate';
     public const CHANNEL = 'zeal:components:invalidate';
 
+    /** What a deferred componentPushRoot() prints; replaced when the response is finished. */
+    public const ROOT_MARKER = '<!--zealphp:push-root-->';
+
     private const PURPOSE = 'component-push';
     private const TOPIC = '/^[A-Za-z0-9:_.\-]{1,128}$/D';
 
@@ -131,26 +134,160 @@ final class Push
     }
 
     /**
-     * The push root for the page: a script tag that opens the connection, or
-     * nothing when no rendered component has topics. Render it once, near the
-     * end of the layout, after the components.
+     * The push root for the page: the script that opens the connection.
+     *
+     * In a buffered response it prints a placeholder that finish() replaces
+     * with the script for every component the response rendered, so it can sit
+     * anywhere in the layout. In a stream, or outside a request, it prints the
+     * script for the components rendered so far. A page gets at most one
+     * script: the client keeps one connection per page.
      */
     public static function root(): SafeHtml
     {
-        $seen = RequestContext::instance()->memo['_zc_push'] ?? [];
-        if (!is_array($seen) || $seen === []) {
-            return new SafeHtml('');
+        $g = RequestContext::instance();
+        if (($g->memo['_zc_push_defer'] ?? false) === true && !($g->_streaming ?? false)) {
+            $g->memo['_zc_push_root'] = true;
+            return new SafeHtml(self::ROOT_MARKER);
         }
+        return new SafeHtml(self::takeScript());
+    }
+
+    /**
+     * Start of a request (ResponseMiddleware): componentPushRoot() prints a
+     * placeholder, filled in by finish().
+     *
+     * @internal
+     */
+    public static function deferRoot(): void
+    {
+        RequestContext::instance()->memo['_zc_push_defer'] = true;
+    }
+
+    /**
+     * End of a buffered response (ResponseMiddleware): put the push script
+     * where componentPushRoot() was called, or, when the layout didn't call
+     * it, before `</body>`. Responses without `</body>` (htmx fragments,
+     * component refreshes, JSON) and non-HTML responses are left alone.
+     * Costs two array lookups when the page rendered no component with topics.
+     *
+     * @internal
+     */
+    public static function finish(\Psr\Http\Message\ResponseInterface $response): \Psr\Http\Message\ResponseInterface
+    {
+        $g = RequestContext::instance();
+        $g->memo['_zc_push_defer'] = false;
+        if (!self::pending() && ($g->memo['_zc_push_root'] ?? false) !== true) {
+            return $response;
+        }
+        if (($g->_streaming ?? false) || !self::isHtml($response->getHeaderLine('Content-Type'))) {
+            return $response;
+        }
+        $body = (string) $response->getBody();
+        $new = self::place($body);
+        if ($new === $body) {
+            return $response;
+        }
+        $stream = fopen('php://memory', 'r+');
+        if ($stream === false) {
+            return $response;
+        }
+        fwrite($stream, $new);
+        fseek($stream, 0);
+        $response = $response->withBody(new \OpenSwoole\Core\Psr\Stream($stream));
+        return $response->hasHeader('Content-Length')
+            ? $response->withHeader('Content-Length', (string) strlen($new))
+            : $response;
+    }
+
+    /**
+     * A chunk about to be streamed: put the push script in it when it holds
+     * the placeholder or `</body>` and the page hasn't got one yet.
+     *
+     * @internal
+     */
+    public static function spliceStream(string $chunk): string
+    {
+        if (!self::pending() && !str_contains($chunk, self::ROOT_MARKER)) {
+            return $chunk;
+        }
+        return self::place($chunk);
+    }
+
+    /**
+     * Stop deferring: a stream is starting, so componentPushRoot() must print
+     * the script itself.
+     *
+     * @internal
+     */
+    public static function streaming(): void
+    {
+        RequestContext::instance()->memo['_zc_push_defer'] = false;
+    }
+
+    /**
+     * The script goes where the first placeholder is (other placeholders are
+     * removed), else before the last `</body>`.
+     */
+    private static function place(string $html): string
+    {
+        $at = strpos($html, self::ROOT_MARKER);
+        if ($at !== false) {
+            $html = substr_replace($html, self::takeScript(), $at, strlen(self::ROOT_MARKER));
+            return str_replace(self::ROOT_MARKER, '', $html);
+        }
+        if (!self::pending()) {
+            return $html;
+        }
+        $at = strripos($html, '</body');
+        return $at === false ? $html : substr_replace($html, self::takeScript(), $at, 0);
+    }
+
+    /** Components with topics were rendered and no script carries them yet. */
+    private static function pending(): bool
+    {
+        $memo = RequestContext::instance()->memo;
+        $seen = $memo['_zc_push'] ?? [];
+        return is_array($seen) && $seen !== [] && ($memo['_zc_push_done'] ?? false) !== true;
+    }
+
+    /** A Content-Type that is HTML, or none (the default is text/html). */
+    private static function isHtml(string $contentType): bool
+    {
+        if ($contentType === '') {
+            $wrapper = RequestContext::instance()->zealphp_response ?? null;
+            if ($wrapper instanceof \ZealPHP\HTTP\Response) {
+                foreach ($wrapper->headersList as [$name, $value]) {
+                    if (strcasecmp($name, 'Content-Type') === 0) {
+                        $contentType = $value;
+                    }
+                }
+            }
+        }
+        return $contentType === '' || str_contains(strtolower($contentType), 'html');
+    }
+
+    /**
+     * The script for every component recorded so far, once per request;
+     * '' when there are none or the page already has it.
+     */
+    private static function takeScript(): string
+    {
+        if (!self::pending()) {
+            return '';
+        }
+        $g = RequestContext::instance();
+        $g->memo['_zc_push_done'] = true;
+        $seen = $g->memo['_zc_push'];
         /** @var array<string, array{n: string, t: list<string>}> $seen */
         $token = self::token($seen);
-        return new SafeHtml('<script ' . Attr::render([
+        return '<script ' . Attr::render([
             'src' => self::CLIENT . '?v=' . self::clientVersion(),
             'defer' => true,
             // The SSE stream needs a coroutine per page; without coroutines, use the socket.
             'data-zc-push' => \OpenSwoole\Coroutine::getCid() < 0 ? 'ws' : self::transport(),
             'data-zc-token' => $token,
             'data-zc-ids' => implode(' ', array_keys($seen)),
-        ]) . '></script>');
+        ]) . '></script>';
     }
 
     /** Changes when client.js does, so a deploy isn't hidden by the browser cache. */

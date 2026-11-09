@@ -4,11 +4,13 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Changed
+- **Live updates need nothing in the layout.** When a page renders a component with `topics()`, the framework adds the push script before `</body>`, one per page. `App::componentPushRoot()` is now optional and can go anywhere, `<head>` included: it marks the spot and the script is filled in when the response is finished, so it lists components rendered after it too (before, it printed nothing when called before the components, and the page silently never connected). Calling it twice gives one script. Streamed pages get the script in the chunk that carries `</body>`; SSE, JSON, htmx fragments and other responses without `</body>` are untouched.
+
 ### Fixed
 - **A mistyped validation rule no longer passes silently.** Every rule but `required`/`accepted` skips empty values, so `#[Model(rules: 'requird|email')]` or `min:x` only threw once someone filled the field, and an empty submit went through. `#[Model(rules: …)]` strings are now checked when the component is registered (a typo stops boot), and `rules()` rules on the first validation, empty value or not. Also refused: an argument on a rule that takes none (`required:true`), `in:` with no list, `between` with three values. New `Validator::assertRules()`.
 
 ### Documentation
-- **`App::componentPushRoot()` is for push only.** The components guide and `/components` now say so: components without `topics()` work without it, it prints nothing on pages that rendered none, and it must come after the components (in `<head>` it prints nothing and the page never connects).
 - **Validation rules, in full.** The components guide (and `/components#validation`) now states the syntax (`name` / `name:argument`, `|`-joined, comma lists, `regex:` takes the rest), that rules run left to right and stop at the first failure, when they run (changed live/blur fields; every field only when an action calls `$this->validate()`), that they are server-only, and the `messages()` key format.
 - **Which page a request is on.** [`docs/templates-and-rendering.md#which-page-is-a-request-on`](docs/templates-and-rendering.md#which-page-is-a-request-on) (and `/templates#which-page`) spells out how relative template and component names find their page: the served file's `SCRIPT_NAME`, set by `App::include()` for implicit public routes, directory index pages and your own includes; `PHP_SELF` only as a fallback with its `PATH_INFO` stripped; no page for routes, APIs and the component endpoint. Tests pin the directory-index case and that `App::include()` sets the page.
 
