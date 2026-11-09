@@ -96,10 +96,11 @@ read_pid() {
     fi
 }
 
-# True when $1 is a plain positive integer > 1 naming a live process.
+# True when $1 is a plain positive integer naming a live process. (PID 1 is
+# allowed: in a container the server is PID 1; pid_is_ours rules out init.)
 pid_alive() {
     local pid="$1"
-    [[ "$pid" =~ ^[0-9]+$ ]] && (( pid > 1 )) || return 1
+    [[ "$pid" =~ ^[0-9]+$ ]] && (( pid > 0 )) || return 1
     kill -0 "$pid" >/dev/null 2>&1 && return 0
     # EPERM: alive but someone else's.
     ps -p "$pid" >/dev/null 2>&1

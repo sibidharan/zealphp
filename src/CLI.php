@@ -551,7 +551,10 @@ class CLI
         if (!self::pidAlive($pid)) {
             return 'dead';
         }
-        if ($pid <= 1 || $pid === getmypid()) {
+        // PID 1 is allowed: in a container the server IS PID 1, and
+        // `docker exec … php app.php stop` must find it. The owner, cmdline
+        // and listen-socket checks below still rule out a host's init.
+        if ($pid === getmypid()) {
             return 'foreign';
         }
         if (!self::pidOwnedByUs($pid) || !self::processIsZealphp($pid)) {
@@ -606,7 +609,7 @@ class CLI
         while ($queue !== []) {
             $parent = array_shift($queue);
             foreach ($children[$parent] ?? [] as $child) {
-                if ($child > 1 && !in_array($child, $out, true) && self::pidOwnedByUs($child)) {
+                if ($child > 0 && !in_array($child, $out, true) && self::pidOwnedByUs($child)) {
                     $out[]   = $child;
                     $queue[] = $child;
                 }
@@ -618,12 +621,13 @@ class CLI
     /**
      * SIGTERM $pid (an OpenSwoole master shuts its manager + workers down
      * itself), wait up to 10 s, then SIGKILL the master and its own
-     * descendants individually. Only ever signals positive pids > 1.
+     * descendants individually. Only ever signals positive pids (never 0 or
+     * a negative process-group id).
      * Returns true when the process exited after SIGTERM.
      */
     private static function terminate(int $pid): bool
     {
-        if ($pid <= 1) {
+        if ($pid <= 0) {
             return false;
         }
         posix_kill($pid, SIGTERM);
@@ -653,9 +657,13 @@ class CLI
 
     /**
      * Start-time guard for `start` / bare `php app.php`. It never signals
-     * anything: a running server, a foreign PID file or a port held by a
-     * process we can see all refuse the start with a message; only a PID file
-     * naming a dead process is removed.
+     * anything. Our own server already running, or the port held by a process
+     * we can see, refuses the start with a message. Any other PID file is
+     * stale and removed: a dead pid, our own pid (a container restarted after
+     * an unclean stop — the server is PID 1 again), or a live pid that isn't a
+     * ZealPHP server for this port (recycled). Starting doesn't act on that
+     * pid, and the port check below catches a real conflict, so refusing would
+     * only wedge restarts. (`stop`/`restart` still refuse a foreign pid.)
      *
      * @return array{int, string}|null [exit code, message] to refuse with, or null to proceed
      */
@@ -663,14 +671,13 @@ class CLI
     {
         if (file_exists($pidFile)) {
             $pid = self::readPidFile($pidFile);
-            $kind = self::classifyPid($pid, $port);
+            $kind = $pid === getmypid() ? 'dead' : self::classifyPid($pid, $port);
             if ($kind === 'ours') {
                 return [0, "ZealPHP is already running (pid {$pid}, port {$port})\n"
                     . "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n"];
             }
             if ($kind === 'foreign') {
-                return [1, "PID file {$pidFile} names pid {$pid}, which is not your ZealPHP server on port {$port}.\n"
-                    . "Not touching it. Remove the file if it is stale, or use another port / ZEALPHP_LOG_DIR.\n"];
+                echo "Removing stale PID file {$pidFile}: pid {$pid} is not a ZealPHP server on port {$port}.\n";
             }
             @unlink($pidFile);
         }
