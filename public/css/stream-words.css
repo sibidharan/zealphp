@@ -1,0 +1,6 @@
+/* /stream/words — standalone $response->stream() demo page (route/streaming.php). */
+body{font-family:system-ui,sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;background:#f8f9fa}
+h1{color:#1a1a2e}.badge{display:inline-block;background:#fff0d0;color:#630;border-radius:4px;padding:2px 8px;font-size:.8rem;vertical-align:middle}
+.word{opacity:0;animation:pop .25s forwards}.card{background:#fff;border:1px solid #dee2e6;border-radius:8px;padding:1rem;margin:1rem 0}
+@keyframes pop{to{opacity:1}}
+nav{margin-bottom:1.5rem}nav a{margin-right:1rem;color:#0070f3;text-decoration:none}
