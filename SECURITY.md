@@ -27,7 +27,11 @@ The following areas are in scope for security reports:
 
 - Framework core (`src/`)
 - Session handling and session storage
-- uopz function overrides
+- Built-in function overrides (`header()`, `setcookie()`, `http_response_code()`,
+  `session_*()`, the exec family) — installed with ext-zealphp's
+  `zealphp_override()`. uopz is used only as a legacy fallback when ext-zealphp
+  is not loaded, and for `session_set_save_handler()`, which ext-zealphp
+  declines to override (see `App::overrideBuiltin()`)
 - Coroutine isolation and per-request state
 - Middleware (CORS, ETag, compression)
 - WebSocket connection handling
