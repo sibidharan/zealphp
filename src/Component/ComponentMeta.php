@@ -14,7 +14,7 @@ namespace ZealPHP\Component;
 final class ComponentMeta
 {
     /** Template variables every component view receives. */
-    private const RESERVED = ['c', 'errors'];
+    private const RESERVED = ['c', 'errors', 'slot'];
 
     /**
      * @param class-string<Component>                  $class
@@ -62,7 +62,7 @@ final class ComponentMeta
             }
             $where = "{$class}::\${$p->getName()}";
             if (in_array($p->getName(), self::RESERVED, true) || str_starts_with($p->getName(), '_')) {
-                throw new \LogicException("{$where}: the name is reserved (c, errors, and names starting with _)");
+                throw new \LogicException("{$where}: the name is reserved (c, errors, slot, and names starting with _)");
             }
             if ($p->isReadOnly()) {
                 throw new \LogicException("{$where}: component state can't be readonly");

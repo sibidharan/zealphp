@@ -96,7 +96,7 @@ class RegistryTest extends TestCase
         yield 'reserved name c' => [new class extends Component {
             public int $c = 0;
             public function render(): mixed { return ''; }
-        }, '#::\$c: the name is reserved \(c, errors, and names starting with _\)$#'];
+        }, '#::\$c: the name is reserved \(c, errors, slot, and names starting with _\)$#'];
         yield 'reserved name errors' => [new class extends Component {
             public array $errors = [];
             public function render(): mixed { return ''; }

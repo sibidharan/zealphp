@@ -72,6 +72,8 @@ abstract class Component
     private array $zcRaw = [];
     /** @var list<string> form ids of the components this one is nested in, outermost first */
     private array $zcAncestors = [];
+    /** Markup the parent passed as the `slot` prop; kept in the snapshot. */
+    private ?string $zcSlot = null;
 
     /** How deep reactive components may nest. */
     private const MAX_DEPTH = 8;
@@ -152,7 +154,7 @@ abstract class Component
      */
     protected function view(string $template, array $vars = []): SafeHtml
     {
-        $args = $vars + $this->state() + ['c' => $this, 'errors' => $this->zcErrors];
+        $args = $vars + $this->state() + ['c' => $this, 'errors' => $this->zcErrors, 'slot' => $this->slot()];
         // Not a fragment selector: a component template is always rendered whole.
         unset($args['fragment']);
         // Absolute from template/: a relative name would be namespaced by the
@@ -368,6 +370,10 @@ abstract class Component
     final public static function zcMount(ComponentMeta $meta, array $props, string $id): self
     {
         $c = self::zcInstantiate($meta, $id);
+        if (array_key_exists('slot', $props)) {
+            $c->zcSlot = self::slotMarkup($props['slot'], $meta->class);
+            unset($props['slot']);
+        }
         foreach ($props as $prop => $value) {
             if (!is_string($prop) || !isset($meta->props[$prop])) {
                 throw new \LogicException("{$meta->class} has no state property \${$prop}");
@@ -403,6 +409,7 @@ abstract class Component
         $c->zcErrors = $snapshot->errors;
         $c->zcFields = array_values(array_intersect($snapshot->fields, array_keys($meta->models)));
         $c->zcAncestors = $snapshot->ancestors;
+        $c->zcSlot = $snapshot->slot;
         $c->hydrate();
         return $c;
     }
@@ -427,6 +434,10 @@ abstract class Component
     final public function zcApplyReactive(array $props): void
     {
         $meta = $this->meta();
+        // A slot is the parent's markup: it always follows the parent.
+        if (array_key_exists('slot', $props)) {
+            $this->zcSlot = self::slotMarkup($props['slot'], $meta->class);
+        }
         foreach ($meta->reactive as $prop) {
             if (!array_key_exists($prop, $props)) {
                 continue;
@@ -437,6 +448,32 @@ abstract class Component
                 throw new \LogicException("{$meta->class}::\${$prop} " . $e->getMessage(), 0, $e);
             }
         }
+    }
+
+    /** Markup the parent passed as the `slot` prop, or null. */
+    public function slot(): ?SafeHtml
+    {
+        return $this->zcSlot === null ? null : new SafeHtml($this->zcSlot);
+    }
+
+    /**
+     * A `slot` prop as markup. It's kept in the snapshot and re-rendered as
+     * it was, so it can't hold reactive components: their state would be
+     * frozen inside it. Render those in the parent instead.
+     */
+    private static function slotMarkup(mixed $slot, string $class): ?string
+    {
+        if ($slot === null) {
+            return null;
+        }
+        if (!is_string($slot) && !$slot instanceof \Stringable) {
+            throw new \LogicException("{$class}: the slot prop must be markup (a string or SafeHtml)");
+        }
+        $markup = (string) $slot;
+        if (str_contains($markup, ' data-zc="')) {
+            throw new \LogicException("{$class}: a slot can't contain reactive components (their state would be frozen in it); render them in the parent instead");
+        }
+        return $markup;
     }
 
     /**
@@ -656,6 +693,7 @@ abstract class Component
             $this->zcFields,
             $this->zcErrors,
             ancestors: $this->zcAncestors,
+            slot: $this->zcSlot,
         ))->encode();
 
         $submitUrl = null;

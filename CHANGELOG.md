@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added — slots for reactive components (#509 phase 4)
+- **A parent can pass markup into a reactive child as the `slot` prop**; the child prints `<?= $slot ?>` (or `$this->slot()`). It's kept in the child's signed snapshot, so the child's own updates re-render it, and a parent re-render replaces it. A slot can't contain reactive components (refused: their state would be frozen inside). Guide: [Nesting components](docs/components.md#nesting-components).
+- `slot` is now a reserved component property name.
+
 ### Added — events between components (#509 phase 4)
 - **`#[On('event')]`** runs a component method when another component on the page dispatches that event (`$this->dispatch('cart-updated')`), then re-renders the listener through its own snapshot and session. A component doesn't hear its own events. Delivered by htmx (`HX-Trigger` → `hx-trigger="… from:body"`) and by `ZealJsBinder`; not without JavaScript. Guide: [Events between components](docs/components.md#events-between-components).
 - New endpoint action `_on` (with `_zc_event`); `authorize()` is called with each listener's method name.

@@ -192,6 +192,7 @@ The template is only the inside of the component. The framework wraps it in the 
 | each public property | its current value (`$count`) |
 | `$c` | the component, for the helpers below |
 | `$errors` | `field => message` validation errors |
+| `$slot` | markup the parent passed as the `slot` prop (`SafeHtml`), or `null` |
 | anything in `$extra` | as given |
 
 The template path is always absolute from `template/`, so the page and the endpoint render the same file.
@@ -666,6 +667,7 @@ final class TodoRow extends Component
 - **Children keep their state when the parent re-renders.** Each child's current snapshot travels in its parent's form; when the parent re-renders, every child is rebuilt from its own state — a row stays `done`, keeps what was typed in its note — instead of being mounted again from the props. A snapshot is only used for the child id it was issued to.
 - **`#[Reactive]` properties follow the parent.** Props seed a child when it first mounts; after that, only properties marked `#[Reactive]` take the parent's new values. The rest belong to the child.
 - **Keys are required inside a parent**, and only need to be unique within it: a child's id is scoped by its parent's (`todo-list-main-todo-row-0`). Use the item's stable id rather than its position if rows can be reordered, so state follows the item.
+- **Slots.** A parent can pass markup into a reactive child as the `slot` prop — `App::component(Modal::class, ['slot' => App::component('/partials/terms')], key: 'terms')` — and the child prints it with `<?= $slot ?>` (or `$this->slot()`). The slot is kept in the child's snapshot, so the child's own updates re-render it; when the parent re-renders, the new slot replaces it. A slot can't contain reactive components (their state would be frozen inside it): render those in the parent. Stateless markup is fine.
 - **Limits:** nesting goes 8 levels deep. A component with `$tag = 'form'` can't contain reactive children, and a nested component can't use `$tag = 'form'` (forms can't nest) — keep the default `div`.
 
 ## Events between components
@@ -712,10 +714,9 @@ final class CartBadge extends Component
 ## Limits in this version
 
 - **Push needs the root on the page.** Pages that don't include `App::componentPushRoot()` render components normally but never receive updates.
-- **Slots for reactive children** (markup a parent passes into a reactive child) aren't supported yet; pass data as props instead.
 - **Dev hot-reload** (`--dev`) re-registers components from `route/*.php`, but the endpoint route and the key check are set up at boot: if a reload adds the *first* component, restart. Removed components stay registered until restart.
 - **Behind a proxy that rewrites `Host`**, the `Origin` fallback and the no-JS back-link compare against the rewritten host. Modern browsers send `Sec-Fetch-Site`, which isn't affected; the back-link falls back to `/`.
 
 ## What's next
 
-Planned ([composition design](architecture/2026-11-09-component-composition.md)): slots for reactive children.
+Composition is complete ([design](architecture/2026-11-09-component-composition.md)): nesting, `#[Reactive]` props, events and slots. Next: a benchmark of component actions against `render(…, htmx: true)` fragments.
