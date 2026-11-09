@@ -452,6 +452,19 @@ while ($__fm_running) {
             }
         }
 
+        // The hard exit below skips PHP's request shutdown, which is where an
+        // open session gets written and its lock released. Without this, every
+        // session change made in fork mode was silently lost, and the session
+        // file stayed flock()ed until the kernel reaped the killed child. Write
+        // it before the response goes out, so the client's next request sees it.
+        if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
+            try {
+                @session_write_close();
+            } catch (\Throwable $e) {
+                fwrite(STDERR, 'fork_master child: session write failed: ' . $e->getMessage() . "\n");
+            }
+        }
+
         try {
             IPC::writeFrame($conn, $__fm_resp);
         } catch (\Throwable $e) {

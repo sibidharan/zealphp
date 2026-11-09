@@ -184,4 +184,35 @@ PHP);
         $this->assertSame(404, $resp['return_value'] ?? null);
         $this->assertTrue($resp['has_return'] ?? false);
     }
+
+    /**
+     * The child hard-exits (SIGKILL), skipping PHP's request shutdown — the
+     * point where native sessions are written. Session changes must still
+     * persist: the child writes the session before sending its response.
+     */
+    public function testSessionChangesPersistAcrossForkedRequests(): void
+    {
+        $sessDir = $this->tmpDir . '/sess';
+        @mkdir($sessDir, 0700, true);
+        $file = $this->fixture('sess.php', '<?php
+            session_save_path(' . var_export($sessDir, true) . ');
+            session_id("forksess1");
+            session_start();
+            $_SESSION["n"] = ($_SESSION["n"] ?? 0) + 1;
+            echo $_SESSION["n"];');
+
+        $first = $this->request(['file' => $file, 'server' => [], 'get' => [], 'post' => [], 'cookies' => []]);
+        $this->assertIsArray($first);
+        $this->assertSame('1', $first['body'] ?? null);
+        $this->assertStringContainsString('n|i:1;', (string) @file_get_contents($sessDir . '/sess_forksess1'));
+
+        $second = $this->request(['file' => $file, 'server' => [], 'get' => [], 'post' => [], 'cookies' => []]);
+        $this->assertIsArray($second);
+        $this->assertSame('2', $second['body'] ?? null, 'the first request\'s session write must be visible');
+
+        foreach (glob($sessDir . '/*') ?: [] as $f) {
+            @unlink($f);
+        }
+        @rmdir($sessDir);
+    }
 }
