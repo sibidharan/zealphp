@@ -63,37 +63,41 @@ class CLI
      * under $root, never overwriting. Returns the exit code.
      *
      * @param list<string> $args the command line after the script name
+     * @param resource|null $out where to report (default STDOUT)
+     * @param resource|null $err where to report errors (default STDERR)
      */
-    public static function makeComponent(string $root, array $args): int
+    public static function makeComponent(string $root, array $args, $out = null, $err = null): int
     {
+        $out ??= STDOUT;
+        $err ??= STDERR;
         $name = $args[1] ?? '';
         if ($name === '' || str_starts_with($name, '-')) {
-            fwrite(STDERR, "Usage: php app.php make:component Name [--stateless]\n");
+            fwrite($err, "Usage: php app.php make:component Name [--stateless]\n");
             return 1;
         }
         try {
             $plan = \ZealPHP\Component\Scaffolder::plan($root, $name, in_array('--stateless', $args, true));
         } catch (\InvalidArgumentException $e) {
-            fwrite(STDERR, $e->getMessage() . "\n");
+            fwrite($err, $e->getMessage() . "\n");
             return 1;
         }
         foreach (array_keys($plan['files']) as $path) {
             if (file_exists($root . '/' . $path)) {
-                fwrite(STDERR, "{$path} already exists; nothing was written.\n");
+                fwrite($err, "{$path} already exists; nothing was written.\n");
                 return 1;
             }
         }
         foreach ($plan['files'] as $path => $content) {
             $full = $root . '/' . $path;
             if (!is_dir(dirname($full)) && !mkdir(dirname($full), 0775, true) && !is_dir(dirname($full))) {
-                fwrite(STDERR, 'Could not create ' . dirname($path) . "\n");
+                fwrite($err, 'Could not create ' . dirname($path) . "\n");
                 return 1;
             }
             file_put_contents($full, $content);
-            echo "created {$path}\n";
+            fwrite($out, "created {$path}\n");
         }
         foreach ($plan['next'] as $line) {
-            echo $line . "\n";
+            fwrite($out, $line . "\n");
         }
         return 0;
     }

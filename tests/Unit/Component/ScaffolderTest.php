@@ -11,11 +11,33 @@ use ZealPHP\Component\Scaffolder;
 class ScaffolderTest extends TestCase
 {
     private string $root = '';
+    /** @var resource */
+    private $out;
+    /** @var resource */
+    private $err;
+
+    /** Run the command with its output captured (writing to the real stderr kills PHPUnit on OpenSwoole 25.2). */
+    private function make(string ...$args): int
+    {
+        return CLI::makeComponent($this->root, ['make:component', ...$args], $this->out, $this->err);
+    }
+
+    private static function read($stream): string
+    {
+        rewind($stream);
+        return (string) stream_get_contents($stream);
+    }
 
     protected function setUp(): void
     {
         $this->root = sys_get_temp_dir() . '/zc-scaffold-' . bin2hex(random_bytes(4));
         mkdir($this->root);
+        $out = fopen('php://memory', 'w+');
+        $err = fopen('php://memory', 'w+');
+        self::assertIsResource($out);
+        self::assertIsResource($err);
+        $this->out = $out;
+        $this->err = $err;
         file_put_contents($this->root . '/composer.json', (string) json_encode([
             'autoload' => ['psr-4' => ['Other\\' => 'lib/', 'Acme\\Shop\\' => 'src/']],
         ]));
@@ -91,42 +113,43 @@ class ScaffolderTest extends TestCase
     {
         foreach ([Scaffolder::plan($this->root, 'Counter'), Scaffolder::plan($this->root, 'card', true)] as $plan) {
             foreach ($plan['files'] as $path => $content) {
-                $file = $this->root . '/lint-' . basename($path);
-                file_put_contents($file, $content);
-                exec(escapeshellarg(PHP_BINARY) . ' -l ' . escapeshellarg($file) . ' 2>&1', $out, $code);
-                $this->assertSame(0, $code, $path . ': ' . implode("\n", $out));
+                try {
+                    token_get_all($content, TOKEN_PARSE); // throws \ParseError on invalid PHP
+                    $this->addToAssertionCount(1);
+                } catch (\ParseError $e) {
+                    $this->fail($path . ': ' . $e->getMessage());
+                }
             }
         }
     }
 
     public function testCommandWritesFilesAndNeverOverwrites(): void
     {
-        ob_start();
-        $code = CLI::makeComponent($this->root, ['make:component', 'Counter']);
-        $out = (string) ob_get_clean();
-        $this->assertSame(0, $code);
+        $this->assertSame(0, $this->make('Counter'));
+        $out = self::read($this->out);
         $this->assertStringContainsString('created src/Components/Counter.php', $out);
+        $this->assertStringContainsString('App::components(', $out);
         $this->assertFileExists($this->root . '/src/Components/Counter.php');
         $this->assertFileExists($this->root . '/template/components/counter.php');
 
         file_put_contents($this->root . '/template/components/counter.php', 'mine');
-        ob_start();
-        $this->assertSame(1, CLI::makeComponent($this->root, ['make:component', 'Counter']));
-        ob_end_clean();
+        $this->assertSame(1, $this->make('Counter'));
+        $this->assertStringContainsString('already exists; nothing was written', self::read($this->err));
         $this->assertSame('mine', file_get_contents($this->root . '/template/components/counter.php'));
 
-        ob_start();
-        $this->assertSame(0, CLI::makeComponent($this->root, ['make:component', 'badge', '--stateless']));
-        ob_end_clean();
+        $this->assertSame(0, $this->make('badge', '--stateless'));
         $this->assertFileExists($this->root . '/template/components/badge.php');
         $this->assertFileDoesNotExist($this->root . '/src/Components/Badge.php');
     }
 
     public function testCommandRefusesMissingAndBadNames(): void
     {
-        $this->assertSame(1, CLI::makeComponent($this->root, ['make:component']));
-        $this->assertSame(1, CLI::makeComponent($this->root, ['make:component', '--stateless']));
-        $this->assertSame(1, CLI::makeComponent($this->root, ['make:component', 'bad name']));
+        $this->assertSame(1, $this->make());
+        $this->assertSame(1, $this->make('--stateless'));
+        $this->assertSame(1, $this->make('bad name'));
+        $err = self::read($this->err);
+        $this->assertStringContainsString('Usage: php app.php make:component', $err);
+        $this->assertStringContainsString("Component name 'bad name'", $err);
         $this->assertDirectoryDoesNotExist($this->root . '/src');
     }
 }
