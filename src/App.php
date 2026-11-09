@@ -5044,13 +5044,16 @@ class App
      *      NOT in `trusted_proxies` — that's the real client. If every entry is
      *      trusted, fall back to the socket peer (`REMOTE_ADDR`) — NOT the
      *      leftmost entry, which a client can forge by prepending (#249/#434).
-     *      An entry that isn't a valid IP (`FILTER_VALIDATE_IP`) is never
-     *      returned; reaching one ends the walk at the socket peer.
-     *   4. If `X-Forwarded-For` is absent but a valid-IP `X-Real-IP` is present
-     *      (and the peer is trusted), return `X-Real-IP`.
+     *      A trailing port (`a.b.c.d:port`, `[v6]:port`) is stripped. An entry
+     *      that still isn't a valid IP (`FILTER_VALIDATE_IP`) is never returned
+     *      and ends the walk with `''` (unknown) — not the proxy's address.
+     *   4. If `X-Forwarded-For` is absent but `X-Real-IP` is present (and the
+     *      peer is trusted), return its address (port stripped), or `''` when
+     *      it isn't one.
      *
-     * Returns the empty string when no IP can be determined (`REMOTE_ADDR` missing
-     * entirely — only happens for non-request contexts like CLI invocation).
+     * Returns the empty string when no IP can be determined: `REMOTE_ADDR`
+     * missing (non-request contexts like CLI invocation), or a trusted proxy
+     * forwarded something that isn't an address.
      */
     public static function clientIp(): string
     {
@@ -5067,14 +5070,16 @@ class App
         if ($forwarded !== '') {
             $chain = array_map('trim', explode(',', $forwarded));
             for ($i = count($chain) - 1; $i >= 0; $i--) {
-                $ip = $chain[$i];
-                if ($ip === '') continue;
-                if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
-                    // Not an address (`unknown`, `1.2.3.4:80`, markup, CRLF…):
-                    // never return it. Everything to its left is no more
-                    // trustworthy, so don't walk past it either — stop at the
-                    // socket peer, as when every hop is trusted.
-                    return $remote;
+                if ($chain[$i] === '') continue;
+                $ip = self::forwardedAddress($chain[$i]);
+                if ($ip === null) {
+                    // Not an address (`unknown`, markup, CRLF…): never return
+                    // it, and don't walk past it — everything to its left is
+                    // client-supplied, so skipping would let the client pick.
+                    // Nor return $remote: that is the trusted PROXY, which
+                    // would put every client in one rate-limit bucket and
+                    // inside any allowlist covering the proxy subnet.
+                    return '';
                 }
                 if (!self::peerInTrustedProxies($ip)) {
                     return $ip;
@@ -5090,10 +5095,32 @@ class App
         }
 
         $realIp = trim((string)($g->server['HTTP_X_REAL_IP'] ?? ''));
-        if ($realIp !== '' && filter_var($realIp, FILTER_VALIDATE_IP) !== false) {
-            return $realIp;
+        if ($realIp !== '') {
+            // Same rule as an XFF hop: an unusable value is '' (unknown), not
+            // the proxy's own address.
+            return self::forwardedAddress($realIp) ?? '';
         }
         return $remote;
+    }
+
+    /**
+     * The IP address in one forwarding-header entry, or null when it isn't
+     * one. Proxies such as Azure Application Gateway append the client PORT,
+     * so `a.b.c.d:port`, `[v6]:port` and a bare `[v6]` are accepted with the
+     * port/brackets removed; the result must pass `FILTER_VALIDATE_IP`.
+     */
+    private static function forwardedAddress(string $entry): ?string
+    {
+        $ip = trim($entry);
+        if (preg_match('/^\[([^\]]+)\](?::(\d{1,5}))?$/D', $ip, $m) === 1
+            || preg_match('/^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$/D', $ip, $m) === 1
+        ) {
+            if (isset($m[2]) && (int) $m[2] > 65535) {
+                return null;
+            }
+            $ip = $m[1];
+        }
+        return filter_var($ip, FILTER_VALIDATE_IP) !== false ? $ip : null;
     }
 
     /**
