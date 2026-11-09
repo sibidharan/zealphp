@@ -45,6 +45,8 @@ abstract class Component
     public const UPDATE = '_update';
     /** Re-renders with the current state (and any submitted input). */
     public const REFRESH = '_refresh';
+    /** Runs this component's #[On] methods for the event in `_zc_event`, then re-renders. */
+    public const ON = '_on';
 
     /** The outer element. Use `'form'` so the component works without JavaScript. */
     protected string $tag = 'div';
@@ -406,6 +408,16 @@ abstract class Component
     }
 
     /**
+     * Run this component's #[On] methods for an event (validated by the caller).
+     *
+     * @internal
+     */
+    final public function zcListen(string $method): void
+    {
+        $this->{$method}();
+    }
+
+    /**
      * Take a parent's new values for this child's `#[Reactive]` properties.
      * The rest of the child's state stays its own.
      *
@@ -684,11 +696,24 @@ abstract class Component
                 'type' => 'hidden', 'name' => '_zc_kids[' . $this->zcId . ']', 'value' => $this->zcWire, 'form' => $ancestorForm,
             ]) . '>';
         }
+        // A hidden element per event this component listens for; the binder
+        // decides how the page delivers the event (htmx: hx-trigger). It's a
+        // button in the component's form, so a request from it carries that
+        // form (htmx 4 sends an element's own form, not a detached form's
+        // non-descendants), and type=button never submits without JS.
+        $listeners = '';
+        foreach (array_keys($meta->listeners) as $event) {
+            $listeners .= '<button ' . Attr::render(
+                ['type' => 'button', 'hidden' => true, 'tabindex' => '-1', 'aria-hidden' => 'true', 'form' => $this->formId()]
+                + App::componentBinder()->listenerAttributes($this, $event, $this->actionUrl(self::ON))
+            ) . '></button>';
+        }
         return '<' . $this->tag . ' ' . Attr::render($attrs) . '>'
             . $form
             . '<input type="hidden" name="_zc" value="' . Escape::html($this->zcWire) . '" form="' . Escape::html($this->formId()) . '">'
             . $carried
             . $defaultSubmit
+            . $listeners
             . $body
             . '</' . $this->tag . '>';
     }

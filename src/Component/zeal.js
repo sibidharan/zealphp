@@ -71,6 +71,22 @@
     try { events = JSON.parse(eventsHeader); } catch (e) { return; }
     Object.keys(events || {}).forEach(function (name) {
       el.dispatchEvent(new CustomEvent(name, { detail: events[name], bubbles: true }));
+      deliver(name, el.id);
+    });
+  }
+
+  // #[On] listeners: every other component listening for the event refreshes
+  // through its own form. A component never hears its own events.
+  function deliver(name, fromId) {
+    document.querySelectorAll('[data-zc-on]').forEach(function (listener) {
+      if (listener.getAttribute('data-zc-on') !== name) return;
+      var id = listener.getAttribute('data-zc-for');
+      if (!id || id === fromId) return;
+      var root = document.getElementById(id);
+      if (!root) return;
+      var body = fields(root, null);
+      body.append('_zc_event', name);
+      send(root, listener.getAttribute('data-zc-url'), body, null);
     });
   }
 
