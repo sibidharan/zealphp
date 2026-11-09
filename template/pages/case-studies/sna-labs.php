@@ -127,9 +127,14 @@ PHP,
 <?php App::render('/components/_code', [
   'label' => 'load.php — the dual-runtime shim (Apache fallback is the only "bridge" part)',
   'code'  => <<<'PHP'
-$GLOBALS['g'] = $g = class_exists('\ZealPHP\RequestContext', false)
-    ? \ZealPHP\RequestContext::instance()    // ZealPHP: populated by framework
-    : (object)[                               // Apache: references to superglobals
+if (class_exists('\ZealPHP\RequestContext', false)) {
+    // ZealPHP: $g is this request's context; $GLOBALS['g'] is a proxy that
+    // looks up the current request on every access ($GLOBALS is shared by
+    // all the requests a worker serves at once).
+    $GLOBALS['g'] = new \ZealPHP\Compat\CurrentRequestContext();
+    $g = \ZealPHP\RequestContext::instance();
+} else {
+    $GLOBALS['g'] = $g = (object)[            // Apache: references to superglobals
         "get"     => &$_GET,
         "post"    => &$_POST,
         "server"  => &$_SERVER,
@@ -137,9 +142,11 @@ $GLOBALS['g'] = $g = class_exists('\ZealPHP\RequestContext', false)
         "request" => &$_REQUEST,
         "cookie"  => &$_COOKIE,
         "session" => &$_SESSION
-      ];
+    ];
+}
 PHP,
 ]); ?>
+<p class="sna-callout-p"><strong>Correction (v0.4.20).</strong> The first version of this shim put <code>RequestContext::instance()</code> itself into <code>$GLOBALS['g']</code>. <code>$GLOBALS</code> belongs to the whole worker, which serves many requests at once, so <code>$GLOBALS['g']-&gt;session</code> (what the <code>Session</code> class below reads) could be another visitor's session. Under ZealPHP, <code>$GLOBALS['g']</code> must be the <code>CurrentRequestContext</code> proxy, as above. The shipped <code>compat/g.php</code> does this.</p>
 <p>The Apache fallback creates a plain PHP object where <code>$g->get</code> is a <em>reference</em> to <code>$_GET</code> — so reads and writes pass through to the superglobal. Under ZealPHP, <code>$g->get</code> is a per-coroutine array populated from the async request. Same API, completely different mechanisms underneath.</p>
 <p>The bulk of the migration work was replacing every <code>$_GET</code>, <code>$_POST</code>, <code>$_SERVER</code>, and <code>$_SESSION</code> reference with <code>$g->get</code>, <code>$g->post</code>, <code>$g->server</code>, and <code>$g->session</code>. That's 35 commits of mechanical changes — the code moved <em>toward</em> ZealPHP's native pattern, and the 5-line Apache shim kept backward compatibility.</p>
 <p>Similarly, <code>$_SESSION</code> access was wrapped in a <code>Session</code> class:</p>

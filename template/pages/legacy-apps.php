@@ -409,25 +409,28 @@ PHP]); ?>
     'label' => 'compat/g.php — shipped with ZealPHP at vendor/zealphp/zealphp/compat/g.php',
     'code'  => <<<'PHP'
 <?php
-// Include this ONCE at the top of every entry point — on BOTH servers.
-if (!isset($GLOBALS['g'])) {
-    if (class_exists('\ZealPHP\RequestContext', false)) {
-        // ZealPHP is loaded → use the framework's per-request context.
-        // Coroutine mode: per-coroutine, concurrency-safe. The ONLY safe
-        // accessor there ($_GET/$_SESSION are intentionally empty).
-        $GLOBALS['g'] = \ZealPHP\RequestContext::instance();
-    } else {
-        // Apache + mod_php → ZealPHP isn't here at all. Build $g from
-        // references to PHP's real superglobals so $g->get IS $_GET.
-        $GLOBALS['g'] = (object) [
-            'get'     => &$_GET,    'post'    => &$_POST,
-            'server'  => &$_SERVER, 'cookie'  => &$_COOKIE,
-            'files'   => &$_FILES,  'request' => &$_REQUEST,
-            'session' => &$_SESSION,
-        ];
+// Include this at the top of every entry point — on BOTH servers.
+if (class_exists('\ZealPHP\RequestContext', false)) {
+    // ZealPHP is loaded. $g is this request's context (per coroutine in
+    // coroutine mode — the ONLY safe accessor; $_GET/$_SESSION are empty).
+    // $GLOBALS is shared by every request the worker serves, so it gets a
+    // proxy that looks up the current request on each access — never one
+    // request's context, which would hand it to every later request.
+    if (!($GLOBALS['g'] ?? null) instanceof \ZealPHP\Compat\CurrentRequestContext) {
+        $GLOBALS['g'] = new \ZealPHP\Compat\CurrentRequestContext();
     }
+    $g = \ZealPHP\RequestContext::instance();
+} else {
+    // Apache + mod_php → ZealPHP isn't here at all. Build $g from
+    // references to PHP's real superglobals so $g->get IS $_GET.
+    $GLOBALS['g'] ??= (object) [
+        'get'     => &$_GET,    'post'    => &$_POST,
+        'server'  => &$_SERVER, 'cookie'  => &$_COOKIE,
+        'files'   => &$_FILES,  'request' => &$_REQUEST,
+        'session' => &$_SESSION,
+    ];
+    $g = $GLOBALS['g'];
 }
-$g = $GLOBALS['g'];
 PHP]); ?>
 
 <p>Then application code uses only <code>$g-&gt;X</code> — never <code>$_GET</code>/<code>$_SESSION</code> directly:</p>

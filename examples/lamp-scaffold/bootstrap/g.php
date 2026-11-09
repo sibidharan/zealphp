@@ -20,10 +20,18 @@
  * `composer install`).
  */
 
-if (!isset($GLOBALS['g'])) {
-    if (class_exists('\ZealPHP\RequestContext', false)) {
-        $GLOBALS['g'] = \ZealPHP\RequestContext::instance();
-    } else {
+if (class_exists('\ZealPHP\RequestContext', false)) {
+    // $GLOBALS is shared by every request the worker serves (concurrently, in
+    // coroutine mode). Never store one request's context there: that handed
+    // request 1's $g (session, cookies, input) to every later request. The
+    // proxy resolves the current request's context on each access, and
+    // survives require_once (which runs this file once per worker).
+    if (!($GLOBALS['g'] ?? null) instanceof \ZealPHP\Compat\CurrentRequestContext) {
+        $GLOBALS['g'] = new \ZealPHP\Compat\CurrentRequestContext();
+    }
+    $g = \ZealPHP\RequestContext::instance();
+} else {
+    if (!isset($GLOBALS['g'])) {
         $GLOBALS['g'] = (object) [
             'get'     => &$_GET,
             'post'    => &$_POST,
@@ -34,6 +42,5 @@ if (!isset($GLOBALS['g'])) {
             'session' => &$_SESSION,
         ];
     }
+    $g = $GLOBALS['g'];
 }
-
-$g = $GLOBALS['g'];
