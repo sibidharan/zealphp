@@ -35,19 +35,25 @@ final class ZealphpShScriptTest extends TestCase
         @rmdir($this->logDir);
     }
 
-    /** Start `php -r <listen+sleep> app.php` in $cwd; return its pid. */
+    /**
+     * Start `php -r <listen+sleep> app.php` in $cwd and return the pid that
+     * listens on $port, as ss reports it. `$!` is not used: under dash,
+     * `cd … && php … &` backgrounds a subshell, so `$!` is the shell, not php.
+     * Skips when ss can't show the listener's pid (some CI sandboxes).
+     */
     private function spawnListener(string $cwd, int $port): int
     {
         $code = '$s = stream_socket_server("tcp://127.0.0.1:' . $port . '"); sleep(30);';
-        $pid = (int) trim((string) shell_exec('cd ' . escapeshellarg($cwd) . ' && '
-            . escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' app.php > /dev/null 2>&1 & echo $!'));
-        for ($i = 0; $i < 50; $i++) {
-            if (str_contains((string) shell_exec("ss -Hltn 'sport = :{$port}' 2>/dev/null"), ":{$port}")) {
-                break;
+        shell_exec('cd ' . escapeshellarg($cwd) . ' && exec '
+            . escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' app.php > /dev/null 2>&1 &');
+        for ($i = 0; $i < 100; $i++) {
+            $ss = (string) shell_exec("ss -Hltnp 'sport = :{$port}' 2>/dev/null");
+            if (preg_match('/pid=(\d+),/', $ss, $m) === 1) {
+                return (int) $m[1];
             }
             usleep(100000);
         }
-        return $pid;
+        $this->markTestSkipped("ss shows no pid for the listener on :{$port}");
     }
 
     private function runScript(string $command, int $port): string
