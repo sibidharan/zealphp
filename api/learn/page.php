@@ -6,6 +6,7 @@
 
 use ZealPHP\App;
 use ZealPHP\G;
+use ZealPHP\Site\LessonArticle;
 
 ${basename(__FILE__, '.php')} = function () {
     $g = G::instance();
@@ -30,11 +31,7 @@ ${basename(__FILE__, '.php')} = function () {
     header('Content-Type: text/html; charset=utf-8');
     $html = (string) App::component($tplPath, ['active' => $slug, 'page' => $slug]);
 
-    // Extract just the <article class="lesson-content">…</article> so the
-    // htmx swap target receives the article alone — no nested layout/sidebar.
-    if (preg_match('/<article class="lesson-content">.*?<\/article>/s', $html, $m)) {
-        $html = $m[0];
-    }
-
-    $this->response($html, 200);
+    // Send just the lesson's article so the htmx swap target receives it
+    // alone — no nested layout/sidebar.
+    $this->response(LessonArticle::extract($html) ?? $html, 200);
 };
