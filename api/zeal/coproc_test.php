@@ -1,4 +1,9 @@
 <?php
+// Test/debug endpoint (prints request or process state): not defined unless
+// ZEALPHP_TEST_ROUTES is set.
+if (!\ZealPHP\env_flag('ZEALPHP_TEST_ROUTES', false)) {
+    return;
+}
 use OpenSwoole\Coroutine as co;
 use function ZealPHP\coproc;
 
