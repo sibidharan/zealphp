@@ -4,7 +4,11 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Fixed
+- **A mistyped validation rule no longer passes silently.** Every rule but `required`/`accepted` skips empty values, so `#[Model(rules: 'requird|email')]` or `min:x` only threw once someone filled the field, and an empty submit went through. `#[Model(rules: …)]` strings are now checked when the component is registered (a typo stops boot), and `rules()` rules on the first validation, empty value or not. Also refused: an argument on a rule that takes none (`required:true`), `in:` with no list, `between` with three values. New `Validator::assertRules()`.
+
 ### Documentation
+- **Validation rules, in full.** The components guide (and `/components#validation`) now states the syntax (`name` / `name:argument`, `|`-joined, comma lists, `regex:` takes the rest), that rules run left to right and stop at the first failure, when they run (changed live/blur fields; every field only when an action calls `$this->validate()`), that they are server-only, and the `messages()` key format.
 - **Which page a request is on.** [`docs/templates-and-rendering.md#which-page-is-a-request-on`](docs/templates-and-rendering.md#which-page-is-a-request-on) (and `/templates#which-page`) spells out how relative template and component names find their page: the served file's `SCRIPT_NAME`, set by `App::include()` for implicit public routes, directory index pages and your own includes; `PHP_SELF` only as a fallback with its `PATH_INFO` stripped; no page for routes, APIs and the component endpoint. Tests pin the directory-index case and that `App::include()` sets the page.
 
 ## [0.4.20] - 2026-11-09

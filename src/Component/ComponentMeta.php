@@ -70,7 +70,9 @@ final class ComponentMeta
             $props[$p->getName()] = Type::fromReflection($p->getType(), $where);
             $attrs = $p->getAttributes(Model::class);
             if ($attrs !== []) {
-                $models[$p->getName()] = $attrs[0]->newInstance();
+                $model = $attrs[0]->newInstance();
+                Validator::assertRules($model->rules, $where);
+                $models[$p->getName()] = $model;
             }
             if ($p->getAttributes(Reactive::class) !== []) {
                 $reactive[] = $p->getName();
