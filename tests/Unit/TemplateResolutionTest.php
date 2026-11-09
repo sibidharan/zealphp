@@ -14,6 +14,17 @@ class TemplateResolutionTest extends TestCase
 {
     private string $prevCwd = '';
 
+    public static function setUpBeforeClass(): void
+    {
+        // App::include() needs the instance; init() also installs error
+        // handlers, so do it outside any one test.
+        if (App::instance() === null) {
+            $cwd = App::$cwd;
+            App::init('127.0.0.1', 19996, ZEALPHP_ROOT);
+            App::$cwd = $cwd;
+        }
+    }
+
     protected function setUp(): void
     {
         $this->prevCwd = App::$cwd;
@@ -68,6 +79,7 @@ class TemplateResolutionTest extends TestCase
     public static function pages(): iterable
     {
         yield 'a nested page uses its full path' => [['SCRIPT_NAME' => '/admin/users.php'], 'nested-page row'];
+        yield 'a directory index page' => [['SCRIPT_NAME' => '/docs/index.php'], 'docs-index row'];
         yield 'then its basename folder (compatibility)' => [['SCRIPT_NAME' => '/other/users.php'], 'page-folder row'];
         yield 'PATH_INFO does not pick the folder' => [['SCRIPT_NAME' => '/index.php', 'PHP_SELF' => '/index.php/users', 'PATH_INFO' => '/users'], 'top-level row'];
         yield 'PHP_SELF alone: PATH_INFO dropped' => [['PHP_SELF' => '/index.php/users', 'PATH_INFO' => '/users'], 'top-level row'];
@@ -118,6 +130,20 @@ class TemplateResolutionTest extends TestCase
         $this->expectException(\LogicException::class);
         $this->expectExceptionMessage('looked in template/total.php, template/_total.php, template/components/total.php');
         App::component('total', ['invoices' => []]);
+    }
+
+    /**
+     * App::include() serves a public file and sets SCRIPT_NAME, so it decides
+     * the page: a route that includes public/invoices.php gets the invoices
+     * page's components (total.php lives only in template/invoices/components/).
+     */
+    public function testIncludeSetsThePage(): void
+    {
+        RequestContext::instance()->server = [];
+        $this->assertSame('<p>total 5</p>', trim((string) App::include('/invoices.php')));
+        $server = RequestContext::instance()->server;
+        $this->assertSame('/invoices.php', $server['SCRIPT_NAME']);
+        $this->assertSame('/invoices.php', $server['PHP_SELF']);
     }
 
     public function testMissingTemplatesNameEveryPlaceLooked(): void

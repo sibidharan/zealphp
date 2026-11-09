@@ -106,6 +106,24 @@ To compose templates, use `<?= App::component(...) ?>`, or call `App::render()` 
 
 The page's folder is the public file's path under the document root, without `.php` (`public/admin/users.php` → `template/admin/users/`), taken from `SCRIPT_NAME`, so a request's `PATH_INFO` (`/users.php/x`) never changes where names resolve. Before v0.4.20 only the basename was used (`template/users/`); a nested page still looks there after its own folders. Keep a component used by one page in that page's `components/` folder; move it to `template/components/` when another page needs it — no call changes. In each place `name.php` comes before the partial `_name.php`, and `'ui/button'` names a folder. A missing template's error lists every place it looked. A registered reactive component's name wins over templates in `component()`.
 
+### Which page is a request on?
+
+The page is the public file being served: its `SCRIPT_NAME` without the leading `/` and the `.php`. `App::include()` sets `SCRIPT_NAME` (with `PHP_SELF` and `SCRIPT_FILENAME`, as Apache does) before it runs the file, and every public page is served through it: the implicit `/{file}` routes, directory index pages, and your own `App::include()` calls.
+
+| Request | Served by | Page | Relative names look in first |
+|---|---|---|---|
+| `GET /` | `public/index.php` | `index` | `template/index/` |
+| `GET /invoices` | `public/invoices.php` | `invoices` | `template/invoices/` |
+| `GET /admin/users` | `public/admin/users.php` | `admin/users` | `template/admin/users/` |
+| `GET /docs/` | `public/docs/index.php` (directory index) | `docs/index` | `template/docs/index/` |
+| `GET /invoices.php/2024/q1` | `public/invoices.php`, `PATH_INFO=/2024/q1` | `invoices` | `template/invoices/` |
+| `GET /old-page`, route returns `App::include('/new.php')` | `public/new.php` | `new` | `template/new/` |
+| a route, an API, `/_zeal/c/…` | no public file | none | `template/`, then `template/components/` |
+
+- **`SCRIPT_NAME`, not `PHP_SELF`.** `PHP_SELF` is `SCRIPT_NAME` plus the client's `PATH_INFO`, so reading it let `/index.php/users` choose `template/users/`. When only `PHP_SELF` is set (code that sets it by hand), its `PATH_INFO` is stripped first.
+- **It's per request, and it's the served file.** A component or layout asking for a relative name gets the page's folder, wherever its own file lives. A route that calls `App::include()` switches the page for the rest of that request.
+- `App::currentPage()` computes it (private; `templateCandidates()` uses it).
+
 ## From a public file to the page: render, then components
 
 `render()` serves the page; everything inside the page is a component. One request, end to end:
@@ -274,7 +292,7 @@ The framework injects `$users` from the args array by name, exactly like route p
 public static function include(string $publicPath, array $args = []): mixed
 ```
 
-Resolves `$publicPath` relative to `public/` (Apache document-root convention — leading `/` optional, so `'/about.php'` and `'about.php'` both work). Auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, and `SCRIPT_FILENAME` for the included file (Apache mod_php parity). Applies `includeCheck()` containment so a traversal attempt outside the document root is refused with HTTP 403 via the universal return contract.
+Resolves `$publicPath` relative to `public/` (Apache document-root convention — leading `/` optional, so `'/about.php'` and `'about.php'` both work). Auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, and `SCRIPT_FILENAME` for the included file (Apache mod_php parity). `SCRIPT_NAME` also sets the request's page, so relative template and component names inside it resolve from that file's folder ([Which page is a request on?](#which-page-is-a-request-on)). Applies `includeCheck()` containment so a traversal attempt outside the document root is refused with HTTP 403 via the universal return contract.
 
 In coroutine mode the file runs in-process via the shared `executeFile()` core. When `processIsolation()` is on (the default for legacy-app modes), it dispatches to a pre-spawned subprocess pool (`cgiMode('pool')`, ~1–3 ms warm) for global-scope isolation — the file's return value still flows back through the universal return contract via the metadata channel. Use `App::cgiMode('proc')` to switch to a fresh `proc_open` subprocess per request (~30–50 ms cold) when you need fully-isolated process state on every call.
 

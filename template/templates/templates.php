@@ -123,7 +123,24 @@ PHP]) ?>
 <tr><td><code>'header'</code> from <code>public/admin/users.php</code></td><td><code>template/admin/users/header.php</code>, <code>template/admin/users/components/header.php</code>, then (compatibility) <code>template/users/…</code>, then <code>template/header.php</code>, <code>template/components/header.php</code></td></tr>
 <tr><td><code>'header'</code> from a route or API</td><td>No public file, so no page folder: <code>template/header.php</code>, <code>template/components/header.php</code></td></tr>
 </table>
-<p>The page is the public file's path without <code>.php</code>, read from <code>SCRIPT_NAME</code> (a request's <code>PATH_INFO</code> never changes it). Relative names resolve from the <strong>request's</strong> page, not from the file making the call.</p>
+<p>Relative names resolve from the <strong>request's</strong> page, not from the file making the call.</p>
+
+<h3 id="which-page">Which page is a request on?</h3>
+<p>The page is the public file being served: its <code>SCRIPT_NAME</code> without the leading <code>/</code> and the <code>.php</code>. <code>App::include()</code> sets <code>SCRIPT_NAME</code> (with <code>PHP_SELF</code> and <code>SCRIPT_FILENAME</code>, as Apache does) before it runs the file, and every public page is served through it: the implicit <code>/{file}</code> routes, directory index pages, and your own <code>App::include()</code> calls.</p>
+<table class="ztable">
+<tr><th>Request</th><th>Served by</th><th>Page</th><th>Relative names look in first</th></tr>
+<tr><td><code>GET /</code></td><td><code>public/index.php</code></td><td><code>index</code></td><td><code>template/index/</code></td></tr>
+<tr><td><code>GET /invoices</code></td><td><code>public/invoices.php</code></td><td><code>invoices</code></td><td><code>template/invoices/</code></td></tr>
+<tr><td><code>GET /admin/users</code></td><td><code>public/admin/users.php</code></td><td><code>admin/users</code></td><td><code>template/admin/users/</code></td></tr>
+<tr><td><code>GET /docs/</code></td><td><code>public/docs/index.php</code> (directory index)</td><td><code>docs/index</code></td><td><code>template/docs/index/</code></td></tr>
+<tr><td><code>GET /invoices.php/2024/q1</code></td><td><code>public/invoices.php</code>, <code>PATH_INFO=/2024/q1</code></td><td><code>invoices</code></td><td><code>template/invoices/</code></td></tr>
+<tr><td><code>GET /old-page</code>, route returns <code>App::include('/new.php')</code></td><td><code>public/new.php</code></td><td><code>new</code></td><td><code>template/new/</code></td></tr>
+<tr><td>a route, an API, <code>/_zeal/c/…</code></td><td>no public file</td><td>none</td><td><code>template/</code>, then <code>template/components/</code></td></tr>
+</table>
+<ul>
+<li><strong><code>SCRIPT_NAME</code>, not <code>PHP_SELF</code>.</strong> <code>PHP_SELF</code> is <code>SCRIPT_NAME</code> plus the client's <code>PATH_INFO</code>, so reading it let <code>/index.php/users</code> choose <code>template/users/</code>. When only <code>PHP_SELF</code> is set (code that sets it by hand), its <code>PATH_INFO</code> is stripped first.</li>
+<li><strong>It's per request, and it's the served file.</strong> A component or layout asking for a relative name gets the page's folder, wherever its own file lives. A route that calls <code>App::include()</code> switches the page for the rest of that request.</li>
+</ul>
 
 <h2 id="page-to-components">From a public file to the page</h2>
 <p><code>render()</code> serves the page; everything inside the page is a component. One request, end to end:</p>
@@ -197,7 +214,7 @@ PHP]) ?>
 <tr>
   <td><code>App::include($publicPath, $args = [])</code></td>
   <td><code>public/</code> (Apache document-root convention — leading <code>/</code> optional)</td>
-  <td><code>mixed</code> — full <a href="/responses#return-contract">return contract</a>, never echoed (always returned so it threads through <code>ResponseMiddleware</code>). Auto-populates <code>$_SERVER['PHP_SELF']</code>, <code>SCRIPT_NAME</code>, <code>SCRIPT_FILENAME</code> for the included file (Apache mod_php parity).</td>
+  <td><code>mixed</code> — full <a href="/responses#return-contract">return contract</a>, never echoed (always returned so it threads through <code>ResponseMiddleware</code>). Auto-populates <code>$_SERVER['PHP_SELF']</code>, <code>SCRIPT_NAME</code>, <code>SCRIPT_FILENAME</code> for the included file (Apache mod_php parity). <code>SCRIPT_NAME</code> also sets the request's page, so relative template names inside it resolve from that file's folder (<a href="#which-page">which page</a>).</td>
   <td>Apache rewrites — <code>$app-&gt;route('/old-page', fn() =&gt; App::include('/new.php'))</code> serves <code>public/new.php</code> in-process with the URL bar still at <code>/old-page</code>. See <a href="/legacy-apps">Legacy Apps</a> for the 12 rewrite recipes</td>
 </tr>
 <tr>
