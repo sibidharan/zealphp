@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added
+- **Where code goes, as rules.** [`docs/directory-structure.md#where-code-goes`](docs/directory-structure.md#where-code-goes) states the structure: routes and APIs are wiring (no markup), pages are built from components, components live next to their page until another page needs them, templates are views, logic lives in `src/`. The README's design principles, `/why-zealphp`, the project-structure lesson and CLAUDE.md say the same, and `tests/Unit/ArchitectureRulesTest.php` holds the demo site to it.
+- **`/llms.txt` and `/llms-full.txt`** at the site root: an index for AI assistants (what ZealPHP is, the structure rules, a link per guide) and the full reference, generated from the docs by `make docs-rebuild`.
+
+### Fixed
+- **Plain files at the root of the document root are served.** `robots.txt`, `llms.txt`, `favicon.ico` and the like returned 404: the static handler only covers its directory prefixes (`/css/`, `/js/` …) and the root route only knew `.php` files.
+
 ### Changed
 - **A nested page's templates resolve from its full path.** `public/admin/users.php` looks in `template/admin/users/` (and its `components/`), where it used to use the basename's folder (`template/users/`), so two pages named alike in different folders shared one. The basename folder is still checked after the page's own, so existing templates keep resolving.
 
