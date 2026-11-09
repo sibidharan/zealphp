@@ -7706,48 +7706,80 @@ class App
     }
 
     /**
-     * Resolve a template-file name to an absolute path.
+     * Where a template name can live, in lookup order — the one rule shared by
+     * `render()` and `component()`:
      *
-     * Lookup rules mirror the historical render() behaviour:
-     *   - Leading slash ("/foo") = absolute lookup from $dir root
-     *   - When the current request's PHP_SELF basename is a sub-directory
-     *     under $dir, prefer "$dir/{basename}/$tpl.php"
-     *   - Otherwise fall back to "$dir/$tpl.php"
+     *   - `/emails/welcome`: absolute from `template/`;
+     *   - `header`: nearest first — the current page's folder
+     *     (`template/users/` for `public/users.php`), that page's components
+     *     (`template/users/components/`), then `template/`, then
+     *     `template/components/`.
+     *
+     * In each place `name.php` comes before the partial `_name.php`.
+     *
+     * @return list<string> paths relative to the template dir, without `.php`
+     */
+    private static function templateCandidates(string $tpl): array
+    {
+        $absolute = str_starts_with($tpl, '/');
+        $rel = $absolute ? substr($tpl, 1) : $tpl;
+        $sub = dirname($rel) === '.' ? '' : dirname($rel) . '/';
+        $names = [$rel, $sub . '_' . basename($rel)];
+        $places = [''];
+        if (!$absolute) {
+            $page = self::getCurrentFile(null);
+            $places = $page !== '' ? [$page . '/', $page . '/components/', '', 'components/'] : ['', 'components/'];
+        }
+        $candidates = [];
+        foreach ($places as $place) {
+            foreach ($names as $name) {
+                $candidates[] = $place . $name;
+            }
+        }
+        return $candidates;
+    }
+
+    /**
+     * The template a name resolves to (see {@see self::templateCandidates()}),
+     * confined to the template dir, or null when there is none.
+     */
+    private static function locateTemplate(string $tpl, string $dir): ?string
+    {
+        $templateRoot = realpath(self::$cwd . "/$dir");
+        if ($templateRoot === false) {
+            return null;
+        }
+        foreach (self::templateCandidates($tpl) as $candidate) {
+            $resolved = realpath("$templateRoot/$candidate.php");
+            // #442 — confine template resolution to the template dir (the
+            // documented jail: a leading "/" means "absolute from template/"),
+            // NOT the project root. pathWithinRoot() is segment-aware — the same
+            // check App::include() applies to public/ — so a "../"-bearing name
+            // can't escape into a sibling dir and a shared-prefix sibling
+            // (template-data/ vs template/) can't bypass it.
+            if ($resolved !== false && is_file($resolved) && self::pathWithinRoot($resolved, $templateRoot)) {
+                return $resolved;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Resolve a template name to an absolute path, or throw.
+     *
+     * @throws TemplateUnavailableException
      */
     private static function resolveTemplatePath(string $tpl, string $dir): string
     {
-        $currentFile  = self::getCurrentFile(null);
-        $templateDir  = self::$cwd . "/$dir";
-        $rootLookup   = strpos($tpl, '/') === 0;
-
-        if ($rootLookup) {
-            $candidate = $templateDir . $tpl . '.php';
-        } else if (!empty($currentFile) && is_file("$templateDir/" . $currentFile . '/' . $tpl . '.php')) {
-            // Namespaced by the current public file (template/users/header.php
-            // for public/users.php). Fall back to template/header.php when that
-            // file is missing — checking only the directory broke every page
-            // whose name matches a template folder (public/components.php vs
-            // template/components/).
-            $candidate = "$templateDir/" . $currentFile . '/' . $tpl . '.php';
-        } else {
-            $candidate = "$templateDir/" . $tpl . '.php';
-        }
-
-        $resolved     = realpath($candidate);
-        $templateRoot = realpath($templateDir);
-        // #442 — confine template resolution to the template dir (the documented
-        // jail: a leading "/" means "absolute from template/"), NOT the project
-        // root. Use the segment-aware pathWithinRoot() containment — the same
-        // check App::include()/includeCheck() applies to public/ — so a
-        // "../"-bearing name can't escape into a sibling dir and a shared-prefix
-        // sibling (template-data/ vs template/) can't bypass via the old
-        // strpos($resolved, self::$cwd) === 0 prefix match.
-        if ($resolved === false || $templateRoot === false
-            || !self::pathWithinRoot($resolved, $templateRoot)) {
+        $resolved = self::locateTemplate($tpl, $dir);
+        if ($resolved === null) {
             $bt = debug_backtrace();
             $caller = array_shift($bt);
             throw new TemplateUnavailableException(
-                "The template $candidate does not exist in file "
+                "The template {$tpl} does not exist (looked in " . implode(', ', array_map(
+                    static fn(string $c): string => "$dir/$c.php",
+                    self::templateCandidates($tpl)
+                )) . ") in file "
                 . str_replace(self::$cwd, '', $caller['file'] ?? '') . ":" . ($caller['line'] ?? '')
             );
         }
@@ -8125,38 +8157,78 @@ class App
     }
 
     /**
-     * Render a stateless component template from `template/components/`.
+     * Render a template as a stateless component, resolved by the same rule
+     * as `render()` ({@see self::templateCandidates()}).
      *
      * @param array<string, mixed> $props
      */
     private static function statelessComponent(string $name, array $props): SafeHtml
     {
-        // A leading '/' names any template, absolute from template/ (what
-        // renderToString() did); otherwise the name is under template/components/.
-        $absolute = str_starts_with($name, '/');
-        $rel = $absolute ? substr($name, 1) : $name;
-        if (preg_match('#^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$#', $rel) !== 1
-            || str_contains($rel, '..')
-            || (!$absolute && preg_match('#^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*$#', $rel) !== 1)) {
+        $rel = ltrim($name, '/');
+        if (preg_match('#^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$#D', $rel) !== 1 || str_contains($rel, '..')) {
             throw new \LogicException(
                 "Component {$name} is not registered and isn't a valid template name "
-                . '(lowercase letters, digits, - and _, with / for folders)'
+                . '(letters, digits, ., - and _, with / for folders)'
             );
         }
-        $root = $absolute ? '' : 'components/';
-        $dir = self::$cwd . '/template/' . $root;
-        $base = basename($rel);
-        $sub = dirname($rel) === '.' ? '' : dirname($rel) . '/';
-        foreach ([$sub . $base, $sub . '_' . $base] as $candidate) {
-            if (is_file($dir . $candidate . '.php')) {
-                unset($props['fragment']); // a prop, never a fragment selector
-                $path = self::resolveTemplatePath('/' . $root . $candidate, 'template');
-                return new SafeHtml(self::coerceToString(self::executeFile($path, $props + ['props' => $props])));
-            }
+        $path = self::locateTemplate($name, 'template');
+        if ($path === null) {
+            throw new \LogicException(
+                "Component {$name} is neither registered with App::components() nor a template (looked in "
+                . implode(', ', array_map(static fn(string $c): string => "template/$c.php", self::templateCandidates($name))) . ')'
+            );
         }
+        unset($props['fragment']); // a prop, never a fragment selector
+        $args = $props + ['props' => $props];
+        return new SafeHtml(self::componentMarkup(self::executeFile($path, $args), "Component {$name}", $args));
+    }
+
+    /**
+     * A component's result as markup — the content half of the return
+     * contract, shared by stateless templates and reactive `render()`.
+     *
+     * A component is a piece of someone else's response, so it produces
+     * content only: echo, a string, `SafeHtml` (or any `Stringable`), a
+     * Generator of those, or a Closure (called with its parameters injected
+     * by name from `$args`, like a streaming template). The response half —
+     * an int status, an array for JSON, a `ResponseInterface` — belongs to
+     * the route or page that owns the response, so it's refused here rather
+     * than printed into the page.
+     *
+     * @param array<string, mixed> $args
+     * @internal
+     */
+    public static function componentMarkup(mixed $result, string $who, array $args = []): string
+    {
+        if ($result === null) {
+            return '';
+        }
+        if (is_string($result)) {
+            return $result;
+        }
+        if ($result instanceof \Stringable) {
+            return (string) $result;
+        }
+        if ($result instanceof \Closure) {
+            return self::componentMarkup($result(...self::resolveClosureParams($result, $args, $who)), $who, $args);
+        }
+        if ($result instanceof \Generator) {
+            $buf = '';
+            foreach ($result as $chunk) {
+                $buf .= self::componentMarkup($chunk, $who, $args);
+            }
+            return $buf;
+        }
+        $what = match (true) {
+            is_int($result) => "the status code {$result}",
+            is_array($result) => 'an array (JSON)',
+            $result instanceof \Psr\Http\Message\ResponseInterface => 'a response object',
+            default => 'a ' . get_debug_type($result),
+        };
         throw new \LogicException(
-            "Component {$name} is neither registered with App::components() nor a template at "
-            . "template/{$root}{$sub}{$base}.php"
+            "{$who} returned {$what}. A component produces markup only (echo, a string, SafeHtml, "
+            . 'a Generator or a Closure); a status, JSON or a response object must come from the route '
+            . 'or page that owns the response.'
         );
     }
 

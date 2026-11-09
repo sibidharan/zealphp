@@ -96,14 +96,14 @@ To compose templates, use `<?= App::component(...) ?>`, or call `App::render()` 
 
 ### Path resolution
 
-| Call | Resolves to | When |
-|------|-------------|------|
-| `App::render('home')` | `template/home.php` | Top-level template |
-| `App::render('/components/_card')` | `template/components/_card.php` | Leading `/` = absolute from `template/` |
-| `App::render('header')` from `public/users.php` | `template/users/header.php` | Auto-namespaces by current public file |
-| `App::render('header')` (fallback) | `template/header.php` | If the namespaced path does not exist |
-| `App::component('card')` | `template/components/card.php`, else `template/components/_card.php` | A component name |
-| `App::component('/emails/welcome')` | `template/emails/welcome.php` | Leading `/` = any template, absolute from `template/` |
+`render()` and `component()` resolve a name by the same rule:
+
+| Name | Looks in, in order |
+|------|--------------------|
+| `'/emails/welcome'` | `template/emails/welcome.php` — a leading `/` is absolute from `template/` |
+| `'header'` from `public/users.php` | nearest first: `template/users/header.php` (the page's folder), `template/users/components/header.php` (that page's components), `template/header.php`, `template/components/header.php` |
+
+Keep a component used by one page in that page's `components/` folder; move it to `template/components/` when another page needs it — no call changes. In each place `name.php` comes before the partial `_name.php`, and `'ui/button'` names a folder. A missing template's error lists every place it looked. A registered reactive component's name wins over templates in `component()`.
 
 ## `App::component()` — markup as a value
 
@@ -111,7 +111,18 @@ To compose templates, use `<?= App::component(...) ?>`, or call `App::render()` 
 public static function component(string $component, array $props = [], ?string $key = null): SafeHtml
 ```
 
-`App::component()` returns the rendered markup and never echoes it. A name without a leading `/` is a component under `template/components/` (or a reactive component registered with `App::components()`); a leading `/` renders any template, absolute from `template/`. The props become template variables. Whatever the template returns is turned into markup: Generators are consumed and concatenated, Closures are invoked with parameter injection, arrays/objects are JSON-encoded, scalars are cast.
+`App::component()` returns the rendered markup and never echoes it. The name resolves by the [same rule as `render()`](#path-resolution) (a registered reactive component's name wins). The props become template variables.
+
+**A component follows the content half of the return contract only, by design.** It's a piece of someone else's response, so it can't set that response's status or turn it into JSON:
+
+| The template… | `component()` gives |
+|---|---|
+| echoes, returns a string, `SafeHtml` or any `Stringable` | that markup (echo first, then the return, in order) |
+| returns a Generator | its chunks, concatenated |
+| returns a Closure | the Closure called with its parameters injected by name from the props, then the same rules |
+| returns an `int` status, an array, a `ResponseInterface` or any other value | a `LogicException` naming what came back — return those from the route or page that owns the response |
+
+When a component *is* the whole response (`return App::component(...)` from a route), the route owns the response and the full contract applies to that return: the `SafeHtml` is sent as HTML.
 
 ```php
 <!-- in a template -->

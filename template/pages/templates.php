@@ -114,15 +114,12 @@ PHP]); ?>
 <?php endforeach; ?>
 PHP]); ?>
 
-<h2>Path resolution</h2>
+<h2 id="path-resolution">Path resolution</h2>
+<p><code>render()</code> and <code>component()</code> resolve a name by the same rule. In each place <code>name.php</code> comes before the partial <code>_name.php</code>; a missing template's error lists every place it looked.</p>
 <table class="ztable">
-<tr><th>Call</th><th>Resolves to</th><th>When</th></tr>
-<tr><td><code>App::render('home')</code></td><td><code>template/home.php</code></td><td>Top-level template</td></tr>
-<tr><td><code>App::render('/components/_card')</code></td><td><code>template/components/_card.php</code></td><td>Leading <code>/</code> = absolute from <code>template/</code></td></tr>
-<tr><td><code>App::render('header')</code> from <code>public/users.php</code></td><td><code>template/users/header.php</code></td><td>Auto-namespaces by current public file</td></tr>
-<tr><td><code>App::render('header')</code> (fallback)</td><td><code>template/header.php</code></td><td>If namespaced path doesn't exist</td></tr>
-<tr><td><code>App::component('card')</code></td><td><code>template/components/card.php</code>, else <code>template/components/_card.php</code></td><td>A component name</td></tr>
-<tr><td><code>App::component('/emails/welcome')</code></td><td><code>template/emails/welcome.php</code></td><td>Leading <code>/</code> = any template, absolute from <code>template/</code></td></tr>
+<tr><th>Name</th><th>Looks in, in order</th></tr>
+<tr><td><code>'/emails/welcome'</code></td><td><code>template/emails/welcome.php</code> &mdash; a leading <code>/</code> is absolute from <code>template/</code></td></tr>
+<tr><td><code>'header'</code> from <code>public/users.php</code></td><td>Nearest first: <code>template/users/header.php</code> (the page's folder), <code>template/users/components/header.php</code> (that page's components), <code>template/header.php</code>, <code>template/components/header.php</code></td></tr>
 </table>
 
 <h2 id="file-execution-family">The rendering methods — <code>render()</code> and <code>component()</code></h2>
@@ -132,14 +129,14 @@ PHP]); ?>
 <tr><th>Method</th><th>Path resolved from</th><th>Returns</th><th>Use when</th></tr>
 <tr>
   <td><code>App::render($tpl, $args, …options)</code></td>
-  <td><code>template/</code> (with <code>.php</code> suffix)</td>
+  <td><a href="#path-resolution">The template rule</a></td>
   <td><code>mixed</code> — full <a href="/responses#return-contract">return contract</a>. A string result is also echoed (<code>echo: true</code>, the default), so every <code>App::render('_master', …)</code> statement in <code>public/*.php</code> keeps working.</td>
   <td>A page, or a route's response. Options: <code>fragment:</code>, <code>htmx:</code>, <code>fullPage:</code>, <code>stream:</code>, <code>echo:</code></td>
 </tr>
 <tr>
   <td><code>App::component($name, $props)</code></td>
-  <td><code>template/components/</code> for a name (<code>'card'</code>); <code>template/</code> for a leading <code>/</code> (<code>'/emails/welcome'</code>)</td>
-  <td><code>ZealPHP\SafeHtml</code> — markup, never echoed. Cast with <code>(string)</code> where a plain string is required (<code>json_encode()</code>, <code>strlen()</code>, a <code>string</code> parameter).</td>
+  <td>The <a href="#path-resolution">same rule</a> as <code>render()</code> (a registered reactive component's name wins)</td>
+  <td><code>ZealPHP\SafeHtml</code> — markup, never echoed. Content only, by design: a status code, array or response object throws, because the route or page that owns the response returns those. Cast with <code>(string)</code> where a plain string is required.</td>
   <td>Markup inside a page (<code>&lt;?= App::component(…) ?&gt;</code>), an htmx partial, an email body</td>
 </tr>
 <tr>

@@ -560,7 +560,7 @@ abstract class Component
         $depth = $g->memo['_zc_depth'] ?? 0;
         $g->memo['_zc_depth'] = (is_int($depth) ? $depth : 0) + 1;
         try {
-            $body = self::stringify($this->render());
+            $body = App::componentMarkup($this->render(), static::class . '::render()');
         } finally {
             $g->memo['_zc_depth'] = is_int($depth) ? $depth : 0;
         }
@@ -705,23 +705,5 @@ abstract class Component
         }
         $this->zcErrors = $errors + $this->zcErrors;
         return $errors;
-    }
-
-    private static function stringify(mixed $out): string
-    {
-        if ($out instanceof \Generator) {
-            $buf = '';
-            foreach ($out as $chunk) {
-                $buf .= self::stringify($chunk);
-            }
-            return $buf;
-        }
-        if ($out === null) {
-            return '';
-        }
-        if (is_scalar($out) || $out instanceof \Stringable) {
-            return (string) $out;
-        }
-        throw new \LogicException('Component render() must return a string, SafeHtml, or a Generator of strings');
     }
 }

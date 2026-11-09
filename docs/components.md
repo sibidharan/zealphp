@@ -7,7 +7,7 @@ ZealPHP builds pages from components, and one call renders both kinds:
 <?= App::component(Counter::class, ['count' => 5]) ?>     // reactive: state, actions, input binding
 ```
 
-- A **stateless component** is a PHP template in `template/components/`. Same props in, same HTML out — like a React function component without hooks.
+- A **stateless component** is a template rendered with `App::component()`: props in, markup out — like a React function component without hooks. Names resolve like `render()`'s, nearest first: the page's folder, the page's `components/`, `template/`, then `template/components/` (a leading `/` is absolute).
 - A **reactive component** is a PHP class. Public properties are its **state**, `#[Action]` methods are what buttons **call**, and `#[Model]` properties **bind** to form inputs, with validation. The server owns the state and renders HTML; the browser swaps it in. There's no client-side framework and no JSON API to keep in sync, and pages still work with JavaScript turned off.
 
 Start stateless; make a component reactive when it needs to respond to the user. Live demo: [`/components`](/components). For `App::render()`, streaming and fragments, see [Templates and Rendering](templates-and-rendering.md).
@@ -31,10 +31,10 @@ Put a template in `template/components/` and render it by name:
 ]) ?>
 ```
 
-- **Lookup:** `'card'` renders `components/card.php`, else `components/_card.php` (so existing underscore partials work as they are). `'ui/button'` looks in `components/ui/`. Names are lowercase letters, digits, `-` and `_`, with `/` for folders.
+- **Lookup:** the [same rule as `render()`](templates-and-rendering.md#path-resolution), nearest first: the page's folder, the page's `components/`, `template/`, then `template/components/`; `card.php` before the partial `_card.php` in each (so existing underscore partials work as they are). `'ui/button'` names a folder.
 - **Any template:** a leading `/` renders any template, absolute from `template/`: `App::component('/emails/welcome', ['user' => $u])`. This is how you get markup from a template that isn't a component; it replaces the deprecated `App::renderToString()`.
 - **Props** become template variables; `$props` holds them all. Pass child markup as `slot` — an `App::component()` result or `Escape::raw()` is printed as-is, anything else should go through `e()`.
-- **Returns markup, never echoes**, so `<?= ?>` is correct. A route can `return App::component(...)` too: the response is the HTML. `App::render()` is for whole pages; see [Templates and Rendering](templates-and-rendering.md).
+- **Returns markup, never echoes**, so `<?= ?>` is correct. A route can `return App::component(...)` too: the response is the HTML. A component returns content only — markup, a Generator or a Closure; a status code or JSON throws, because those belong to the route or page that owns the response ([why](templates-and-rendering.md#appcomponent--markup-as-a-value)).
 - **Registered names win.** If a reactive component is registered as `card`, `App::component('card')` renders that.
 - Stateless components can be used anywhere, including inside reactive components. They have no state, so they need no key and no `ZEALPHP_APP_KEY`.
 
