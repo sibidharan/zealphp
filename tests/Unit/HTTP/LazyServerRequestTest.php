@@ -91,6 +91,21 @@ class LazyServerRequestTest extends TestCase
         $this->assertSame('POST', $this->makeLazy()->getMethod());
     }
 
+    /**
+     * An honoured X-HTTP-Method-Override reaches the middleware stack too:
+     * the PSR request reports the effective method on both the fast path and
+     * after hydration, so a guard keyed on DELETE sees DELETE.
+     */
+    public function testEffectiveMethodOverridesWireMethod(): void
+    {
+        $native = $this->makeNative(server: ['request_method' => 'POST', 'request_uri' => '/x']);
+        $lazy = new LazyServerRequest($native, 'DELETE');
+        $this->assertSame('DELETE', $lazy->getMethod());
+        $this->silenceHydrationWarning(static fn () => $lazy->getUri());   // forces hydration
+        $this->assertSame('DELETE', $lazy->getMethod());
+        $this->assertSame('PATCH', $lazy->withMethod('PATCH')->getMethod());
+    }
+
     public function testGetMethodDefaultsToGet(): void
     {
         $lazy = new LazyServerRequest($this->makeNative());
