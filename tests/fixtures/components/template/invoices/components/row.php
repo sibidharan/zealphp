@@ -1,0 +1,1 @@
+<?php use function ZealPHP\e; ?><tr><td><?= e($invoice['number']) ?></td><?= \ZealPHP\App::component('/invoices/components/cell', ['v' => $invoice['amount']]) ?></tr>

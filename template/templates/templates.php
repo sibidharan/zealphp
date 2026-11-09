@@ -120,7 +120,62 @@ PHP]) ?>
 <tr><th>Name</th><th>Looks in, in order</th></tr>
 <tr><td><code>'/emails/welcome'</code></td><td><code>template/emails/welcome.php</code> &mdash; a leading <code>/</code> is absolute from <code>template/</code></td></tr>
 <tr><td><code>'header'</code> from <code>public/users.php</code></td><td>Nearest first: <code>template/users/header.php</code> (the page's folder), <code>template/users/components/header.php</code> (that page's components), <code>template/header.php</code>, <code>template/components/header.php</code></td></tr>
+<tr><td><code>'header'</code> from <code>public/admin/users.php</code></td><td><code>template/admin/users/header.php</code>, <code>template/admin/users/components/header.php</code>, then (compatibility) <code>template/users/…</code>, then <code>template/header.php</code>, <code>template/components/header.php</code></td></tr>
+<tr><td><code>'header'</code> from a route or API</td><td>No public file, so no page folder: <code>template/header.php</code>, <code>template/components/header.php</code></td></tr>
 </table>
+<p>The page is the public file's path without <code>.php</code>, read from <code>SCRIPT_NAME</code> (a request's <code>PATH_INFO</code> never changes it). Relative names resolve from the <strong>request's</strong> page, not from the file making the call.</p>
+
+<h2 id="page-to-components">From a public file to the page</h2>
+<p><code>render()</code> serves the page; everything inside the page is a component. One request, end to end:</p>
+<?= App::component('/components/_code', [
+    'label' => 'GET /invoices',
+    'lang'  => 'text',
+    'code'  => <<<'TXT'
+public/invoices.php                     App::render('invoices', ['invoices' => $list])
+  → template/invoices/invoices.php      the page's own template, in the page's folder
+    → App::component('row', $invoice)   → template/invoices/components/row.php   (this page only)
+    → App::component('card', [...])     → template/components/card.php           (shared)
+TXT]) ?>
+<div class="tpl-split">
+<div>
+<?= App::component('/components/_code', [
+    'label' => 'public/invoices.php',
+    'code'  => <<<'PHP'
+<?php use ZealPHP\App;
+App::render('invoices', [
+    'invoices' => Billing\Invoices::open(),
+]);
+PHP]) ?>
+</div>
+<div>
+<?= App::component('/components/_code', [
+    'label' => 'template/invoices/invoices.php',
+    'code'  => <<<'PHP'
+<h1>Invoices</h1>
+<?= App::component('card', ['title' => 'Open',
+    'slot' => App::component('total', ['invoices' => $invoices])]) ?>
+<table>
+  <?php foreach ($invoices as $invoice): ?>
+    <?= App::component('row', ['invoice' => $invoice]) ?>
+  <?php endforeach; ?>
+</table>
+PHP]) ?>
+</div>
+</div>
+
+<h3 id="where-components">Where components can be used</h3>
+<table class="ztable">
+<tr><th>You're in</th><th>Write</th><th>Resolves</th></tr>
+<tr><td>A page template, or a component it renders</td><td><code>App::component('row', $p)</code></td><td>page folder → its <code>components/</code> → <code>template/</code> → <code>template/components/</code></td></tr>
+<tr><td>A layout (<code>_master.php</code>)</td><td><code>App::component("/$page/" . basename($page))</code> for the body, <code>'/_nav'</code> for its own parts</td><td>absolute: the layout serves every page</td></tr>
+<tr><td>A route or API (no page)</td><td><code>return App::component('/invoices/components/row', $p)</code>, or a shared name</td><td>absolute; or <code>template/</code>, <code>template/components/</code></td></tr>
+<tr><td>An htmx endpoint</td><td><code>return App::component('/invoices/components/row', $p)</code>, or <code>App::render('/invoices/invoices', $a, fragment: 'rows')</code></td><td>the file the page rendered, so the swap matches</td></tr>
+<tr><td>A streaming page</td><td><code>yield App::component('row', $p);</code> or <code>yield from App::render('/invoices/rows', $a, stream: true)</code></td><td>as a page template</td></tr>
+<tr><td>A reactive component</td><td><code>$this-&gt;view('/invoices/components/counter')</code>; stateless parts inside by name</td><td>absolute: it re-renders from <code>/_zeal/c/…</code>, where there is no page</td></tr>
+<tr><td>A page's component a route also renders</td><td>name its own children in full too</td><td>a route has no page, so a relative child isn't found</td></tr>
+<tr><td>Shared by several pages and routes</td><td><code>template/components/</code>, bare name</td><td>found from anywhere</td></tr>
+</table>
+<p>The rules behind this layout are in <a href="/docs/guide/directory-structure#where-code-goes">Where code goes</a>.</p>
 
 <h2 id="file-execution-family">The rendering methods — <code>render()</code> and <code>component()</code></h2>
 <p>Rendering comes down to two methods. <code>App::render()</code> renders a page or a response; its options select a fragment, make the render htmx-aware, or return a stream. <code>App::component()</code> returns markup as a value and never echoes; use it to compose. Both run the template through one private core (<code>App::executeFile()</code>) and apply the <a href="/responses#return-contract">universal return contract</a>. <code>App::include()</code> runs a file from <code>public/</code> the same way, and <code>App::fragment()</code> runs <em>inside</em> a template to mark a named region the framework can extract by name. See the <a href="#fragments">fragments section</a> below.</p>

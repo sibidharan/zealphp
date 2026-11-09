@@ -79,8 +79,12 @@ App::render('/_master', ['title' =&gt; 'About', 'page' =&gt; 'about']);</code></
     'variant' =&gt; 'highlight',
 ]) ?&gt;</code></pre>
     <p>
-      <code>App::component('card')</code> looks in <code>template/components/</code> for <code>card.php</code>,
-      then <code>_card.php</code>. It returns the markup and never echoes it, so you print it with
+      <code>App::component('card')</code> looks nearest first: the page's folder
+      (<code>template/pricing/</code> for <code>public/pricing.php</code>), its <code>components/</code>,
+      <code>template/</code>, then <code>template/components/</code> &mdash; <code>card.php</code> before
+      <code>_card.php</code> in each. So a card only the pricing page uses lives in
+      <code>template/pricing/components/card.php</code>; this one, used everywhere, lives in
+      <code>template/components/</code>. Same call either way. It returns the markup and never echoes it, so you print it with
       <code>&lt;?= ?&gt;</code>, concatenate it, or return it from a route.
       No class, no JSX, no bundler. A component is just a PHP file that echoes HTML with variables.
     </p>

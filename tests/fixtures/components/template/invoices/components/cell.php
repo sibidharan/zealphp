@@ -1,0 +1,1 @@
+<?php use function ZealPHP\e; ?><td class="amount"><?= e($v) ?></td>
