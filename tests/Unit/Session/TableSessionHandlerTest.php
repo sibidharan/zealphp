@@ -116,6 +116,19 @@ final class TableSessionHandlerTest extends TestCase
         $this->assertSame($payload, file_get_contents($file));
     }
 
+    public function testFileBackingIsCreated0600RegardlessOfUmask(): void
+    {
+        $sid = $this->sid('mode');
+        $old = umask(0022);
+        try {
+            self::$handler->write($sid, 'a|i:1;');
+        } finally {
+            umask($old);
+        }
+        clearstatcache();
+        $this->assertSame(0600, fileperms(self::$saveDir . '/sess_' . $sid) & 0777);
+    }
+
     public function testReadUnknownSessionReturnsEmptyString(): void
     {
         $this->assertSame('', self::$handler->read($this->sid('missing')));

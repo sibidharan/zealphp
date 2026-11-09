@@ -48,6 +48,33 @@ class FileSessionHandlerTest extends TestCase
         return $h;
     }
 
+    public function testWriteCreatesFile0600RegardlessOfUmask(): void
+    {
+        $h = $this->opened();
+        $old = umask(0022);
+        try {
+            $this->assertTrue($h->write('modecheck', 'a|i:1;'));
+        } finally {
+            umask($old);
+        }
+        clearstatcache();
+        $file = $this->savePath . '/sess_modecheck';
+        $this->assertSame(0600, fileperms($file) & 0777);
+        $this->assertSame('a|i:1;', $h->read('modecheck'));
+    }
+
+    public function testWriteTightensAnExistingWideFileAndReplacesContent(): void
+    {
+        $h = $this->opened();
+        $file = $this->savePath . '/sess_widefile';
+        file_put_contents($file, 'old|s:20:"much longer old value";');
+        chmod($file, 0644);
+        $this->assertTrue($h->write('widefile', 'n|i:2;'));
+        clearstatcache();
+        $this->assertSame(0600, fileperms($file) & 0777);
+        $this->assertSame('n|i:2;', file_get_contents($file), 'truncated, not overlaid');
+    }
+
     public function testImplementsSessionHandlerInterface(): void
     {
         $this->assertInstanceOf(\SessionHandlerInterface::class, new FileSessionHandler());

@@ -88,8 +88,9 @@ class FileSessionHandler implements \SessionHandlerInterface
     /**
      * Write serialised `$sessionData` to the session file for `$sessionId`.
      *
-     * The file is named `sess_{sessionId}` inside `$savePath`. Returns `false`
-     * only when `file_put_contents()` fails.
+     * The file is named `sess_{sessionId}` inside `$savePath` and is mode
+     * `0600` (umask-independent). Returns `false` when it can't be opened,
+     * locked or written.
      */
     public function write($sessionId, $sessionData): bool
     {
@@ -97,9 +98,28 @@ class FileSessionHandler implements \SessionHandlerInterface
             return false;
         }
         $file = $this->savePath . '/sess_' . basename((string) $sessionId);
+        $fp = @fopen($file, 'c');
+        if ($fp === false) {
+            return false;
+        }
+        // 0600 before any data goes in: fopen() creates the file with the
+        // process umask (typically 0644 — readable by every local user when
+        // the save path is a shared directory). Also tightens older files.
+        @chmod($file, 0600);
         // Exclusive lock around truncate + write, so a concurrent read() (or
         // another write) never sees the file in between.
-        return file_put_contents($file, $sessionData, LOCK_EX) !== false;
+        try {
+            if (!flock($fp, LOCK_EX)) {
+                return false;
+            }
+            ftruncate($fp, 0);
+            $written = fwrite($fp, (string) $sessionData);
+            fflush($fp);
+            flock($fp, LOCK_UN);
+            return $written !== false;
+        } finally {
+            fclose($fp);
+        }
     }
 
     /**
