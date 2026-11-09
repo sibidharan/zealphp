@@ -88,8 +88,12 @@ class EndpointTest extends TestCase
         $this->assertStringStartsWith('<div id="counter-main" data-zc="counter">', $html);
         $this->assertStringContainsString('<span class="count">5</span>', $html);
         $this->assertStringContainsString('hx-post="/_zeal/c/counter/increment"', $html);
-        $this->assertStringContainsString('hx-target="closest [data-zc]"', $html);
-        $this->assertStringContainsString('hx-include="closest [data-zc]"', $html);
+        $this->assertStringContainsString('hx-target="#counter-main"', $html);
+        $this->assertStringContainsString('hx-include="#counter-main-zc"', $html, 'its own form: never a nested child\'s fields');
+        $this->assertStringContainsString('<form method="post" action="/_zeal/c/counter/_refresh" id="counter-main-zc" hidden data-zc-form="counter-main"></form>', $html);
+        $this->assertStringContainsString('<input type="hidden" name="_zc" value="', $html);
+        $this->assertMatchesRegularExpression('/name="_zc" value="[^"]+" form="counter-main-zc"/', $html);
+        $this->assertMatchesRegularExpression('/formaction="\/_zeal\/c\/counter\/increment"[^>]* form="counter-main-zc"/', $html, 'buttons join the form');
         $this->assertStringContainsString('formaction="/_zeal/c/counter/increment"', $html, 'no-JS fallback kept');
         $this->assertStringEndsWith('</div>', $html);
     }
@@ -418,7 +422,7 @@ class EndpointTest extends TestCase
         $this->assertSame(200, $r['status'], 'htmx gets 200 so it swaps the errors in');
         $this->assertStringContainsString('<b class="saved">no</b>', $r['body']);
         $this->assertStringContainsString('Age must be a whole number.', $r['body']);
-        $this->assertStringContainsString('id="signup-bad-age" value="old"', $r['body'], 'the typed text is shown back');
+        $this->assertStringContainsString('id="signup-bad-age" form="signup-bad" value="old"', $r['body'], 'the typed text is shown back');
         $this->assertSame(0, $this->props($r['body'])['age'], 'state keeps the last valid value');
     }
 
@@ -545,10 +549,10 @@ class EndpointTest extends TestCase
     public function testActionsReplaceInFlightRequestsAndDisableTheButton(): void
     {
         $html = (string) App::component(Counter::class, [], 'sync');
-        $this->assertStringContainsString('hx-sync="closest [data-zc]:replace" hx-disabled-elt="this"', $html);
+        $this->assertStringContainsString('hx-sync="#counter-sync:replace" hx-disabled-elt="this"', $html);
         $signup = (string) App::component(Signup::class, [], 'sync');
-        $this->assertStringContainsString('hx-sync="this:replace"', $signup);
-        $this->assertStringContainsString('hx-sync="closest [data-zc]:queue last"', $signup);
+        $this->assertStringContainsString('hx-post="/_zeal/c/signup/save" hx-target="#signup-sync" hx-swap="outerHTML" hx-sync="#signup-sync:replace"', $signup);
+        $this->assertStringContainsString('hx-sync="#signup-sync:queue last"', $signup);
     }
 
     public function testHtmx4DialectAndMorph(): void
@@ -600,10 +604,10 @@ class EndpointTest extends TestCase
         $this->assertDoesNotMatchRegularExpression('/id="signup-body-email"[^>]*hx-preserve/', $r['body']);
     }
 
-    public function testNestedComponentsAreRefused(): void
+    public function testNestedChildrenNeedAKey(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('cannot be nested');
+        $this->expectExceptionMessage('a key');
         App::component(\ZealPHP\Tests\Unit\Component\Fixtures\Nester::class);
     }
 
@@ -612,7 +616,7 @@ class EndpointTest extends TestCase
         $html = (string) App::component(Signup::class, [], 'raw');
         $r = $this->post('signup', '_refresh', $html, ['age' => '"><script>x</script>', 'size' => 's']);
         $this->assertStringNotContainsString('<script>x', $r['body']);
-        $this->assertStringContainsString('id="signup-raw-age" value="&quot;&gt;&lt;script&gt;x&lt;/script&gt;"', $r['body']);
+        $this->assertStringContainsString('id="signup-raw-age" form="signup-raw" value="&quot;&gt;&lt;script&gt;x&lt;/script&gt;"', $r['body']);
     }
 
     public function testErrorMarkup(): void
@@ -625,9 +629,9 @@ class EndpointTest extends TestCase
     public function testModelWithoutValueAndArrayNames(): void
     {
         $html = (string) App::component(Signup::class, ['size' => Size::Small, 'bio' => 'hi'], 'nv');
-        $this->assertStringContainsString('<select name="size" id="signup-nv-size">', $html, 'model(..., false) prints no value');
-        $this->assertStringContainsString('<textarea name="bio" id="signup-nv-bio">hi</textarea>', $html);
-        $this->assertStringContainsString('<input type="checkbox" name="tags[]" value="a"', $html);
+        $this->assertStringContainsString('<select name="size" id="signup-nv-size" form="signup-nv">', $html, 'model(..., false) prints no value');
+        $this->assertStringContainsString('<textarea name="bio" id="signup-nv-bio" form="signup-nv">hi</textarea>', $html);
+        $this->assertStringContainsString('<input type="checkbox" name="tags[]" form="signup-nv" value="a"', $html);
     }
 
     public function testValuesAreEscapedInTheMarkup(): void

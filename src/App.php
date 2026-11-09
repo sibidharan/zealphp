@@ -8119,10 +8119,10 @@ class App
         if ($meta === null) {
             return self::statelessComponent($component, $props);
         }
-        $depth = RequestContext::instance()->memo['_zc_depth'] ?? 0;
-        if (is_int($depth) && $depth > 0) {
-            // A parent's requests would carry the child's snapshot too.
-            throw new \LogicException('Reactive components cannot be nested yet: render ' . $component . ' outside other reactive components');
+        $parent = Component\Component::zcParent();
+        if ($parent !== null && $key === null) {
+            // Positional keys would hand one row's state to another after a reorder.
+            throw new \LogicException("Give {$component} a key: inside another component, App::component(..., key: ...) keeps each child's state with it");
         }
         if ($key === null) {
             $g = RequestContext::instance();
@@ -8135,16 +8135,21 @@ class App
         } elseif (preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $key) !== 1) {
             throw new \InvalidArgumentException('Component key must be 1-64 letters, digits, - or _');
         }
-        $id = $meta->name . '-' . $key;
+        // A child's id is scoped by its parent's, so keys only need to be unique per parent.
+        $id = ($parent === null ? '' : $parent->id . '-') . $meta->name . '-' . $key;
 
-        // A no-JS action left its result in the session (Post/Redirect/Get).
-        $flashed = Component\Endpoint::takeFlash($id);
+        // Its current state, if the page already has this instance: after a
+        // no-JS action (the session flash), or carried in the parent's request.
         $instance = null;
-        if ($flashed !== null) {
+        foreach ([Component\Endpoint::takeFlash($id), Component\Endpoint::carriedSnapshot($id)] as $wire) {
+            if ($wire === null || $instance !== null) {
+                continue;
+            }
             try {
-                $snapshot = Component\Snapshot::decode($flashed, $meta);
+                $snapshot = Component\Snapshot::decode($wire, $meta);
                 if ($snapshot->id === $id) {
                     $instance = Component\Component::zcRestore($meta, $snapshot);
+                    $instance->zcApplyReactive($props);
                 }
             } catch (Component\ComponentException) {
                 $instance = null; // stale or foreign: mount fresh

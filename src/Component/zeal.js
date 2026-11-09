@@ -19,28 +19,23 @@
     return el && el.closest ? el.closest('[data-zc]') : null;
   }
 
-  // A component's fields: its form's own fields, or (for a non-form root)
-  // the named controls inside it, the way a browser would submit them.
+  // A component's own form: the outer element when it is a <form>, else the
+  // empty form it renders first (data-zc-form). Its controls and buttons join
+  // it with form="...", so it never carries a nested child's fields.
+  function formOf(root) {
+    return root.tagName === 'FORM' ? root : document.getElementById(root.id + '-zc');
+  }
+
+  function rootOfForm(form) {
+    if (form.hasAttribute('data-zc')) return form;
+    var id = form.getAttribute('data-zc-form');
+    return id ? document.getElementById(id) : null;
+  }
+
   function fields(root, submitter) {
-    if (root.tagName === 'FORM') {
-      return submitter ? new FormData(root, submitter) : new FormData(root);
-    }
-    var fd = new FormData();
-    root.querySelectorAll('input[name], select[name], textarea[name]').forEach(function (input) {
-      if (input.disabled) return;
-      if ((input.type === 'checkbox' || input.type === 'radio') && !input.checked) return;
-      if (input.type === 'file') {
-        Array.prototype.forEach.call(input.files || [], function (f) { fd.append(input.name, f); });
-        return;
-      }
-      if (input.tagName === 'SELECT' && input.multiple) {
-        Array.prototype.forEach.call(input.selectedOptions, function (o) { fd.append(input.name, o.value); });
-        return;
-      }
-      fd.append(input.name, input.value);
-    });
-    if (submitter && submitter.name) fd.append(submitter.name, submitter.value);
-    return fd;
+    var form = formOf(root);
+    if (!form) return new FormData();
+    return submitter && submitter.form === form ? new FormData(form, submitter) : new FormData(form);
   }
 
   // Replace the component, keeping the field being typed in (value, focus,
@@ -118,28 +113,20 @@
     });
   }
 
-  // Form roots: actions (buttons with formaction) and Enter both submit.
+  // Actions (buttons join the component's form) and Enter both submit it.
   document.addEventListener('submit', function (e) {
     var form = e.target;
-    if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-zc')) return;
+    if (!(form instanceof HTMLFormElement)) return;
+    var root = rootOfForm(form);
+    if (!root) return;
     e.preventDefault();
     var button = e.submitter && e.submitter.hasAttribute('data-zc-action') ? e.submitter : null;
     var url = button ? button.getAttribute('formaction') : form.getAttribute('action');
-    send(form, url, fields(form, e.submitter || null), button);
-  });
-
-  // Actions in a non-form root: no submit event fires, so take the click.
-  document.addEventListener('click', function (e) {
-    var button = e.target && e.target.closest ? e.target.closest('[data-zc-action]') : null;
-    if (!button || button.form) return; // a form root handles it on submit
-    var root = rootOf(button);
-    if (!root) return;
-    e.preventDefault();
-    send(root, button.getAttribute('formaction'), fields(root, button), button);
+    send(root, url, fields(root, e.submitter || null), button);
   });
 
   function update(input) {
-    var root = rootOf(input);
+    var root = input.form ? rootOfForm(input.form) : rootOf(input);
     if (!root) return;
     var body = fields(root, null);
     body.append('_zc_trigger', input.name.replace(/\[\]$/, ''));

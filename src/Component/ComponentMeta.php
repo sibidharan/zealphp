@@ -21,6 +21,7 @@ final class ComponentMeta
      * @param array<string, Type>                      $props   every state property
      * @param array<string, Model>                     $models  the input-bound subset
      * @param array<string, list<array{name: string, type: Type, optional: bool, default: mixed}>> $actions
+     * @param list<string>                             $reactive state properties a parent's props keep updating
      */
     private function __construct(
         public readonly string $name,
@@ -29,6 +30,7 @@ final class ComponentMeta
         public readonly array $models,
         public readonly array $actions,
         public readonly string $version,
+        public readonly array $reactive = [],
     ) {
     }
 
@@ -51,6 +53,7 @@ final class ComponentMeta
 
         $props = [];
         $models = [];
+        $reactive = [];
         foreach ($rc->getProperties(\ReflectionProperty::IS_PUBLIC) as $p) {
             if ($p->isStatic() || $p->getDeclaringClass()->getName() === Component::class) {
                 continue;
@@ -66,6 +69,9 @@ final class ComponentMeta
             $attrs = $p->getAttributes(Model::class);
             if ($attrs !== []) {
                 $models[$p->getName()] = $attrs[0]->newInstance();
+            }
+            if ($p->getAttributes(Reactive::class) !== []) {
+                $reactive[] = $p->getName();
             }
         }
 
@@ -113,6 +119,6 @@ final class ComponentMeta
         }
         $version = substr(hash('sha256', implode("\n", $shape)), 0, 16);
 
-        return new self($name, $class, $props, $models, $actions, $version);
+        return new self($name, $class, $props, $models, $actions, $version, $reactive);
     }
 }

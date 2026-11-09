@@ -193,7 +193,7 @@ class ComponentContractTest extends TestCase
         };
         Registry::register($c::class, 'raw-c');
         $r = Endpoint::handle('raw-c', '_refresh', ['_zc' => self::wire((string) App::component('raw-c')), 'n' => ['x']], self::HX);
-        $this->assertStringContainsString('name="n" id="raw-c-1-n" value=""', $r['body']);
+        $this->assertStringContainsString('name="n" id="raw-c-1-n" form="raw-c-1-zc" value=""', $r['body']);
     }
 
     public function testSeveralChangedFieldsAreAllValidatedAndHooked(): void

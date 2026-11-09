@@ -479,6 +479,9 @@ For writing a binder or a client.
 | `_zc` | the snapshot from the component's hidden input |
 | `_zc_args` | action arguments as a JSON object (`{"by": 2}`); omit for none |
 | `#[Model]` fields | as a form would send them (`tags[]` for arrays) — send **every** bound control in the component, not just the changed one: a missing `bool` means unchecked and a missing `array` means empty, so a partial post clears them |
+| `_zc_kids[{id}]` | the current snapshot of each component nested inside this one, so a re-render rebuilds them from their state (each is verified, and used only for its own id) |
+
+Everything a component sends is in its own form: the outer element when `$tag` is `'form'`, otherwise an empty `<form id="{id}-zc">` it renders first; every control and button joins it with `form="{id}-zc"`. Post that form's `FormData` and nothing else — never the fields of a component nested inside it.
 
 `{action}` is an `#[Action]` method name, `_update` (apply input and validate changed fields), or `_refresh` (apply input, re-render). For `_update`, name the field that changed in a `_zc_trigger` form field (the htmx binder does this); a `Zeal-Trigger` or `HX-Trigger-Name` header also works. Scripted clients send `Zeal-Request: 1`.
 
@@ -615,6 +618,56 @@ Tester::render(SignupForm::class)
 
 Read with `html()`, `status()`, `get($prop)`, `errors()`, `events()` and `redirectedTo()`. Assert with `assertSee()`/`assertDontSee()` (text is HTML-escaped first; pass `false` to match markup), `assertSet()`, `assertHasErrors(...$fields)`, `assertHasNoErrors()`, `assertDispatched()`, `assertRedirect(?$to)` and `assertStatus()`. A refused request (403 from `authorize()`, 404 for an unknown action) sets the status and leaves the markup as it was. Assertions go through PHPUnit when it's installed and throw `\AssertionError` otherwise. Without `ZEALPHP_APP_KEY` the tester signs with a random key for the process.
 
+## Nesting components
+
+A reactive component can render other reactive components. Give each child a `key:` — it's how the child keeps its state:
+
+```php
+final class TodoList extends Component
+{
+    public array $items = ['Milk', 'Bread'];
+    public string $filter = '';
+
+    public function render(): mixed
+    {
+        return $this->view('components/todo-list');
+    }
+}
+
+final class TodoRow extends Component
+{
+    #[Reactive]
+    public string $label = '';       // follows the parent
+    public bool $done = false;       // the row's own state
+    #[Model]
+    public string $note = '';
+
+    #[Action]
+    public function toggle(): void
+    {
+        $this->done = !$this->done;
+    }
+
+    public function render(): mixed
+    {
+        return $this->view('components/todo-row');
+    }
+}
+```
+
+```php
+<?php /* template/components/todo-list.php */ use ZealPHP\App; ?>
+<?php foreach ($items as $i => $item): ?>
+  <?= App::component(TodoRow::class, ['label' => $item], key: (string) $i) ?>
+<?php endforeach; ?>
+```
+
+- **Each component sends only its own fields.** Every component posts its own form, so a row's button never sends the list's fields and the list's actions never send the rows'. This works the same with htmx 2, htmx 4, `ZealJsBinder` and without JavaScript.
+- **Children keep their state when the parent re-renders.** Each child's current snapshot travels in its parent's form; when the parent re-renders, every child is rebuilt from its own state — a row stays `done`, keeps what was typed in its note — instead of being mounted again from the props. A snapshot is only used for the child id it was issued to.
+- **`#[Reactive]` properties follow the parent.** Props seed a child when it first mounts; after that, only properties marked `#[Reactive]` take the parent's new values. The rest belong to the child.
+- **Keys are required inside a parent**, and only need to be unique within it: a child's id is scoped by its parent's (`todo-list-main-todo-row-0`). Use the item's stable id rather than its position if rows can be reordered, so state follows the item.
+- **Limits:** nesting goes 8 levels deep. A component with `$tag = 'form'` can't contain reactive children, and a nested component can't use `$tag = 'form'` (forms can't nest) — keep the default `div`.
+
 ## Running in coroutine-legacy
 
 `App::components()` loads and reflects your component classes — and the framework's own component classes — in the master, before workers fork, so none of them is compiled cold under concurrency. Instances live for one request and are never stored in statics, so they need no isolation support.
@@ -622,10 +675,10 @@ Read with `html()`, `status()`, `get($prop)`, `errors()`, `events()` and `redire
 ## Limits in this version
 
 - **Push needs the root on the page.** Pages that don't include `App::componentPushRoot()` render components normally but never receive updates.
-- **No reactive nesting.** A reactive component inside another reactive component's render throws: the parent's requests would carry the child's snapshot too. Stateless components nest freely.
+- **Slots for reactive children** (markup a parent passes into a reactive child) aren't supported yet; pass data as props instead.
 - **Dev hot-reload** (`--dev`) re-registers components from `route/*.php`, but the endpoint route and the key check are set up at boot: if a reload adds the *first* component, restart. Removed components stay registered until restart.
 - **Behind a proxy that rewrites `Host`**, the `Origin` fallback and the no-JS back-link compare against the rewritten host. Modern browsers send `Sec-Fetch-Site`, which isn't affected; the back-link falls back to `/`.
 
 ## What's next
 
-Planned in [the design doc](architecture/2026-11-06-server-driven-components.md): a bundled vanilla-JS client for actions and input binding, nested components, and benchmarks against `render(…, htmx: true)` fragments.
+Planned ([composition design](architecture/2026-11-09-component-composition.md)): `#[On]` events between components on a page, and slots for reactive children.
