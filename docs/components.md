@@ -31,7 +31,7 @@ Put a template in `template/components/` and render it by name:
 ]) ?>
 ```
 
-- **Lookup:** `'card'` renders `components/card.php`, else `components/_card.php` (so existing underscore partials work as they are). `'ui/button'` looks in `components/ui/`. Names are lowercase letters, digits, `-` and `_`, with `/` for folders.
+- **Lookup:** the [same rule as `render()`](templates-and-rendering.md#path-resolution), nearest first: the page's folder, the page's `components/`, `template/`, then `template/components/`; `card.php` before the partial `_card.php` in each (so existing underscore partials work as they are). `'ui/button'` names a folder.
 - **Any template:** a leading `/` renders any template, absolute from `template/`: `App::component('/emails/welcome', ['user' => $u])`. This is how you get markup from a template that isn't a component; it replaces the deprecated `App::renderToString()`.
 - **Props** become template variables; `$props` holds them all. Pass child markup as `slot` — an `App::component()` result or `Escape::raw()` is printed as-is, anything else should go through `e()`.
 - **Returns markup, never echoes**, so `<?= ?>` is correct. A route can `return App::component(...)` too: the response is the HTML. A component returns content only — markup, a Generator or a Closure; a status code or JSON throws, because those belong to the route or page that owns the response ([why](templates-and-rendering.md#appcomponent--markup-as-a-value)).
