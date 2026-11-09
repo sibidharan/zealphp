@@ -105,6 +105,20 @@ final class ForkPoolTest extends TestCase
         }
     }
 
+    public function testAThrowingScriptAnswersAPlain500UnlessDisplayErrors(): void
+    {
+        // D-4: the exception message used to be the response body.
+        $f = $this->fixture('boom.php', "<?php\nthrow new RuntimeException('db password is hunter2');\n");
+        $resp = $this->pool->dispatch($this->frameFor($f), 10.0);
+        $this->assertSame(500, $resp['status'] ?? null);
+        $this->assertSame('500 Internal Server Error', $resp['body'] ?? null);
+
+        $shown = $this->pool->dispatch(['display_errors' => true] + $this->frameFor($f), 10.0);
+        $this->assertSame(500, $shown['status'] ?? null);
+        $this->assertIsString($shown['body'] ?? null);
+        $this->assertStringContainsString('RuntimeException: db password is hunter2', $shown['body']);
+    }
+
     public function testIsAliveReflectsMasterState(): void
     {
         $this->assertTrue($this->pool->isAlive());
