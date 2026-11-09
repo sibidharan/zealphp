@@ -23,7 +23,7 @@ ${basename(__FILE__, '.php')} = function () {
 
     header('Content-Type: text/html; charset=utf-8');
     if (empty($rows)) {
-        $this->response('<p class="chat-empty">No history yet — start a new conversation.</p>', 200);
+        $this->response((string) App::component('/components/chat_history_empty'), 200);
         return;
     }
     $html = '';
