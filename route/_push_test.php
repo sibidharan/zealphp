@@ -34,3 +34,10 @@ $app->route('/_test/push/stream', fn() => (function () {
 
 // A fragment (no </body>): left alone.
 $app->route('/_test/push/fragment', fn() => App::component(SharedLikes::class, [], key: 'fragment'));
+
+// A raw route streaming a page, with the root in <head> (rendered before the stream).
+$app->route('/_test/push/raw-stream', fn() => (function () {
+    yield '<!doctype html><html><head>' . App::componentPushRoot() . '</head><body>';
+    yield (string) App::component(SharedLikes::class, [], key: 'raw');
+    yield '</body></html>';
+})(), methods: ['GET'], raw: true);

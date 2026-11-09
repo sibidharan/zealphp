@@ -597,6 +597,8 @@ It can go anywhere, `<head>` included: it marks the spot, and the script is fill
 
 **Streamed pages** (a generator, `render(…, stream: true)`, `$response->stream()`) can't be rewritten once a chunk is sent, so the script rides in the chunk that carries `</body>`. Inside a stream, `componentPushRoot()` prints the script at once for the components rendered so far: call it after them, or leave it out. SSE responses are never touched.
 
+A body that middleware *inside* the router (`App::when()`, route or group middleware) has already compressed or cut to a range can't be edited, so it gets no script. Compression belongs in the global stack, or in OpenSwoole's `http_compression` (on by default), which runs after the script is added.
+
 ### How it works
 
 1. While rendering, each reactive component's `topics()` are recorded. The push script carries the list, signed into a token bound to the visitor's session, so a page can only subscribe to topics it was actually shown.
@@ -773,6 +775,7 @@ final class CartBadge extends Component
 
 ## Limits in this version
 
+- **Reactive components render in-process.** A file run in a CGI subprocess (`legacy-cgi`, `cgiMode('proc'|'pool'|'fork'|'fcgi')`) has no component registry, so `App::component(Foo::class)` there throws "not registered"; push needs the same.
 - **Push needs `</body>` or the root.** The script is added before `</body>` or where `App::componentPushRoot()` is called. A full page always has one of them; a hand-built page that has neither gets no live updates.
 - **Dev hot-reload** (`--dev`) re-registers components from `route/*.php`, but the endpoint route and the key check are set up at boot: if a reload adds the *first* component, restart. Removed components stay registered until restart.
 - **Behind a proxy that rewrites `Host`**, the `Origin` fallback and the no-JS back-link compare against the rewritten host. Modern browsers send `Sec-Fetch-Site`, which isn't affected; the back-link falls back to `/`.
