@@ -62,7 +62,7 @@ run_pass() {
     rm -f "/tmp/zealphp/zealphp_${PORT}.pid" 2>/dev/null || true
     env ZEALPHP_COVERAGE_DIR="$COVDIR" ZEALPHP_PORT="$PORT" ZEALPHP_WORKERS=1 \
         ZEALPHP_TASK_WORKERS=0 ZEALPHP_LOG_ASYNC=0 ZEALPHP_ACCESS_LOG=0 \
-        ZEALPHP_DEBUG_LOG=0 ZEALPHP_RECYCLE_LOG=0 "$@" \
+        ZEALPHP_DEBUG_LOG=0 ZEALPHP_RECYCLE_LOG=0 ZEALPHP_TEST_ROUTES=1 "$@" \
         "${PHP[@]}" app.php \
         >"$COVDIR/server-$label.log" 2>&1 &
     local srv=$!
@@ -115,7 +115,7 @@ catch (Throwable \$e) { exit(1); }
     rm -f "/tmp/zealphp/zealphp_${PORT}.pid" 2>/dev/null || true
     env ZEALPHP_COVERAGE_DIR="$COVDIR" ZEALPHP_PORT="$PORT" ZEALPHP_WORKERS=1 \
         ZEALPHP_TASK_WORKERS=0 ZEALPHP_LOG_ASYNC=0 ZEALPHP_ACCESS_LOG=0 \
-        ZEALPHP_DEBUG_LOG=0 ZEALPHP_RECYCLE_LOG=0 \
+        ZEALPHP_DEBUG_LOG=0 ZEALPHP_RECYCLE_LOG=0 ZEALPHP_TEST_ROUTES=1 ZEALPHP_REDIS_DEMOS=1 \
         ZEALPHP_STORE_BACKEND=redis ZEALPHP_REDIS_URL="$REDIS_URL_PROBE" \
         ZEALPHP_REDIS_PREFER=predis \
         "${PHP[@]}" app.php \

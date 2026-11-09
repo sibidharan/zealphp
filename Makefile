@@ -50,7 +50,7 @@ test: ## Run the full PHPUnit suite (server must be up for integration)
 unit: ## Run unit tests only (no server needed)
 	$(PHPUNIT) tests/Unit/ --testdox
 
-integration: ## Run integration tests (requires the server on :8080)
+integration: ## Run integration tests (requires the server on :8080, started with ZEALPHP_TEST_ROUTES=1)
 	$(PHPUNIT) tests/Integration/ --testdox
 
 stan: ## PHPStan static analysis (level 10, zero errors)

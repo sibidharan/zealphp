@@ -12,6 +12,13 @@ use ZealPHP\App;
 use ZealPHP\G;
 use ZealPHP\Store;
 
+// Test fixtures: off unless the integration suite's server asks for them
+// (deterministic error, fallback and timing routes have no place on a public
+// site).
+if (!\ZealPHP\env_flag('ZEALPHP_TEST_ROUTES', false)) {
+    return;
+}
+
 $app = App::instance();
 
 // ─── Scope A: ErrorDocument handlers ───────────────────────────────────────
@@ -161,7 +168,7 @@ $app->route('/__error_test/slow-handler-set', function() {
         Store::set('error_test', 'iso', ['handler_fired' => 1, 'handler_cid' => $cid, 'shutdown_count' => 0]);
         return true;
     });
-    \OpenSwoole\Coroutine::sleep(0.5);
+    \OpenSwoole\Coroutine::usleep(500000);
     restore_error_handler();
     return ['slow-done' => true];
 });
@@ -237,7 +244,7 @@ $app->route('/__error_test/shutdown-counter-read', function() {
 
 $app->route('/__error_test/error-reporting-set', function() {
     error_reporting(E_ERROR);
-    \OpenSwoole\Coroutine::sleep(0.3);
+    \OpenSwoole\Coroutine::usleep(300000);
     return ['level_in_slow' => error_reporting()];
 });
 

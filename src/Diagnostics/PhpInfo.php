@@ -338,7 +338,14 @@ final class PhpInfo
         if (in_array(strtoupper($name), ['HTTP_COOKIE', 'HTTP_AUTHORIZATION', 'PHP_AUTH_PW', 'PHP_AUTH_DIGEST', 'AUTH_PASSWORD'], true)) {
             return true;
         }
-        return preg_match('/(^|_)(API_?KEY|KEY|SECRET|TOKEN|PASS|PASSWD|PASSWORD|CREDENTIALS?|PRIVATE|DSN|SALT)(_|$)/i', $name) === 1;
+        if (preg_match('/(^|_)(API_?KEY|KEY|SECRET|TOKEN|PASS|PASSWD|PASSWORD|CREDENTIALS?|PRIVATE|DSN|SALT)(_|$)/i', $name) === 1) {
+            return true;
+        }
+        // Connection strings and webhook URLs (DATABASE_URL, MONGODB_URI,
+        // SLACK_WEBHOOK_URL) carry credentials. The request's own CGI names
+        // don't, and are worth seeing.
+        return preg_match('/(^|_)(URL|URI)(_|$)/i', $name) === 1
+            && !in_array(strtoupper($name), ['REQUEST_URI', 'SCRIPT_URI', 'SCRIPT_URL', 'REDIRECT_URL'], true);
     }
 
     /** @return array<int|string, mixed> */
@@ -452,12 +459,29 @@ final class PhpInfo
     private static function stringify(mixed $v): string
     {
         if (is_string($v)) {
-            return $v;
+            return self::maskUrlCredentials($v);
         }
         if (is_scalar($v)) {
             return (string) $v;
         }
         return is_array($v) ? '(array)' : gettype($v);
+    }
+
+    /**
+     * Hide the credentials in any `scheme://user:password@host` (or
+     * `scheme://token@host`) inside a value, whatever the variable is called.
+     */
+    private static function maskUrlCredentials(string $v): string
+    {
+        return (string) preg_replace_callback(
+            '#([a-z][a-z0-9+.\-]*://)([^/@\s]+)@#i',
+            static function (array $m): string {
+                $colon = strpos($m[2], ':');
+                $user = $colon === false ? '' : substr($m[2], 0, $colon) . ':';
+                return $m[1] . $user . '********@';
+            },
+            $v
+        );
     }
 
     private static function openswooleVersion(): string

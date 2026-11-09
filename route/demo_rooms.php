@@ -25,6 +25,12 @@ use ZealPHP\HTTP\Request;
 use ZealPHP\Store;
 use ZealPHP\WSRouter;
 
+// Off unless asked for: the routes take room and client ids from the query
+// string, so on a shared Redis anyone could join, read or push to any room.
+if (!\ZealPHP\env_flag('ZEALPHP_REDIS_DEMOS', false)) {
+    return;
+}
+
 if (!(Store::defaultBackend() instanceof \ZealPHP\Store\RedisBackend)) {
     // Table backend → demo routes throw a clear "needs Redis" message rather
     // than silently 404. Still safe to load the file (no init side-effects).

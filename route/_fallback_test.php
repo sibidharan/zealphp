@@ -8,6 +8,13 @@
 use ZealPHP\App;
 use ZealPHP\G;
 
+// Test fixtures: off unless the integration suite's server asks for them
+// (deterministic error, fallback and timing routes have no place on a public
+// site).
+if (!\ZealPHP\env_flag('ZEALPHP_TEST_ROUTES', false)) {
+    return;
+}
+
 $app = App::instance();
 
 $app->setFallback(function($request, $response) {

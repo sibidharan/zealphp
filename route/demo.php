@@ -323,29 +323,40 @@ if (Store::defaultBackend() instanceof \ZealPHP\Store\RedisBackend) {
     });
 }
 
-$app->route('/demo/pubsub/publish', ['methods' => ['GET']], function (\ZealPHP\HTTP\Request $request) {
-    $q = $request->get ?? [];
-    $channel = is_string($q['channel'] ?? null) ? $q['channel'] : 'demo:pubsub';
-    $msg     = is_string($q['msg']     ?? null) ? $q['msg']     : 'hello';
-    try {
-        $receivers = Store::publish($channel, $msg);
-        return ['ok' => true, 'channel' => $channel, 'msg' => $msg, 'receivers' => $receivers];
-    } catch (\ZealPHP\Store\StoreException $e) {
-        return ['ok' => false, 'error' => $e->getMessage()];
-    }
-});
+// Publishing is off unless asked for, and then limited to demo: channels and
+// streams: on a shared Redis an open publish endpoint could post into the
+// framework's own channels (WebSocket routing, component invalidation).
+if (\ZealPHP\env_flag('ZEALPHP_REDIS_DEMOS', false)) {
+    $app->route('/demo/pubsub/publish', ['methods' => ['GET']], function (\ZealPHP\HTTP\Request $request) {
+        $q = $request->get ?? [];
+        $channel = is_string($q['channel'] ?? null) ? $q['channel'] : 'demo:pubsub';
+        $msg     = is_string($q['msg']     ?? null) ? $q['msg']     : 'hello';
+        if (!str_starts_with($channel, 'demo:')) {
+            return 400;
+        }
+        try {
+            $receivers = Store::publish($channel, $msg);
+            return ['ok' => true, 'channel' => $channel, 'msg' => $msg, 'receivers' => $receivers];
+        } catch (\ZealPHP\Store\StoreException $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    });
 
-$app->route('/demo/pubsub/publish-reliable', ['methods' => ['GET']], function (\ZealPHP\HTTP\Request $request) {
-    $q = $request->get ?? [];
-    $stream = is_string($q['stream'] ?? null) ? $q['stream'] : 'demo:reliable';
-    $msg    = is_string($q['msg']    ?? null) ? $q['msg']    : 'durable';
-    try {
-        $id = Store::publishReliable($stream, $msg);
-        return ['ok' => true, 'stream' => $stream, 'msg' => $msg, 'message_id' => $id];
-    } catch (\ZealPHP\Store\StoreException $e) {
-        return ['ok' => false, 'error' => $e->getMessage()];
-    }
-});
+    $app->route('/demo/pubsub/publish-reliable', ['methods' => ['GET']], function (\ZealPHP\HTTP\Request $request) {
+        $q = $request->get ?? [];
+        $stream = is_string($q['stream'] ?? null) ? $q['stream'] : 'demo:reliable';
+        $msg    = is_string($q['msg']    ?? null) ? $q['msg']    : 'durable';
+        if (!str_starts_with($stream, 'demo:')) {
+            return 400;
+        }
+        try {
+            $id = Store::publishReliable($stream, $msg);
+            return ['ok' => true, 'stream' => $stream, 'msg' => $msg, 'message_id' => $id];
+        } catch (\ZealPHP\Store\StoreException $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    });
+}
 
 $app->route('/demo/pubsub/log', ['methods' => ['GET']], function () {
     if (!(Store::defaultBackend() instanceof \ZealPHP\Store\RedisBackend)) {
