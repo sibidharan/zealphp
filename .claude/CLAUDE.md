@@ -506,7 +506,7 @@ $app->route('/users', fn() => (function() {
 2. `return (function() use ($var) { yield ...; })();` — IIFE Generator (explicit)
 3. Regular echo template — captured output yielded as one chunk
 
-**Universal return contract** — one contract, every entry point. Route handler, fallback, error handler, `App::render() / component() / include()`, public file, API closure, streaming-template Closure — every one of them rides the same return-shape mapping. Canonical home: `template/responses/responses.php#return-contract`. This table mirrors that one **verbatim** — any change to return-value handling MUST update both in lock-step. The shared private core that implements this is `App::executeFile()`.
+**Universal return contract** — one contract, every entry point. Route handler, fallback, error handler, `App::render() / include()` (`component()` takes the content half only: markup/Generator/Closure; status/array/response throws — a component can't own the response), public file, API closure, streaming-template Closure — every one of them rides the same return-shape mapping. Canonical home: `template/responses/responses.php#return-contract`. This table mirrors that one **verbatim** — any change to return-value handling MUST update both in lock-step. The shared private core that implements this is `App::executeFile()`.
 
 | The handler / file does | Core sees | ResponseMiddleware emits |
 |-------------------------|-----------|--------------------------|
@@ -769,7 +769,7 @@ The rendering API grew one helper per need — `render()`, `renderToString()`, `
 - **No magic keys in data arrays.** Behaviour is selected by named parameters, never by a reserved key inside user data (`$args['fragment']` was both a template variable and a selector).
 - **Return values over side effects.** A function that produces markup returns it; echoing is the caller's choice. Never both.
 - **One name per concept** across code, docs, site nav and URLs (the Components merge: stateless + reactive under one `App::component()`, one page, one guide).
-- **One resolution rule.** The same input resolves the same way from every entry point (component templates are always absolute from `template/`; the namespaced-by-public-file lookup falls back to the top level, as documented).
+- **One resolution rule.** `render()` and `component()` resolve a name the same way (`templateCandidates()`): leading `/` absolute from `template/`; else nearest first from the request's page folder, its `components/`, `template/`, `template/components/`.
 - **Extend a seam, don't copy a path.** If a new feature needs most of an existing code path, add the option to that path.
 
 ### PHP Style

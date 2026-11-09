@@ -6,7 +6,8 @@
 
 <h2 id="return-contract">Universal return contract</h2>
 <div class="callout info resp-callout">
-  <p class="resp-m-0"><strong>One contract, every entry point.</strong> Any function that produces a response — route handler, fallback, error handler, <code>App::render()</code>, <code>App::component()</code>, <code>App::include()</code>, public file, API closure, streaming template Closure — uses the same return contract. The framework translates the return value into an HTTP response identically regardless of where it came from. Other pages link here rather than restating it.</p>
+  <p class="resp-m-0"><strong>One contract, every entry point.</strong> Any function that produces a response — route handler, fallback, error handler, <code>App::render()</code>, <code>App::include()</code>, public file, API closure, streaming template Closure — uses the same return contract. The framework translates the return value into an HTTP response identically regardless of where it came from. Other pages link here rather than restating it.</p>
+  <p class="resp-m-0"><strong><code>App::component()</code> takes the content half only, by design.</strong> A component is a piece of someone else's response, so it can't set the status or turn the response into JSON: echo, a string, <code>SafeHtml</code>, a <code>Generator</code> (joined) or a <code>Closure</code> (called with its props) become its markup; an <code>int</code>, an array or a response object throws. When a route returns a component, the route owns the response and the full contract applies to that return (<a href="/templates#where-components">where components can be used</a>).</p>
 </div>
 
 <table class="ztable resp-mb-2">
@@ -56,7 +57,7 @@ $app->route('/echo', function() {
 $app->route('/article/{id}', fn($id) => App::include('/article.php'));
 PHP]) ?>
 
-<p class="resp-mt-1">The same contract applies inside any file invoked by <a href="/templates"><code>App::render() / component() / include()</code></a> — and inside any region declared by <a href="/templates#fragments"><code>App::fragment()</code></a> when extracted. See <a href="/templates#file-execution-family">the rendering methods</a> for the full method table.</p>
+<p class="resp-mt-1">The same contract applies inside any file invoked by <a href="/templates"><code>App::render()</code> or <code>App::include()</code></a> (a file rendered by <code>App::component()</code> gets its content half) — and inside any region declared by <a href="/templates#fragments"><code>App::fragment()</code></a> when extracted. See <a href="/templates#file-execution-family">the rendering methods</a> for the full method table.</p>
 
 <h3 id="status-range" class="resp-mt-2">Valid HTTP status codes</h3>
 
