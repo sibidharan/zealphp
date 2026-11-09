@@ -268,6 +268,53 @@ ensure_php_security_fix() {
 Upgrade to PHP $(php2shell_floor "$current") or later before running ZealPHP."
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ext-zealphp source pin. A git tag is mutable (it can be re-pointed or
+# force-pushed), so the default source build checks out the tag AND verifies the
+# resulting commit is the one recorded here before compiling anything. Bump both
+# lines together; get the SHA with
+#   gh api repos/sibidharan/ext-zealphp/git/ref/tags/<tag>
+# and, for an annotated tag, dereference it to the commit it points at.
+#
+# ZEALPHP_EXT_VERSION overrides the tag. An override can't be pinned (this script
+# has no SHA for an arbitrary tag), so it is built from the tag as-is — set
+# ZEALPHP_EXT_COMMIT alongside it to get the same verification for your tag.
+# ─────────────────────────────────────────────────────────────────────────────
+ZEALPHP_EXT_DEFAULT_VERSION="v0.4.1"
+ZEALPHP_EXT_DEFAULT_COMMIT="63806408e0afd8c0655c27a064cf83d0d5cdad78"
+if [ -n "${ZEALPHP_EXT_VERSION:-}" ]; then
+    ZEALPHP_EXT_REF="$ZEALPHP_EXT_VERSION"
+    ZEALPHP_EXT_PIN="${ZEALPHP_EXT_COMMIT:-}"
+else
+    ZEALPHP_EXT_REF="$ZEALPHP_EXT_DEFAULT_VERSION"
+    ZEALPHP_EXT_PIN="$ZEALPHP_EXT_DEFAULT_COMMIT"
+fi
+
+# Clone ext-zealphp at $ZEALPHP_EXT_REF into $1 and, when a pin is known, refuse
+# the checkout unless HEAD is exactly that commit. Returns 1 (and removes $1) on
+# a failed clone or a commit mismatch.
+fetch_zealphp_ext_source() {
+    local dest="$1"
+    if ! git clone --depth 1 --branch "$ZEALPHP_EXT_REF" https://github.com/sibidharan/ext-zealphp.git "$dest"; then
+        echo -e "${RED}Failed to clone ext-zealphp ${ZEALPHP_EXT_REF}.${RESET}"
+        rm -rf "$dest"
+        return 1
+    fi
+    if [ -z "$ZEALPHP_EXT_PIN" ]; then
+        echo -e "${YELLOW}ext-zealphp ${ZEALPHP_EXT_REF}: no commit pin for this tag (set ZEALPHP_EXT_COMMIT to verify it).${RESET}"
+        return 0
+    fi
+    local head
+    head="$(git -C "$dest" rev-parse 'HEAD^{commit}')"
+    if [ "$head" != "$ZEALPHP_EXT_PIN" ]; then
+        echo -e "${RED}ext-zealphp ${ZEALPHP_EXT_REF} resolved to commit ${head}, expected ${ZEALPHP_EXT_PIN}. Refusing to build.${RESET}"
+        rm -rf "$dest"
+        return 1
+    fi
+    echo -e "${GREEN}ext-zealphp ${ZEALPHP_EXT_REF} verified at commit ${head}.${RESET}"
+    return 0
+}
+
 docker_setup() {
     set -e
     export DEBIAN_FRONTEND=noninteractive
@@ -312,14 +359,14 @@ docker_setup() {
     docker-php-ext-enable --ini-name zz-openswoole.ini openswoole
     php -r 'exit(extension_loaded("openswoole") ? 0 : 1);' || { echo -e "${RED}OpenSwoole built but failed to load.${RESET}"; exit 1; }
 
-    echo -e "${YELLOW}Installing ext-zealphp ${ZEALPHP_EXT_VERSION:-v0.3.60} for Docker image.${RESET}"
+    echo -e "${YELLOW}Installing ext-zealphp ${ZEALPHP_EXT_REF} for Docker image.${RESET}"
     # Pinned tagged SOURCE build for the Docker image — deliberately reproducible and
     # supply-chain-proof (same rationale as OpenSwoole above: do not depend on pie /
     # Packagist network state at image-build time). Interactive installs use pie;
     # the image pins a known-good tag. ext-zealphp is required — no uopz fallback.
-    # NOTE: the ext has its OWN 0.3.x version line — do NOT confuse it with the
-    # framework's 0.3.x. Override with ZEALPHP_EXT_VERSION.
-    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.60}" https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
+    # NOTE: the ext has its OWN version line — do NOT confuse it with the
+    # framework's. Override with ZEALPHP_EXT_VERSION (see fetch_zealphp_ext_source).
+    fetch_zealphp_ext_source /tmp/ext-zealphp || exit 1
     if (cd /tmp/ext-zealphp && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
         docker-php-ext-enable --ini-name zz-zealphp.ini zealphp
         rm -rf /tmp/ext-zealphp
@@ -764,8 +811,7 @@ ensure_pie() {
 # updates are just `pie install zealphp/ext`. Returns 0 on success, 1 to fall back.
 pie_install_zealphp_ext() {
     ensure_pie || return 1
-    local ver="${ZEALPHP_EXT_VERSION:-v0.3.60}"
-    local constraint="^${ver#v}"   # v0.3.60 -> ^0.3.59 (newest patch within the line)
+    local constraint="^${ZEALPHP_EXT_REF#v}"   # v0.4.1 -> ^0.4.1 (newest patch within the line)
     echo -e "${YELLOW}Installing zealphp/ext ${constraint} via pie.${RESET}"
     # shellcheck disable=SC2086
     if $SUDO $PIE_BIN install "zealphp/ext:${constraint}"; then
@@ -791,8 +837,7 @@ install_zealphp_ext() {
     # Fallback: tagged source build (pie unavailable or its install failed).
     local tmpdir
     tmpdir="$(mktemp -d)"
-    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.60}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir/ext-zealphp" || {
-        echo -e "${RED}Failed to clone ext-zealphp repo.${RESET}"
+    fetch_zealphp_ext_source "$tmpdir/ext-zealphp" || {
         rm -rf "$tmpdir"
         return 1
     }
@@ -907,7 +952,7 @@ macos_setup() {
     else
         local tmpdir
         tmpdir="$(mktemp -d)"
-        if git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.60}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir" && \
+        if fetch_zealphp_ext_source "$tmpdir" && \
            (cd "$tmpdir" && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
             echo "extension=zealphp.so" > "${php_ini_dir}/zz-zealphp.ini"
             rm -rf "$tmpdir"
