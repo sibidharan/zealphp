@@ -98,6 +98,49 @@ HTML]); ?>
   </div>
 </div>
 
+<h3 id="end-to-end" class="lc-mt-2">From class to page</h3>
+<p>The class and its view above are two of the files. Register the component once at boot, then render it with one line in any page template. The page only has to load htmx.</p>
+<?php App::render('/components/_code', [
+    'label' => 'route/components.php — registers it at boot',
+    'code'  => <<<'PHP'
+<?php
+use ZealPHP\App;
+use App\Components\Counter;
+
+App::components([Counter::class]);
+PHP]); ?>
+<?php App::render('/components/_code', [
+    'label' => 'public/counter.php — the URL /counter',
+    'code'  => <<<'PHP'
+<?php
+use ZealPHP\App;
+
+App::render('counter-page', ['title' => 'Counter']);
+PHP]); ?>
+<?php App::render('/components/_code', [
+    'label' => 'template/counter-page.php — the page',
+    'lang'  => 'html',
+    'code'  => <<<'HTML'
+<?php
+use ZealPHP\App;
+use App\Components\Counter;
+use function ZealPHP\e;
+?>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title><?= e($title) ?></title>
+  <script src="https://unpkg.com/htmx.org@2.0.10" defer></script>
+</head>
+<body>
+  <h1><?= e($title) ?></h1>
+  <?= App::component(Counter::class, ['count' => 5], key: 'main') ?>
+</body>
+</html>
+HTML]); ?>
+<p>Start the server with <code>ZEALPHP_APP_KEY</code> set and open <code>/counter</code>. A route works the same: <code>$app-&gt;route('/counter', fn() =&gt; App::render('counter-page', ['title' =&gt; 'Counter']))</code>. With a shared layout, the htmx script goes in the layout once and any page template, partial or component template can call <code>App::component()</code>. <a href="/docs/guide/components#putting-it-on-a-page-end-to-end">The full walkthrough</a> also shows the HTML the browser receives.</p>
+
 <h3 id="binding" class="lc-mt-2">Input binding and live validation</h3>
 <p><code>username</code> is <code>live</code>: it's validated as you type (try <code>ab</code>, <code>admin</code>, or <code>a b</code>). The field you're typing in is never replaced, so focus and cursor stay put. <code>email</code>, <code>plan</code> and the checkbox are deferred — they ride along when you press <strong>Sign up</strong>, which runs <code>save()</code>.</p>
 
