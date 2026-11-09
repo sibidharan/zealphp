@@ -17,6 +17,7 @@ use function ZealPHP\access_logging_enabled;
 use function ZealPHP\async_logging_enabled;
 use function ZealPHP\jTraceEx;
 use function ZealPHP\elog;
+use function ZealPHP\log_escape;
 use function ZealPHP\zlog;
 use function ZealPHP\access_log;
 use function ZealPHP\get_config;
@@ -192,6 +193,37 @@ class UtilsLoggingTest extends TestCase
         $contents = (string)file_get_contents($file);
         $this->assertStringContainsString('[unittag]', $contents);
         $this->assertStringContainsString($marker, $contents);
+    }
+
+    public function testLogEscapeNeutralisesControlCharacters(): void
+    {
+        $out = log_escape("a\r\nb\x1b[31mred\x00\x7f\xc2\x9b2J ok é\n┌[error] forged");
+        $this->assertStringNotContainsString("\r", $out);
+        $this->assertStringNotContainsString("\x1b", $out);
+        $this->assertStringNotContainsString("\x00", $out);
+        $this->assertStringNotContainsString("\x7f", $out);
+        $this->assertStringNotContainsString("\xc2\x9b", $out);
+        $this->assertStringContainsString('\\x1B[31m', $out);
+        $this->assertStringContainsString('\\u009B', $out);
+        $this->assertStringContainsString('ok é', $out, 'printable UTF-8 is untouched');
+        // A LF stays (multi-line traces) but can never start a new record.
+        foreach (array_slice(explode("\n", $out), 1) as $line) {
+            $this->assertStringStartsWith('   ', $line);
+        }
+        $this->assertSame("tab\tok", log_escape("tab\tok"));
+    }
+
+    public function testElogCannotForgeARecord(): void
+    {
+        if (!debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging disabled in this process');
+        }
+        $file = (string)log_file_for('debug');
+        $marker = 'forged-' . uniqid();
+        elog("user input\n┌[error] {$marker}\r", 'unittag');
+        $contents = (string)file_get_contents($file);
+        $this->assertStringContainsString("\n   ┌[error] {$marker}\\r", $contents);
+        $this->assertStringNotContainsString("\n┌[error] {$marker}", $contents);
     }
 
     public function testElogWordpressTagIsSuppressed(): void
