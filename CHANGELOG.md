@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.4.18] - 2026-11-09
+
 ### Added — component push (#509 phase 3)
 - **Components update live across tabs and visitors.** A reactive component lists what it depends on in `topics()`; `Component::invalidate('contacts')` after a write makes every open page showing it re-render it. Add `<?= App::componentPushRoot() ?>` to the layout. Demo: "Live across tabs" on `/components`. Guide: [Live updates (push)](docs/components.md#live-updates-push).
 - **WebSockets or SSE.** `App::componentPush(transport: 'ws'|'sse', maxConnections:, coalesce:)`, or `ZEALPHP_COMPONENT_PUSH=sse`. One connection per page. WebSockets are the default because HTTP/1.1 browsers allow six connections per host, so SSE suits HTTP/2. Dead connections are noticed at the next heartbeat; a full worker tells clients to retry later; hx-boost navigation away closes the connection.
