@@ -325,7 +325,7 @@ Inside the closure, the universal contract applies — `return 404;` for auth, `
 
 ## Universal return contract
 
-One contract, every entry point. Route handler, fallback, error handler, `App::render() / component() / include()`, public file, API closure, streaming-template closure — every one rides the same return-shape mapping, implemented by the shared private core `App::executeFile()`.
+One contract, every entry point. Route handler, fallback, error handler, `App::render()` / `App::include()`, public file, API closure, streaming-template closure — every one rides the same return-shape mapping, implemented by the shared private core `App::executeFile()`. `App::component()` takes the content half only (markup, a joined Generator, a Closure called with its props; a status, array or response throws), because a component is a piece of someone else's response — see [`App::component()`](#appcomponent--markup-as-a-value).
 
 **One exception:** *combining* `echo` with an explicit non-null `return` concatenates only on the `executeFile`-backed entry points, **not** a top-level route handler, which `ResponseMiddleware` invokes directly. The two affected rows are marked `[1]`; see the note below the table.
 
