@@ -3996,19 +3996,29 @@ class App
      * worker. Outside a coroutine (boot / CLI) it falls back to the blocking
      * `App::rawExec()` implementation. Either way the return shape is the same.
      *
+     * `output` is stdout only — stderr is not captured, as with PHP's own
+     * `shell_exec()` — so a tool's log lines can't corrupt the output it
+     * prints (e.g. JSON). Redirect explicitly (`2>&1`) to capture both.
+     *
+     * `$timeout` is enforced with coreutils `timeout`: the command is stopped
+     * (SIGTERM, then SIGKILL a second later) and `code` is 124. OpenSwoole's
+     * `System::exec()` has no timeout of its own.
+     *
      * @param string     $cmd     Shell command to run.
-     * @param float|null $timeout Coroutine-mode timeout in seconds (`null` = no timeout).
+     * @param float|null $timeout Seconds before the command is stopped (`null` = no limit).
      *
      * @return array{output:string, code:int, signal:int}
      */
     public static function exec(string $cmd, ?float $timeout = null): array
     {
+        if ($timeout !== null) {
+            $cmd = self::withTimeout($cmd, $timeout);
+        }
         if (\OpenSwoole\Coroutine::getCid() >= 0) {
-            // The ide-helper stub types System::exec()'s 2nd arg as bool and its
-            // return as a bare array; the real ext-openswoole 26.2 takes a float
-            // timeout (-1 = none) and returns {output, code, signal}. See the
-            // documented ignore in phpstan.neon.
-            $r = \OpenSwoole\Coroutine\System::exec($cmd, $timeout ?? -1);
+            // OpenSwoole 26.2: System::exec(string $command, bool $get_error_stream).
+            // Passing anything truthy (the old `$timeout ?? -1`) merged stderr into
+            // the output — a CLI's DEBUG lines then landed in front of its JSON.
+            $r = \OpenSwoole\Coroutine\System::exec($cmd, false);
             if (is_array($r)) {
                 $output = $r['output'] ?? '';
                 $code = $r['code'] ?? 0;
@@ -4022,6 +4032,37 @@ class App
             return ['output' => '', 'code' => 1, 'signal' => 0];
         }
         return ['output' => (string) self::rawExec($cmd), 'code' => 0, 'signal' => 0];
+    }
+
+    /**
+     * Wrap a command so it is stopped after `$timeout` seconds.
+     *
+     * @throws \InvalidArgumentException for a non-positive timeout
+     * @throws \RuntimeException when coreutils `timeout` is not installed
+     */
+    private static function withTimeout(string $cmd, float $timeout): string
+    {
+        if (!($timeout > 0) || !is_finite($timeout)) {
+            throw new \InvalidArgumentException('App::exec(): timeout must be a positive number of seconds');
+        }
+        $bin = self::$timeout_binary ??= self::findTimeoutBinary();
+        if ($bin === '') {
+            throw new \RuntimeException('App::exec(): a timeout needs coreutils `timeout`, which was not found');
+        }
+        return escapeshellarg($bin) . ' -k 1 ' . sprintf('%.3F', $timeout) . ' sh -c ' . escapeshellarg($cmd);
+    }
+
+    /** Path of coreutils `timeout` ('' when absent), found once per worker. */
+    private static ?string $timeout_binary = null;
+
+    private static function findTimeoutBinary(): string
+    {
+        foreach (['/usr/bin/timeout', '/bin/timeout', '/usr/local/bin/timeout'] as $candidate) {
+            if (is_executable($candidate)) {
+                return $candidate;
+            }
+        }
+        return '';
     }
 
     /**
