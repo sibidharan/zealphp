@@ -11056,7 +11056,27 @@ class App
             $abs_file = realpath($docRoot . '/' . $file . '.php');
             if ($abs_file !== false && file_exists($abs_file)) {
                 return App::include('/' . $file . '.php');
-            } else if (is_dir($docRoot . '/' . $file)) {
+            }
+            // A plain file at the root of the docroot (robots.txt, llms.txt,
+            // favicon.ico). The static handler only serves its directory
+            // prefixes (/css/, /js/ …, #367), so these used to 404.
+            $plain = realpath($docRoot . '/' . $file);
+            if ($plain !== false && is_file($plain) && !str_ends_with(strtolower($plain), '.php')
+                && $this->includeCheck($plain)
+            ) {
+                $g = RequestContext::instance();
+                $g->server['PHP_SELF']        = '/' . $file;
+                $g->server['SCRIPT_NAME']     = '/' . $file;
+                $g->server['SCRIPT_FILENAME'] = $plain;
+                $out = $g->zealphp_response;
+                if (!$out instanceof \ZealPHP\HTTP\Response) {
+                    return 500;
+                }
+                $out->sendFile($plain);
+                $g->_streaming = true;
+                return null;
+            }
+            if (is_dir($docRoot . '/' . $file)) {
                 $result = $this->serveDirectory($file, $file);
                 if ($result === false) {
                     return $this->invokeFallbackOrNotFound();
