@@ -21,6 +21,7 @@ server in the foreground on the configured port (8080 by default).
 | `status` | Report whether the instance is running (prints pid + port). |
 | `logs` | Tail the log files (Ctrl+C to stop). Combine with the log filters below to tail specific logs. |
 | `key:generate` | Print a new `ZEALPHP_APP_KEY=base64:…` line and exit, without starting a server. The key signs [reactive component](components.md) state; see [environment variables](environment-variables.md). |
+| `make:component Name [--stateless]` | Create a [component](components.md#generating-a-component): `src/Components/Name.php` (namespace from your `composer.json` PSR-4 map for `src/`) and `template/components/name.php`; `--stateless` writes only the template. Never overwrites; prints how to register and render it. |
 
 ## Options
 

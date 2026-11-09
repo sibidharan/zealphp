@@ -479,6 +479,47 @@ Topic names are 1–128 characters of letters, digits, `:`, `_`, `.` and `-` (`c
 - `Component::invalidate()` is server-side only; clients can't trigger one.
 - **Capacity.** `maxConnections` is per worker, and a page's token can be reused for many connections. On a public site, cap connections per client in front of ZealPHP (your proxy's per-IP connection limit on `/_zeal/c/ws` and `/_zeal/c/stream`).
 
+## Generating a component
+
+```bash
+php app.php make:component LikeButton            # src/Components/LikeButton.php + template/components/like-button.php
+php app.php make:component user-card --stateless # template/components/user-card.php only
+```
+
+The class lands in your `src/` namespace (from `composer.json`'s PSR-4 map), with a counter to start from. The command never overwrites a file and prints the line that registers the component.
+
+## Testing components
+
+`ZealPHP\Component\Tester` drives a component through the real endpoint, without a server or a browser, so snapshots, validation, `authorize()`, hooks, events and redirects behave as in production:
+
+```php
+use ZealPHP\Component\Tester;
+
+Tester::render(Counter::class, ['count' => 1])
+    ->call('increment', ['by' => 2])        // click an action
+    ->assertSet('count', 3)
+    ->assertSee('3');
+
+Tester::render(SignupForm::class)
+    ->set('username', 'ab')                 // type into a #[Model] field
+    ->assertStatus(422)
+    ->assertHasErrors('username')
+    ->set('username', 'alice')
+    ->set('email', 'alice@example.com')
+    ->call('save')
+    ->assertHasNoErrors()
+    ->assertDispatched('signed-up');
+```
+
+| Step | Does |
+|---|---|
+| `Tester::render($classOrName, $props, $key)` | Render (registering the class if needed) |
+| `call($action, $args)` | Run an `#[Action]` |
+| `set($prop, $value)` | Change a `#[Model]` field: validates it and runs `updated{Prop}()`; the other bound fields are sent with their current values, as a browser would |
+| `refresh()` | Re-render with the current state |
+
+Read with `html()`, `status()`, `get($prop)`, `errors()`, `events()` and `redirectedTo()`. Assert with `assertSee()`/`assertDontSee()` (text is HTML-escaped first; pass `false` to match markup), `assertSet()`, `assertHasErrors(...$fields)`, `assertHasNoErrors()`, `assertDispatched()`, `assertRedirect(?$to)` and `assertStatus()`. A refused request (403 from `authorize()`, 404 for an unknown action) sets the status and leaves the markup as it was. Assertions go through PHPUnit when it's installed and throw `\AssertionError` otherwise. Without `ZEALPHP_APP_KEY` the tester signs with a random key for the process.
+
 ## Running in coroutine-legacy
 
 `App::components()` loads and reflects your component classes — and the framework's own component classes — in the master, before workers fork, so none of them is compiled cold under concurrency. Instances live for one request and are never stored in statics, so they need no isolation support.

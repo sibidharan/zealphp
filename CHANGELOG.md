@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added — component dev tools
+- **`ZealPHP\Component\Tester`** drives a reactive component through the real endpoint in a unit test: `Tester::render(Counter::class)->call('increment')->assertSet('count', 1)`, `->set('email', …)->assertHasErrors('email')`, plus `assertSee`, `assertDispatched`, `assertRedirect` and `assertStatus`. No server or browser needed. Guide: [Testing components](docs/components.md#testing-components).
+- **`php app.php make:component Name [--stateless]`** writes a component class and its template (or just a template), in your `src/` namespace, never overwriting.
+
 ## [0.4.18] - 2026-11-09
 
 ### Added — component push (#509 phase 3)
