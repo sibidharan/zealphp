@@ -1398,6 +1398,8 @@ Relative names resolve from the **request's page** — the public file being ser
 | A page's component that a route also renders | name its own children in full too (`App::component('/invoices/components/cell', …)`) | a route has no page, so a relative child isn't found |
 | A component used on several pages **and** by a route | put it in `template/components/` and use its bare name | found from anywhere |
 
+**Why relative names resolve from the request's page, not from the calling file.** One name means one thing for the whole request: `row` is the page's `row` whether the page template, the layout, or a component asks for it. Resolving from the calling file instead would make the same name mean different templates in different files, and a moved file would silently change what its calls render. The cost is the route case above, where there is no page: name a page's component (and its children) in full, or share it.
+
 A stateless component can contain components (`slot`, or calls in its template). A reactive component can render stateless components anywhere, and reactive children with a `key:` (see [Nesting components](components.md#nesting-components)). A component returns content only; status codes, arrays and responses belong to the route or page that owns the response ([why](#appcomponent--markup-as-a-value)).
 
 ## Templates and Rendering — `App::component()` — markup as a value
@@ -1451,6 +1453,18 @@ $app->route('/users', function() {
         yield from App::render('shell-close', stream: true);
     })();
 });
+```
+
+**Components in a stream: `yield`, not `yield from`.** A component is one value (its `SafeHtml`), not a Generator, so it is one chunk of the stream; `yield from App::component(...)` is a PHP error (`Can use "yield from" only with arrays and Traversables`). A component's own Generator is joined before it returns, so stream from the page: a template that yields many chunks goes through `render(…, stream: true)`.
+
+```php
+return (function () use ($users) {
+    yield from App::render('shell-open', ['title' => 'Users'], stream: true);
+    foreach ($users as $user) {
+        yield App::component('row', ['user' => $user]);   // one chunk per row, flushed as it's ready
+    }
+    yield from App::render('shell-close', stream: true);
+})();
 ```
 
 ### Three streaming template styles
