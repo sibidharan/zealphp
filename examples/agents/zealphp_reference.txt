@@ -1935,7 +1935,7 @@ The endpoint speaks plain HTTP. A **binder** decides which attributes `action()`
 
 ### htmx 2 and htmx 4
 
-`HtmxBinder` supports both. htmx 2 is the default (it's still npm's `latest`); pass `htmx: 4` for htmx 4:
+`HtmxBinder` supports both. The setting decides the attributes of the first page render; after that, every component request says which htmx sent it (htmx 4 adds `HX-Request-Type`), and the response uses that version's dialect. htmx 2 is the default setting (it's still npm's `latest`); pass `htmx: 4` if your pages load htmx 4:
 
 ```php
 App::componentBinder(new HtmxBinder());            // htmx 2.x
@@ -1991,19 +1991,98 @@ For writing a binder or a client.
 
 Headers: `Zeal-Events` (JSON object of event → detail), `Zeal-Redirect` (a path to navigate to), `Zeal-Reload: 1` (with 409). Every response is `Cache-Control: no-store`.
 
+## Components — Live updates (push)
+
+A component can stay current while it's on screen: when data it shows changes, every open page showing it re-renders it.
+
+```php
+final class SharedLikes extends Component
+{
+    public static ?Counter $likes = null;      // created in route/ before run()
+
+    public function topics(): array
+    {
+        return ['demo:likes'];                 // what this component depends on
+    }
+
+    #[Action]
+    public function like(): void
+    {
+        self::$likes?->increment();
+        Component::invalidate('demo:likes');   // after the write
+    }
+
+    public function render(): mixed
+    {
+        return $this->view('components/live/likes', ['likes' => self::$likes?->get() ?? 0]);
+    }
+}
+```
+
+Add the push root once to your layout, after the components:
+
+```php
+<?= App::componentPushRoot() ?>
+</body>
+```
+
+It renders a `<script>` only when the page rendered a component with topics. Call `Component::invalidate()` from anywhere that changes the data — an action, an API handler, a task worker, a sidecar process, a timer.
+
+### How it works
+
+1. While rendering, each reactive component's `topics()` are recorded. The push root signs the list into a token bound to the visitor's session, so a page can only subscribe to topics it was actually shown.
+2. The page opens one connection: a WebSocket (`/_zeal/c/ws`) or an SSE stream (`/_zeal/c/stream`).
+3. `Component::invalidate('demo:likes')` delivers to this worker's connections, sends the topics to the node's other workers (OpenSwoole `sendMessage`), and, with the Redis or Tiered `Store` backend, publishes them to other nodes. From a task worker or a sidecar process it reaches every HTTP worker.
+4. A connection receives only the **ids** of its stale components, never HTML or data. The page then re-requests each one through the normal endpoint (`_refresh`), with its own cookies, so each visitor sees what *their* session is allowed to see.
+
+Invalidations to one connection are coalesced (50 ms by default), so a burst of writes costs one refresh, and what a worker invalidates within a tick goes to the other workers and nodes as one message. The page skips a component while an htmx request from it is running (an action's response already carries its new state) or while the visitor is typing in it, and runs at most one refresh per component at a time. After a reconnect it refreshes all its components, because invalidations may have been missed.
+
+### Configuration
+
+```php
+App::componentPush(transport: 'sse', maxConnections: 2000, coalesce: 0.1);   // before App::run()
+```
+
+| Setting | Default | |
+|---|---|---|
+| `transport` | `'ws'` (or `ZEALPHP_COMPONENT_PUSH=sse`) | `'ws'`: one WebSocket per page. `'sse'`: one streamed response per page. |
+| `maxConnections` | 1000 | open push connections per worker; beyond it a WebSocket is closed with 1013 (retry later) and an SSE stream asks the browser to come back in 15–45 s |
+| `coalesce` | 0.05 | seconds to gather invalidations into one message |
+
+**WebSocket or SSE.** WebSockets are the default because browsers allow only six HTTP/1.1 connections per host: with SSE, each open tab holds one, so a visitor's seventh tab of your site would stall. Use SSE over HTTP/2 (one connection carries every stream) or where a proxy blocks WebSockets. SSE holds a coroutine per open page and needs coroutine mode; without coroutines the push root uses the WebSocket regardless.
+
+Both reconnect on their own: SSE after a jittered 1–4 s, the WebSocket client with backoff (0.5 s to 60 s, jittered). A stream ends when the browser leaves (noticed at the next 15 s heartbeat) and after an hour. Navigating with hx-boost to a page without the components closes the connection.
+
+### Topics
+
+Topic names are 1–128 characters of letters, digits, `:`, `_`, `.` and `-` (`contacts`, `contact:42`, `org.7.billing`). They're coarse on purpose: a topic says *something here changed*, and the re-render decides what the visitor sees. Use a topic per record (`contact:42`) when a list of many items would otherwise refresh for every edit.
+
+- **Topics are fixed when the page renders.** A component whose topics depend on state that its actions change (`contacts:page:2` after paging) keeps the topics it was first rendered with until the page reloads. Prefer topics that don't change for an instance.
+- **Topics are visible.** They're in the page (the token is signed, not encrypted) and in the access log (the token travels in the connection URL). Don't put secrets in them; `user:42` is fine, an email address isn't.
+- An invalid topic throws in dev mode and is logged and dropped otherwise, so a bad topic built from data doesn't break the page.
+
+### Security
+
+- The token is HMAC-signed with a key derived from `ZEALPHP_APP_KEY` and bound to the session. A token from another session, or signed with a key no longer configured, is refused; the page then refreshes its components, which reload the page when their snapshots are stale too.
+- Tokens don't expire on their own: a push carries only ids, and every refresh re-checks the snapshot's age and `authorize()`.
+- Pushes carry ids only, and the refresh is an ordinary component request: `authorize()`, the session binding and the origin checks all apply. A refresh that's redirected (to a login page, say) is not swapped in.
+- `Component::invalidate()` is server-side only; clients can't trigger one.
+- **Capacity.** `maxConnections` is per worker, and a page's token can be reused for many connections. On a public site, cap connections per client in front of ZealPHP (your proxy's per-IP connection limit on `/_zeal/c/ws` and `/_zeal/c/stream`).
+
 ## Components — Running in coroutine-legacy
 
 `App::components()` loads and reflects your component classes — and the framework's own component classes — in the master, before workers fork, so none of them is compiled cold under concurrency. Instances live for one request and are never stored in statics, so they need no isolation support.
 
 ## Components — Limits in this version
 
+- **Push needs the root on the page.** Pages that don't include `App::componentPushRoot()` render components normally but never receive updates.
 - **No reactive nesting.** A reactive component inside another reactive component's render throws: the parent's requests would carry the child's snapshot too. Stateless components nest freely.
 - **Dev hot-reload** (`--dev`) re-registers components from `route/*.php`, but the endpoint route and the key check are set up at boot: if a reload adds the *first* component, restart. Removed components stay registered until restart.
 - **Behind a proxy that rewrites `Host`**, the `Origin` fallback and the no-JS back-link compare against the rewritten host. Modern browsers send `Sec-Fetch-Site`, which isn't affected; the back-link falls back to `/`.
 
 ## Components — What's next
 
-Planned in [the design doc](architecture/2026-11-06-server-driven-components.md): a bundled vanilla-JS client, pushing "refresh" signals over WebSocket when server data changes (`Component::invalidate('topic')`), nested components, and benchmarks against `App::renderHtmx()` fragments.
+Planned in [the design doc](architecture/2026-11-06-server-driven-components.md): a bundled vanilla-JS client for actions and input binding, nested components, and benchmarks against `render(…, htmx: true)` fragments.
 
 ## Streaming
 
@@ -5045,6 +5124,7 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 |----------|---------|-------|-------------|
 | `ZEALPHP_APP_KEY` | unset → no key: boot refuses when components are registered, except in dev mode (`--dev` / `ZEALPHP_DEV=1`), which uses a random per-boot key | user | The application secret, read by `ZealPHP\AppKey`. `base64:` + base64 of ≥32 random bytes (`php app.php key:generate`), or a raw string of ≥32 bytes. Signs [reactive component](components.md) snapshots; each use derives its own key with HKDF. |
 | `ZEALPHP_APP_KEY_PREVIOUS` | unset → none | user | Comma-separated old app keys, same format. Accepted for **verifying** only, so rotating `ZEALPHP_APP_KEY` doesn't break pages already open. |
+| `ZEALPHP_COMPONENT_PUSH` | unset → `ws` | user | Transport for [component push](components.md#live-updates-push): `ws` or `sse`. Any other value means `ws`. `App::componentPush(transport: …)` takes precedence. |
 | `ZEALPHP_CORS_ORIGINS` | unset → `["*"]` (wildcard) with a one-time `elog()` warning | user | Comma-separated CORS origin allowlist read by `CorsMiddleware::resolveOriginsList()` when no explicit origins are passed to the constructor; empty/unset → wildcard `*`. |
 | `ZEALPHP_SESSION_DIR` | `<log dir>/sessions` (0700) | user | Directory for ZealPHP's file session store when the app doesn't call `App::sessionSavePath()`. Keep it ZealPHP-only: PHP's `session.save_path` (e.g. `/var/lib/php/sessions`) is shared with every mod_php/FPM app on the host. |
 | `ZEALPHP_TRUSTED_PROXIES` | unset (trust no proxy) | user | Comma-separated proxy IPs/CIDRs for `App::trustedProxies()` when the app doesn't set them (e.g. `127.0.0.1` behind a same-host Apache/nginx). Only these peers' `X-Forwarded-For` / `X-Forwarded-Proto` are honoured, which drives `clientIp()` (rate limits, IP access) and the session cookie's Secure flag. |
@@ -5453,7 +5533,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.4.17 .
+docker build -t zealphp:0.4.18 .
 ```
 
 The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
@@ -5465,7 +5545,7 @@ versions with the build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg ZEALPHP_EXT_VERSION=v0.3.33 \
-    -t zealphp:0.4.17 .
+    -t zealphp:0.4.18 .
 ```
 
 ### Run (single container)
@@ -5477,7 +5557,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.4.17
+    zealphp:0.4.18
 ```
 
 ### Production compose
@@ -5488,7 +5568,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.4.17
+    image: registry.example.com/zealphp-app:0.4.18
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -6990,16 +7070,19 @@ With `hx-boost="true"` on `<body>`, **every** `<a>` and `<form>` on the page is 
 
 ## HTMX — Reading the request
 
-`ZealPHP\HTTP\Request` (the `$request` injected into every handler) exposes eight accessors, one per htmx request header. Each reads the lower-cased header from the OpenSwoole request and returns `null` (or `false`, for the booleans) when absent.
+`ZealPHP\HTTP\Request` (the `$request` injected into every handler) exposes one accessor per htmx request header, for htmx 2 and htmx 4. Each returns `null` (or `false`, for the booleans) when the header is absent.
 
 | Accessor | Reads header | Returns | Meaning |
 |----------|--------------|---------|---------|
 | `isHtmx()` | `HX-Request` | `bool` | The request came from htmx (`HX-Request: true`). |
 | `isBoosted()` | `HX-Boosted` | `bool` | The request was issued by `hx-boost` (a boosted link/form). |
 | `isHistoryRestoreRequest()` | `HX-History-Restore-Request` | `bool` | htmx is restoring a history-cache miss (re-fetching a page it couldn't restore from cache). |
-| `htmxTarget()` | `HX-Target` | `?string` | The `id` of the target element (the `hx-target`). |
-| `htmxTrigger()` | `HX-Trigger` | `?string` | The `id` of the triggering element. |
-| `htmxTriggerName()` | `HX-Trigger-Name` | `?string` | The `name` attribute of the triggering element. |
+| `htmxTarget()` | `HX-Target` | `?string` | The `id` of the target element. htmx 4 sends `div#main`; this returns `main` for both versions, and `null` when the target has no id. |
+| `htmxTrigger()` | `HX-Trigger` (2) / `HX-Source` (4) | `?string` | The `id` of the triggering element. |
+| `htmxTriggerName()` | `HX-Trigger-Name` | `?string` | The `name` attribute of the triggering element (htmx 2 only). |
+| `htmxSource()` | `HX-Source` | `?string` | htmx 4: the triggering element as sent, `tag#id` (`button#save`). |
+| `htmxRequestType()` | `HX-Request-Type` | `?string` | htmx 4: `'full'` (the response replaces the body, or uses `hx-select`) or `'partial'`. |
+| `htmxVersion()` | `HX-Request-Type` | `?int` | `4` for htmx 4 (only it sends `HX-Request-Type`), `2` for any other htmx request, `null` when not htmx. |
 | `htmxCurrentUrl()` | `HX-Current-URL` | `?string` | The browser's current URL at request time. |
 | `htmxPrompt()` | `HX-Prompt` | `?string` | The user's response to an `hx-prompt` dialog. |
 
@@ -7059,8 +7142,8 @@ $response->htmx()
 | Method | Header | Effect |
 |--------|--------|--------|
 | `trigger(string $events)` | `HX-Trigger` | Trigger client events after the swap. Single name, comma-list, or a JSON object for events with detail. |
-| `triggerAfterSwap(string $events)` | `HX-Trigger-After-Swap` | Same, fired after the swap step. |
-| `triggerAfterSettle(string $events)` | `HX-Trigger-After-Settle` | Same, fired after the settle step. |
+| `triggerAfterSwap(string $events)` | `HX-Trigger-After-Swap` | Same, fired after the swap step. **htmx 2 only** — htmx 4 ignores it; use `trigger()`. |
+| `triggerAfterSettle(string $events)` | `HX-Trigger-After-Settle` | Same, fired after the settle step. **htmx 2 only** — htmx 4 ignores it; use `trigger()`. |
 | `triggerJSON(string $event, array $detail)` | `HX-Trigger` | Trigger a single named event with a structured detail payload — without hand-encoding the JSON. |
 
 `triggerJSON('showMessage', ['level' => 'info', 'message' => 'Saved!'])` is shorthand for `trigger('{"showMessage":{"level":"info","message":"Saved!"}}')`. The browser receives `event.detail` = the decoded array.
@@ -7192,6 +7275,31 @@ $app->route('/cart/add', function ($request) {
 
 The `id` and swap value are HTML-escaped; the tag is sanitised to alphanumerics (falling back to `div`).
 
+### Updating several elements — `HtmxResponse::partial()`
+
+`partial()` targets any CSS selector with any swap style, and writes the right markup for the htmx that sent the request: htmx 4's `<hx-partial>`, or htmx 2's `hx-swap-oob` wrapper.
+
+```php
+public static function partial(
+    string $target,                 // CSS selector, e.g. '#cart'
+    string|\Stringable $html,       // markup to swap in (not escaped)
+    string $swap = 'innerHTML',     // innerHTML, outerHTML, beforeend, …
+    ?int $htmx = null               // default: the version that sent the request
+): string
+```
+
+```php
+// One action, three regions updated.
+return App::component(Cart::class, …)
+     . HtmxResponse::partial('#cart-count', (string) $cart->count)
+     . HtmxResponse::partial('#toasts', App::component('toast', ['text' => 'Added']), 'beforeend');
+```
+
+| htmx | Emits |
+|---|---|
+| 4 | `<hx-partial hx-target="#cart-count" hx-swap="innerHTML">3</hx-partial>` |
+| 2 | `<div hx-swap-oob="innerHTML:#cart-count">3</div>` — htmx 2 swaps the wrapper's children into the target, for every swap style |
+
 ## HTMX — The boosting model
 
 `hx-boost="true"` (set on `<body>` in the demo) turns ordinary `<a>` and `<form>` elements into AJAX navigations:
@@ -7243,9 +7351,12 @@ if (!Auth::check()) {
 | `isHtmx()` | reads `HX-Request` |
 | `isBoosted()` | reads `HX-Boosted` |
 | `isHistoryRestoreRequest()` | reads `HX-History-Restore-Request` |
-| `htmxTarget()` | reads `HX-Target` |
-| `htmxTrigger()` | reads `HX-Trigger` |
-| `htmxTriggerName()` | reads `HX-Trigger-Name` |
+| `htmxTarget()` | reads `HX-Target` (id; normalises htmx 4's `tag#id`) |
+| `htmxTrigger()` | reads `HX-Trigger`, or the id in htmx 4's `HX-Source` |
+| `htmxTriggerName()` | reads `HX-Trigger-Name` (htmx 2) |
+| `htmxSource()` | reads `HX-Source` (htmx 4) |
+| `htmxRequestType()` | reads `HX-Request-Type` (htmx 4) |
+| `htmxVersion()` | 4 if `HX-Request-Type` is present, 2 for other htmx requests |
 | `htmxCurrentUrl()` | reads `HX-Current-URL` |
 | `htmxPrompt()` | reads `HX-Prompt` |
 | **Response — `$response->htmx()->`** | |
@@ -7258,9 +7369,10 @@ if (!Auth::check()) {
 | `reselect($selector)` | sets `HX-Reselect` |
 | `refresh($bool)` | sets `HX-Refresh` |
 | `trigger($events)` | sets `HX-Trigger` |
-| `triggerAfterSwap($events)` | sets `HX-Trigger-After-Swap` |
+| `triggerAfterSwap($events)` | sets `HX-Trigger-After-Swap` (htmx 2 only) |
 | `triggerAfterSettle($events)` | sets `HX-Trigger-After-Settle` |
 | `triggerJSON($event, $detail)` | sets `HX-Trigger` (JSON-encoded detail) |
+| `HtmxResponse::partial($target, $html, $swap)` | `<hx-partial>` (htmx 4) or `hx-swap-oob` wrapper (htmx 2) |
 | `oob($id, $html, $swap, $tag)` | builds an `hx-swap-oob` element (static) |
 | `response()` | returns the parent `Response` (chain back) |
 | **Rendering — `App::`** | |
