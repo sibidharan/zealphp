@@ -55,12 +55,25 @@ RUN if [ -n "$ZEALPHP_PATCH_OPCACHE" ]; then \
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+# The server runs as an unprivileged user. It listens on 8080 (no low-port
+# capability needed). Dependencies stay root-owned, so the app can't rewrite
+# its own vendor/ code; the app tree itself is owned by `zealphp` because the
+# app writes into it at boot (e.g. public/css/pages.css). Logs, PID files and
+# sessions go to the per-user runtime dir (/tmp/zealphp-10001) unless
+# ZEALPHP_LOG_DIR / ZEALPHP_SESSION_DIR point elsewhere.
+RUN groupadd --system --gid 10001 zealphp \
+    && useradd --system --uid 10001 --gid zealphp --home-dir /app --no-create-home \
+        --shell /usr/sbin/nologin zealphp
+
 WORKDIR /app
 
 COPY composer.json composer.lock ./
 RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader
 
-COPY . .
+COPY --chown=zealphp:zealphp . .
+RUN chown zealphp:zealphp /app
+
+USER zealphp
 
 EXPOSE 8080
 
