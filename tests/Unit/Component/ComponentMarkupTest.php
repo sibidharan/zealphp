@@ -79,7 +79,7 @@ class ComponentMarkupTest extends TestCase
         };
         Registry::register($c::class, 'returns-status');
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('::render() returned the status code 404');
+        $this->expectExceptionMessage($c::class . '::render() returned the status code 404');
         App::component('returns-status');
     }
 }
