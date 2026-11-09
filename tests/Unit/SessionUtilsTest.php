@@ -284,6 +284,23 @@ class SessionUtilsTest extends TestCase
         $this->assertSame('', $params['domain']);
     }
 
+    public function testFirstSetCookieParamsKeepsHttpOnly(): void
+    {
+        // D-5: before any call the session starts with HttpOnly on; the first
+        // session_set_cookie_params() used to merge over httponly=false.
+        $g = \ZealPHP\RequestContext::instance();
+        foreach ([[3600], [['lifetime' => 3600]]] as $args) {
+            unset($g->session_params['cookie_params']);
+            $this->assertTrue(zeal_session_get_cookie_params()['httponly'], 'start default');
+            zeal_session_set_cookie_params(...$args);
+            $params = zeal_session_get_cookie_params();
+            $this->assertSame(3600, $params['lifetime']);
+            $this->assertTrue($params['httponly'], 'kept after ' . json_encode($args));
+        }
+        zeal_session_set_cookie_params(['httponly' => false]);
+        $this->assertFalse(zeal_session_get_cookie_params()['httponly'], 'an explicit false still applies');
+    }
+
     // ── abort ────────────────────────────────────────────────────
     //
     // zeal_session_abort()'s restore-from-disk path is guarded by
