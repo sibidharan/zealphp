@@ -1,6 +1,6 @@
 # Components phase 4: composition (design for review)
 
-Status: **accepted** (2026-11-09). §1 isolation, §2 child identity, `#[Reactive]` and §3 events are implemented; §4 slots are next. See [Decisions](#decisions) for what was chosen and where the implementation differs from the proposal. Builds on [the server-driven components design](2026-11-06-server-driven-components.md), whose phase 4 row asks for child components, updates of other components from one action, and component events.
+Status: **accepted** (2026-11-09). All four parts are implemented: §1 isolation, §2 child identity with `#[Reactive]`, §3 events and §4 slots. See [Decisions](#decisions) for what was chosen and where the implementation differs from the proposal. Builds on [the server-driven components design](2026-11-06-server-driven-components.md), whose phase 4 row asks for child components, updates of other components from one action, and component events.
 
 ## Where we are
 
@@ -119,6 +119,8 @@ Answered 2026-11-09:
 - No-JS parent actions flash the carried snapshots too, so the page after the redirect shows every child's state.
 
 **Implementation note: events (§3).** Listeners are hidden `<button type="button" form="{id}-zc">` elements rather than spans: htmx 4 serialises an element's own form, but for an `hx-include`d form it collects only descendants, which a detached form has none of. A component doesn't hear its own events (an `hx-trigger` filter, and the same rule in `zeal.js`), which also rules out self-loops. Detail-less events go out as `{}` in `HX-Trigger`, because htmx 4's `trigger()` throws on a `null` detail.
+
+**Implementation note: slots (§4), server-side too.** Instead of a client-preserved slot region, a reactive child's `slot` prop is kept in its signed snapshot (`sl`). The child's own updates re-render it from there, and a parent re-render replaces it. So, like child identity, it works the same on every client. The cost is snapshot size, which counts towards the 64 KB cap. The rule that comes with it: a slot can't contain reactive components (their state would be frozen in the stored markup), and that's refused at render. `slot` is a reserved property name.
 
 ## Done when
 

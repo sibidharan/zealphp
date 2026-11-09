@@ -38,6 +38,7 @@ final class Snapshot
      * @param list<string>          $fields the #[Model] fields the last render emitted controls for
      * @param array<string, string> $errors
      * @param list<string>          $ancestors form ids of the components this one is nested in, outermost first
+     * @param string|null           $slot      markup the parent passed in as the `slot` prop
      */
     public function __construct(
         public readonly string $name,
@@ -49,6 +50,7 @@ final class Snapshot
         public readonly array $errors = [],
         public readonly int $issuedAt = 0,
         public readonly array $ancestors = [],
+        public readonly ?string $slot = null,
     ) {
     }
 
@@ -82,6 +84,9 @@ final class Snapshot
         ];
         if ($this->ancestors !== []) {
             $data['a'] = $this->ancestors;
+        }
+        if ($this->slot !== null) {
+            $data['sl'] = $this->slot;
         }
         $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $mac = hash_hmac('sha256', $json, AppKey::derive(self::PURPOSE), true);
@@ -164,7 +169,8 @@ final class Snapshot
             }
         }
         $ancestors = is_array($data['a'] ?? null) ? array_values(array_filter($data['a'], 'is_string')) : [];
-        return new self($data['c'], $data['id'], $props, $data['v'], $data['s'], $fields, $errors, $data['t'], $ancestors);
+        $slot = is_string($data['sl'] ?? null) ? $data['sl'] : null;
+        return new self($data['c'], $data['id'], $props, $data['v'], $data['s'], $fields, $errors, $data['t'], $ancestors, $slot);
     }
 
     /**
