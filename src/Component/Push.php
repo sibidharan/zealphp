@@ -189,8 +189,10 @@ final class Push
         if ($response->hasHeader('Content-Encoding') || $response->hasHeader('Content-Range')
             || in_array($response->getStatusCode(), [204, 206, 304], true)) {
             if (self::pending()) {
+                $why = $response->hasHeader('Content-Encoding') ? 'its body is compressed (Content-Encoding)'
+                    : ($response->hasHeader('Content-Range') ? 'its body is a range (Content-Range)' : 'it has no body to edit');
                 \ZealPHP\elog('[components] push: script not added to a ' . $response->getStatusCode()
-                    . ' response with Content-Encoding/Content-Range set inside the router; register compression globally', 'debug');
+                    . " response: {$why}. Compression belongs in the global middleware stack.", 'debug');
             }
             return $response;
         }
@@ -209,6 +211,20 @@ final class Push
         return $response->hasHeader('Content-Length')
             ? $response->withHeader('Content-Length', (string) strlen($new))
             : $response;
+    }
+
+    /**
+     * HEAD: the body a GET would send, so Content-Length matches it.
+     *
+     * @internal
+     */
+    public static function headBody(string $body): string
+    {
+        $g = RequestContext::instance();
+        if (!self::pending() && ($g->memo['_zc_push_root'] ?? false) !== true) {
+            return $body;
+        }
+        return self::isHtml('') ? self::place($body) : $body;
     }
 
     /**

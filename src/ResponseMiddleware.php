@@ -172,7 +172,7 @@ class ResponseMiddleware implements MiddlewareInterface
             }
 
             if ($method === 'HEAD') {
-                response_add_header('Content-Length', (string)strlen($body));
+                response_add_header('Content-Length', (string)strlen(\ZealPHP\Component\Push::headBody($body)));
                 return (new Response('', $status));
             }
             return (new Response($body, $status));
@@ -422,7 +422,7 @@ class ResponseMiddleware implements MiddlewareInterface
                 ob_end_clean();
                 if ($method === 'HEAD') {
                     // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                    $g->zealphp_response->header('Content-Length', (string)strlen($object));
+                    $g->zealphp_response->header('Content-Length', (string)strlen(\ZealPHP\Component\Push::headBody($object)));
                     return (new Response('', $status));
                 }
                 return (new Response($object, $status));
@@ -432,7 +432,7 @@ class ResponseMiddleware implements MiddlewareInterface
             $buffer = (string)ob_get_clean();
             if ($method === 'HEAD') {
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                $g->zealphp_response->header('Content-Length', (string)strlen($buffer));
+                $g->zealphp_response->header('Content-Length', (string)strlen(\ZealPHP\Component\Push::headBody($buffer)));
                 return (new Response('', $status));
             }
             return (new Response($buffer, $status));

@@ -41,3 +41,14 @@ $app->route('/_test/push/raw-stream', fn() => (function () {
     yield (string) App::component(SharedLikes::class, [], key: 'raw');
     yield '</body></html>';
 })(), methods: ['GET'], raw: true);
+
+// A raw route whose root runs BEFORE the stream starts: it prints the
+// placeholder, which the </body> splice fills in.
+$app->route('/_test/push/raw-head', function () {
+    $head = '<!doctype html><html><head>' . App::componentPushRoot() . '</head><body>';
+    return (function () use ($head) {
+        yield $head;
+        yield (string) App::component(SharedLikes::class, [], key: 'rawhead');
+        yield '</body></html>';
+    })();
+}, methods: ['GET'], raw: true);
