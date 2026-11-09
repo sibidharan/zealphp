@@ -111,7 +111,7 @@ Proving tests: `Http1FramingConformanceTest`, `StaticServingConformanceTest`, `R
 | **WebSocket** — opcodes, CLOSE 1001 (RFC 6455) | `App::ws()` | Behavioral | `tests/Integration/WebSocketTest.php` |
 
 ## Apache / nginx directive parity
-See [`template/pages/http.php#parity`](template/pages/http.php) for the full matrix
+See [`template/http/http.php#parity`](template/http/http.php) for the full matrix
 (headers, expires, cache-control, mime, auth, ip-access, range, rate/conn limits,
 redirects, setenvif, scoped middleware, merge-slashes, body-size, referer, return,
 ServerTokens, FileETag, …) — each backed by a middleware unit test.
@@ -200,7 +200,7 @@ we do **not** provide, with the reason and the recommended substitute:
 
 The directives ZealPHP **does** match are catalogued in the
 [Apache / nginx directive parity](#apache--nginx-directive-parity) section above and the
-`template/pages/http.php#parity` matrix; this register is the honest complement — the
+`template/http/http.php#parity` matrix; this register is the honest complement — the
 deliberate non-goals of an application framework that expects a real proxy in front.
 
 ---

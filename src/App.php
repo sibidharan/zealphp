@@ -1342,7 +1342,7 @@ class App
      *     are IANA-assigned. `104` (temporary registration) is intentionally omitted.
      *
      * Universal return contract: handlers may return any 100-599 status — see
-     * `template/pages/responses.php#status-range` (canonical).
+     * `template/responses/responses.php#status-range` (canonical).
      */
     private const REASON_PHRASES = [
         // 1xx Informational
@@ -1448,7 +1448,7 @@ class App
         \ZealPHP\elog(
             "Invalid HTTP status code returned: {$status}. Coercing to 500. "
             . "(Universal return contract allows 100-599. "
-            . "See template/pages/responses.php#status-range.)"
+            . "See template/responses/responses.php#status-range.)"
         );
         return 500;
     }
@@ -7449,7 +7449,7 @@ class App
     // -----------------------------------------------------------------------
     // File execution family — shared core + four public surfaces.
     //
-    // The universal return contract: see template/pages/responses.php
+    // The universal return contract: see template/responses/responses.php
     // (canonical) and .claude/CLAUDE.md "Return value conventions" (mirror).
     // Keep all three in lock-step on any change.
     //
@@ -8590,7 +8590,7 @@ class App
      *
      * Same return contract as every other entry point: int=status,
      * array=JSON, string=HTML, Generator=stream, Closure=invoked-and-recursed,
-     * null=use buffered output. See `template/pages/responses.php#return-contract`.
+     * null=use buffered output. See `template/responses/responses.php#return-contract`.
      *
      * Example — htmx-style row swap:
      * ```php

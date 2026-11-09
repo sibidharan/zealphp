@@ -3,7 +3,7 @@
 /**
  * /docs routes — narrative guides + auto-generated API reference.
  *
- *   /docs/                 — landing page (template/pages/docs/index.php)
+ *   /docs/                 — landing page (template/docs/index/index.php)
  *   /docs/guide/{topic}    — renders docs/{topic}.md via league/commonmark
  *   /docs/api/             — phpDocumentor static HTML (built on first boot)
  *   /docs/api/{path...}    — static files under public/docs/api/

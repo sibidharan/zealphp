@@ -2,7 +2,7 @@
 
 A retrospective record of every substantive technical critique ZealPHP has received in public review, our assessment, and what we shipped in response. Maintained as an internal learning document — when the same critique surfaces twice, we want to know what we said the first time and whether anything changed.
 
-> **Looking for the public, user-facing version?** The same trade-offs are documented at [/design-tradeoffs](https://php.zeal.ninja/design-tradeoffs) (also under `template/pages/design-tradeoffs.php` in this repo). That page is the marketing-friendly shape: "what we chose, what it costs you, what mitigation exists." CRITIC.md is the version-by-version trace of how we got there.
+> **Looking for the public, user-facing version?** The same trade-offs are documented at [/design-tradeoffs](https://php.zeal.ninja/design-tradeoffs) (also under `template/design-tradeoffs/design-tradeoffs.php` in this repo). That page is the marketing-friendly shape: "what we chose, what it costs you, what mitigation exists." CRITIC.md is the version-by-version trace of how we got there.
 
 ---
 
@@ -289,7 +289,7 @@ The "deliberate trade-off" framing was partly true — the ~57 design-tax sites 
 **Triggered by:** memory-management commenter
 
 - Added `max_request=100000` default to `App::run()` settings ([src/App.php:1503-1509](src/App.php#L1503-L1509))
-- Added `ZEALPHP_MAX_REQUEST` env var override + documented in `docs/deployment.md` and `template/pages/deployment.php`
+- Added `ZEALPHP_MAX_REQUEST` env var override + documented in `docs/deployment.md` and `template/deployment/deployment.php`
 - Scaffold's `app.php` now ships with `App::superglobals(false)` set explicitly (coroutine mode default for new projects)
 
 ### v0.2.5 — Security: CRLF/NUL injection guards
