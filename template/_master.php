@@ -2,7 +2,7 @@
 use ZealPHP\App;
 $title       ??= 'ZealPHP';
 $description ??= 'The async PHP framework built on OpenSwoole.';
-$page        ??= 'home';
+$page        ??= 'index';
 $active      ??= $page;
 ?>
 <!doctype html>
@@ -11,9 +11,10 @@ $active      ??= $page;
 <body hx-boost="true" hx-ext="head-support">
 <div id="htmx-progress" class="htmx-progress" aria-hidden="true" hx-preserve="true"></div>
 <?php App::render('/_nav', ['active' => $active]); ?>
-<?php App::render('/components/_banner'); ?>
+<?= App::component('/components/_banner') ?>
 <main class="page-body">
-<?php App::render("/pages/$page", get_defined_vars()); ?>
+<?php // The page's own template: template/<page>/<last segment>.php (page = public file path).
+App::render('/' . $page . '/' . basename($page), get_defined_vars()); ?>
 </main>
 <?php App::render('/_footer'); ?>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

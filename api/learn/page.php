@@ -27,7 +27,7 @@ ${basename(__FILE__, '.php')} = function () {
         return;
     }
 
-    $tplPath = $slug === 'learn' ? '/pages/learn' : '/pages/' . $slug;
+    $tplPath = '/' . $slug . '/' . basename($slug);   // template/<page>/<last segment>.php
     header('Content-Type: text/html; charset=utf-8');
     $html = (string) App::component($tplPath, ['active' => $slug, 'page' => $slug]);
 

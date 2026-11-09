@@ -4,7 +4,7 @@
  * /sitemap.xml — auto-generated XML sitemap for the ZealPHP docs site.
  *
  * Walks the disk-mapped routes (public/*.php for top-level pages,
- * template/pages/{learn,docs,case-studies}/*.php for nested sections)
+ * public/{learn,case-studies}/*.php for nested sections)
  * and emits a standard sitemaps.org 0.9 XML document. No static file —
  * stays in sync as pages are added or removed without a build step.
  *
@@ -64,7 +64,7 @@ $app->route('/sitemap.xml', function () {
     // 3. /learn + /case-studies — 1-to-1 file-to-URL mapping per
     //    route/{section}.php's pattern route. Skip partials + index.
     foreach (['learn', 'case-studies'] as $section) {
-        $dir = $cwd . '/template/pages/' . $section;
+        $dir = $cwd . '/public/' . $section;   // the public files are the pages
         if (!is_dir($dir)) {
             continue;
         }
@@ -83,7 +83,7 @@ $app->route('/sitemap.xml', function () {
     // 4. /docs/guide/{topic} — `route/docs.php` registers a pattern route
     //    that renders `docs/{topic}.md` via league/commonmark. The
     //    CANONICAL source of valid topics is `docs/*.md` (NOT
-    //    template/pages/docs/*.php — those are framework partials, not
+    //    template/docs/**/*.php — those are page templates and partials, not
     //    routable URLs). Skip UPPERCASE-named docs (CHANGES-SINCE-*,
     //    README, WSROUTER-PRODUCTION) — they're internal release notes.
     $docsDir = $cwd . '/docs';
@@ -101,7 +101,7 @@ $app->route('/sitemap.xml', function () {
     }
 
     // 5. /docs/ landing page.
-    $docsIndex = $cwd . '/template/pages/docs/index.php';
+    $docsIndex = $cwd . '/public/docs/index.php';
     if (is_file($docsIndex)) {
         $urls[] = [
             'loc'     => '/docs/',

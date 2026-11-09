@@ -13,7 +13,7 @@ $page = function () {
     $g = G::instance();
     $slug = trim((string) ($g->get['slug'] ?? ''));
 
-    // Whitelist must match template/pages/docs/{index,_sidebar}.php and
+    // Whitelist must match template/docs/index/index.php, template/docs/components/sidebar.php and
     // MarkdownRenderer::GUIDE_SLUGS — adding a new .md to docs/ requires
     // touching all of them (route/docs.php renders any docs/{slug}.md, but
     // this hx-swap endpoint, the sidebar/index lists, and the cross-link
@@ -31,7 +31,7 @@ $page = function () {
     // article, identical to what public/docs/index.php produces, but extract
     // only the <article>.
     if ($slug === '' || $slug === '__index__') {
-        $html = (string) App::component('/pages/docs/index', [
+        $html = (string) App::component('/docs/index/index', [
             'title'  => 'Documentation',
             'page'   => 'docs/index',
             'active' => 'docs',
@@ -66,7 +66,7 @@ $page = function () {
     $body  = \ZealPHP\Docs\MarkdownRenderer::render((string) file_get_contents($realMd));
     $title = ucwords(str_replace(['-', '_'], ' ', $slug));
 
-    $html = (string) App::component('/pages/docs/guide', [
+    $html = (string) App::component('/docs/guide/guide', [
         'title'   => $title . ' · ZealPHP Docs',
         'page'    => 'docs/guide',
         'active'  => 'docs',

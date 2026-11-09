@@ -1,6 +1,6 @@
 <?php
 /**
- * The docs search dropdown (template/pages/docs/_search.php swaps it into
+ * The docs search dropdown (template/docs/components/search.php swaps it into
  * #api-search-results). Returned by api/docs/search.php.
  *
  * @var array<string, list<array{url: string, name: string, parent: string, summary: string}>> $groups

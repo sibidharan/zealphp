@@ -112,7 +112,7 @@ The **demo app uses `superglobals(false)` (coroutine mode)**. This is the recomm
 
 **Superglobal contract (v0.2.27 + v0.2.30)** — `App::superglobals(true)` now lives up to its name. Both `$_GET` / `$_SESSION` AND `$g->get` / `$g->session` are populated per request, and **every request-input superglobal is a live alias** — `$_GET ↔ $g->get`, `$_POST ↔ $g->post`, `$_COOKIE`, `$_FILES`, `$_SERVER`, `$_REQUEST`, `$_SESSION` — writes through one are visible through the other immediately. This restores v0.1.x behaviour dropped during the Dec 2024 declared-property refactor (commits `327e180` + `900c18a`). The implementation lives in three places: `src/App.php` per-request handler (populates `$GLOBALS['_GET']` family, then `unset()`s the declared `$g->get`/`post`/`cookie`/`files`/`server`/`request` slots so they proxy by reference — v0.2.30, issue #17), `src/Session/SessionManager.php` (`unset($g->session)` after `session_start()` — v0.2.27), and `src/RequestContext.php` `__get`/`__set` (symmetric superglobal-key mapping `session ↔ _SESSION` etc.). Tests pin the contract: `tests/Integration/SuperglobalsParityTest.php` (`testGetAliasMutationCrosses`, `testSessionAliasMutationCrosses`). **v0.4.8 closes the introspection half (the real ext#42 residual):** `RequestContext::__isset()`/`__unset()` — without `__isset`, `isset($g->server)` was FALSE on an unset-and-proxied slot, so `$g->server['X'] ?? $fallback` always took the fallback (`??` consults `__isset` first) and app-side guards like `if (!isset($g->server)) $g->server = [];` wiped the live `$_SERVER` through `__set` (the labs-dashboard `logit()` wipe — request's own coroutine, NOT a child-coroutine leak). `__isset` mirrors `isset($_X)` per proxied name (so `isset($g->session)` stays false pre-`session_start()` — `zeal_session_status()` depends on it); `__unset` is a no-op for proxied names (framework uses `unset($g->X)` as slot-detach; re-detach must never escalate to `unset($GLOBALS['_X'])`) and `__set`-symmetric for custom keys. Pinned by `tests/Unit/RequestContextIssetTest.php`.
 
-**Canonical `$g` vs `$_*` parity rule** — `template/pages/coroutines.php#state-parity` is the single source of truth: **use `$g->get` / `$g->post` / `$g->cookie` / `$g->server` / `$g->session`. It works identically in both modes.** In `superglobals(true)` mode the framework also populates the matching `$_*` superglobals (v0.2.27), so code reading `$_GET` works too. In `superglobals(false)` mode the superglobals are NOT populated per request (process-wide arrays — writes leak across coroutines), so only the `$g->X` form is safe. Recipes and migration examples link to `/coroutines#state-parity` rather than restating this rule.
+**Canonical `$g` vs `$_*` parity rule** — `template/coroutines/coroutines.php#state-parity` is the single source of truth: **use `$g->get` / `$g->post` / `$g->cookie` / `$g->server` / `$g->session`. It works identically in both modes.** In `superglobals(true)` mode the framework also populates the matching `$_*` superglobals (v0.2.27), so code reading `$_GET` works too. In `superglobals(false)` mode the superglobals are NOT populated per request (process-wide arrays — writes leak across coroutines), so only the `$g->X` form is safe. Recipes and migration examples link to `/coroutines#state-parity` rather than restating this rule.
 
 ### Lifecycle: static config → `init()` → instance routing → `run()`
 
@@ -312,7 +312,7 @@ At startup (`src/App.php:__construct()`), `uopz_set_return()` permanently replac
 
 This lets legacy PHP code call `header()`, `session_start()`, or a backtick shell-out unchanged while the framework routes those calls to the correct per-request objects (and, for exec, to the coroutine scheduler instead of blocking the worker).
 
-**Session unserialize whitelist (v0.2.26, issue #15)** — all four `unserialize()` calls in `src/Session/utils.php` pass `['allowed_classes' => ['stdClass']]`. Scalars and arrays pass through normally. `stdClass` round-trips as a live instance (it has zero magic methods, no gadget surface — makes `json_decode($x)` results storable in `$_SESSION` without breakage). Every other class is refused — read back as `__PHP_Incomplete_Class`. Adding any class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first; the function-level docblock at `php_session_decode_to_array()` documents the constraint. Canonical user-facing doc: `template/pages/sessions.php#objects-in-session`.
+**Session unserialize whitelist (v0.2.26, issue #15)** — all four `unserialize()` calls in `src/Session/utils.php` pass `['allowed_classes' => ['stdClass']]`. Scalars and arrays pass through normally. `stdClass` round-trips as a live instance (it has zero magic methods, no gadget surface — makes `json_decode($x)` results storable in `$_SESSION` without breakage). Every other class is refused — read back as `__PHP_Incomplete_Class`. Adding any class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first; the function-level docblock at `php_session_decode_to_array()` documents the constraint. Canonical user-facing doc: `template/sessions/sessions.php#objects-in-session`.
 
 ### IOStreamWrapper
 
@@ -341,7 +341,7 @@ ZealAPI binds every handler closure with `$this` set to the `ZealAPI` instance.
 - `App::adminChecker(?callable)` — `fn(): bool`, consumed by `isAdmin()`, default `false`.
 - `App::usernameProvider(?callable)` — `fn(): ?string`, consumed by `getUsername()`, default `null`.
 
-Wire them ONCE during boot — either in the user's `app.php` for single-app deployments, or in a platform wrapper's bootstrap (labs/Symfony bundle/etc.) so every downstream app inherits the answers without per-app glue. The framework deliberately doesn't ship a default checker — ZealPHP doesn't know about your auth system. See `template/pages/api.php#auth-hooks` for the canonical doc, `template/pages/learn/auth.php#wire-zealapi` for a worked example, and `tests/Unit/ZealApiAuthHooksTest.php` for the 15 behaviour cases pinned (defaults, callback round-trip, coercion edges, independence of the three hooks, setter introspection).
+Wire them ONCE during boot — either in the user's `app.php` for single-app deployments, or in a platform wrapper's bootstrap (labs/Symfony bundle/etc.) so every downstream app inherits the answers without per-app glue. The framework deliberately doesn't ship a default checker — ZealPHP doesn't know about your auth system. See `template/api/api.php#auth-hooks` for the canonical doc, `template/learn/auth/auth.php#wire-zealapi` for a worked example, and `tests/Unit/ZealApiAuthHooksTest.php` for the 15 behaviour cases pinned (defaults, callback round-trip, coercion edges, independence of the three hooks, setter introspection).
 
 ### Parameter Injection
 
@@ -506,7 +506,7 @@ $app->route('/users', fn() => (function() {
 2. `return (function() use ($var) { yield ...; })();` — IIFE Generator (explicit)
 3. Regular echo template — captured output yielded as one chunk
 
-**Universal return contract** — one contract, every entry point. Route handler, fallback, error handler, `App::render() / component() / include()`, public file, API closure, streaming-template Closure — every one of them rides the same return-shape mapping. Canonical home: `template/pages/responses.php#return-contract`. This table mirrors that one **verbatim** — any change to return-value handling MUST update both in lock-step. The shared private core that implements this is `App::executeFile()`.
+**Universal return contract** — one contract, every entry point. Route handler, fallback, error handler, `App::render() / component() / include()`, public file, API closure, streaming-template Closure — every one of them rides the same return-shape mapping. Canonical home: `template/responses/responses.php#return-contract`. This table mirrors that one **verbatim** — any change to return-value handling MUST update both in lock-step. The shared private core that implements this is `App::executeFile()`.
 
 | The handler / file does | Core sees | ResponseMiddleware emits |
 |-------------------------|-----------|--------------------------|
@@ -529,7 +529,7 @@ $app->route('/users', fn() => (function() {
 | `return null;` | "No status override, no body override" — the response defaults to `200` with whatever body the framework computed. |
 | 600–999 | Coerced to **500** like every other out-of-range code (`App::coerceStatusCode()` accepts only `100 ≤ status < 600`). Verified against Apache mod_php 8.4: `http_response_code(600/750/999)` → `HTTP/1.1 500 Internal Server Error` there too — Apache's own status table has no entry for them (#320). The escape hatch Apache honours — a raw `header("HTTP/1.1 600 Custom")` status line passing through verbatim — is a separate tracked parity follow-up. |
 
-Non-standard codes have empty reason phrases on the wire (`HTTP/1.1 451\r\n` without "Unavailable For Legal Reasons"). Browsers don't display reason phrases, so this is cosmetic. Canonical home: `template/pages/responses.php#status-range`.
+Non-standard codes have empty reason phrases on the wire (`HTTP/1.1 451\r\n` without "Unavailable For Legal Reasons"). Browsers don't display reason phrases, so this is cosmetic. Canonical home: `template/responses/responses.php#status-range`.
 
 **Rescuing codes OpenSwoole's native list rejects.** OpenSwoole 22.1.5's single-arg `$response->status($code)` silently downgrades certain IANA codes (notably **425 Too Early** and **451 Unavailable For Legal Reasons**) to `HTTP/1.1 200 OK` — its C-side whitelist predates RFCs 8470 and 7725. The framework works around this internally via `App::emitStatus()` which uses the **two-arg** form `$response->status($code, $reason)`, threading the IANA reason phrase from `REASON_PHRASES`. Every IANA-registered status in 100–599 emits correctly. Wired in at the response-emission boundary in `App::run()`'s OnRequest handler (one place — not in user-facing API). Niche nginx-extension codes (444 Connection Closed Without Response, 499 Client Closed Request) aren't in `REASON_PHRASES` and may still downgrade; add them if your app needs them.
 
@@ -579,7 +579,7 @@ In both modes the file's return value flows back through the universal return co
 - **`exec_paths` = the ExecCGI scope** (Apache `Options +ExecCGI` default-off parity): a registered extension only executes under those URL prefixes. A stray/uploaded file outside the scope is NEITHER executed NOR served as source — returns **403**.
 - **`App::cgiScriptAlias('/cgi-bin', ['mode'=>'proc'])`** — Apache `ScriptAlias` parity: any file under the prefix is executable regardless of extension. URL routing is wired (a `patternRoute('#^/<prefix>/(?P<rest>.+?)/?$#', ...)` is registered for every alias next to the per-extension implicit-route loop). Dispatch picks the interpreter in this order: (1) if the file's extension has a per-extension backend (e.g. `.py` → python3), use that interpreter; (2) otherwise, exec the file directly via its `#!` shebang line (the file must be `+x`, mirroring Apache). So `App::cgiScriptAlias('/cgi-bin', ['mode'=>'proc'])` ALONE is enough to make `GET /cgi-bin/hello.sh` work — no per-extension registration required for shell / Ruby / Node / any shebanged script. `App::include()` still applies the ExecCGI gate via `resolveCgiBackend()`.
 - **Implicit URL parity:** implicit routes are registered per-registered-extension, so `GET /cgi-bin/report.py` runs `public/cgi-bin/report.py` via the `.py` backend with no explicit route.
-- **`App::resolveCgiBackend($absPath, $urlPath)`** returns `['backend'=>[...], 'mayExecute'=>bool]`. **Precedence:** the per-extension registry is the source of truth for *which interpreter* — when both a `registerCgiBackend()` entry and a `cgiScriptAlias()` cover the URL, the per-extension config wins (so a `.py` under `/cgi-bin/` runs via python3, never via the alias's generic config). Aliases broaden the ExecCGI scope: `mayExecute = true` when either a backend's `exec_paths` matches or any `cgiScriptAlias` prefix matches. When only the alias matches (no per-ext for that extension), the alias config is returned and the file runs via its `#!` shebang in `cgiSubprocess()`. Canonical docs: `docs/fastcgi-backends.md`, `template/pages/legacy-apps.php#cgi-backends`.
+- **`App::resolveCgiBackend($absPath, $urlPath)`** returns `['backend'=>[...], 'mayExecute'=>bool]`. **Precedence:** the per-extension registry is the source of truth for *which interpreter* — when both a `registerCgiBackend()` entry and a `cgiScriptAlias()` cover the URL, the per-extension config wins (so a `.py` under `/cgi-bin/` runs via python3, never via the alias's generic config). Aliases broaden the ExecCGI scope: `mayExecute = true` when either a backend's `exec_paths` matches or any `cgiScriptAlias` prefix matches. When only the alias matches (no per-ext for that extension), the alias config is returned and the file runs via its `#!` shebang in `cgiSubprocess()`. Canonical docs: `docs/fastcgi-backends.md`, `template/legacy-apps/legacy-apps.php#cgi-backends`.
 - **Per-route backend — the `backend:` route option + `App::cgiBackendAlias()`.** The route-level sibling of `registerCgiBackend()`: instead of scoping a CGI backend by **extension + `exec_paths`** or a `cgiScriptAlias()` **prefix**, attach one to a **route by name**. Accepted by all four registrars (`route()`/`nsRoute()`/`nsPathRoute()`/`patternRoute()`) and `$app->group()`, as the `backend:` named arg AND the `['backend' => …]` option key (named arg wins, mirroring the `middleware:` precedent). Value is a bare mode (`'pool'`/`'proc'`/`'fork'`/`'fcgi'`), a `cgiBackendAlias()` name, or an inline config array (`['mode'=>'proc','interpreter'=>'/usr/bin/python3']`). **Resolved once at registration** (`routeBackendSpec()` → `resolveBackendSpec()`/`normalizeBackendConfig()`) onto the route struct's `backend` key; `ResponseMiddleware::dispatchRoute()` sets it as the request-scoped `RequestContext::$cgi_backend_override`, which `App::include()` reads (via `applyRouteBackend()`, which also forces `mayExecute=true` — a route naming a backend is its own ExecCGI authorisation), restoring the prior value in a `finally` so nested error/fallback dispatches don't inherit it. Surfaced in `App::describeRoutes()` (`backend` key); persists across `App::reloadRoutes()` (in the route baseline). `App::cgiBackendAlias($name, $config)` is the `middlewareAlias()` of CGI dispatch — register **before** the routes that reference it (app.php-before-route/*.php). **CGI-isolation family ONLY:** `backend:` rejects the process-wide lifecycle modes (`coroutine`/`coroutine-legacy`/`legacy-cgi`/`mixed`) at registration with a message pointing at the separate-process model — `enable_coroutine`/`HOOK_ALL` are frozen at `$server->start()`, so the **scheduler** axis can't vary per route (only the **subprocess-isolation** axis can). Pinned by `tests/Unit/PerRouteBackendTest.php` (31 cases). Canonical doc: `docs/routing.md#per-route-backend--backend`.
 
 **Coroutine-safe exec.** `App::exec(string $cmd, ?float $timeout=null): array{output,code,signal}` — `output` is **stdout only** (OpenSwoole 26.2's `System::exec($cmd, bool $get_error_stream)`: the 2nd arg is NOT a timeout — passing `-1` merged stderr into every command's output, labs#501). In a coroutine the command's stderr is discarded via an `exec 2>/dev/null` shell prefix (keep `get_error_stream` truthy; `false`, or routing stderr to the worker's own stderr, killed PHPUnit with SIGTERM/143 on OpenSwoole 25.2 in CI) — `2>&1` in the command still captures it; `$timeout` is enforced with coreutils `timeout` (exit 124). Yields via `Coroutine\System::exec()` inside a coroutine, falls back to blocking `App::rawExec()` (built on `proc_open`, recursion-safe) outside one. `App::rawExec(string $cmd): ?string` is the explicit blocking escape hatch. `App::hookExec(?bool)` / `App::$hook_exec` (default-on in coroutine mode) toggles the uopz override of the backtick / `shell_exec` / `exec` / `system` / `passthru` family — see the uopz Function Overrides section above.
@@ -816,10 +816,10 @@ The site uses **htmx** globally. `_master.php` sets `hx-boost="true"` on `<body>
 - Prefer `hx-get`/`hx-post` + `hx-target` + `hx-swap` over custom `fetch()` for standard interactions
 - For server-push (streaming, real-time), use WebSocket (`App::ws()`) or SSE (`$response->sse()`)
 
-**Server-side htmx API surface.** ZealPHP exposes the full htmx HX-* request/response header set plus a fragment selector — canonical user docs: `docs/htmx.md` + the `/htmx` website page (`template/pages/htmx.php`).
+**Server-side htmx API surface.** ZealPHP exposes the full htmx HX-* request/response header set plus a fragment selector — canonical user docs: `docs/htmx.md` + the `/htmx` website page (`template/htmx/htmx.php`).
 - **Request — `ZealPHP\HTTP\Request` (the injected `$request`)** — one accessor per HX-* request header, for htmx 2 AND 4. htmx 4 sends element identifiers as `tag#id` (`div#main`) and replaces `HX-Trigger`/`HX-Trigger-Name` with `HX-Source`; `htmxTarget()`/`htmxTrigger()` normalise to the bare id for both versions (a bare tag from htmx 4 → null). `htmxSource()`, `htmxRequestType()` (`full`|`partial`) and `htmxVersion()` (4 iff `HX-Request-Type` present, 2 for other htmx requests, null otherwise) are htmx-4 additions; `HtmxBinder` uses `htmxVersion()` to answer each component request in its sender's dialect. `HtmxResponse::partial($target, $html, $swap)` = `<hx-partial>` (4) / `<div hx-swap-oob="swap:sel">` (2, swaps the wrapper's CHILDREN for every style — browser-verified). Original accessors: `isHtmx()` (`HX-Request`), `isBoosted()` (`HX-Boosted`), `isHistoryRestoreRequest()` (`HX-History-Restore-Request`), `htmxTarget()` (`HX-Target`), `htmxTrigger()` (`HX-Trigger`), `htmxTriggerName()` (`HX-Trigger-Name`), `htmxCurrentUrl()` (`HX-Current-URL`), `htmxPrompt()` (`HX-Prompt`). Booleans return `false` when absent; the rest return `null`.
 - **Response — `$response->htmx()` → `ZealPHP\HTTP\HtmxResponse`** — fluent builder queuing HX-* **response** headers (each value CRLF/NUL-guarded by `Response::header()`): `pushUrl`/`replaceUrl`/`redirect`/`location` (history/nav), `reswap`/`retarget`/`reselect` (swap control), `refresh` (page), `trigger`/`triggerAfterSwap`/`triggerAfterSettle`/`triggerJSON` (events), plus `oob()` (static — builds an `hx-swap-oob` element) and `response()` (returns the parent `Response` so the chain flows back: `$res->htmx()->retarget('#x')->response()->status(422)`). **`triggerJSON($event, $detail)`** JSON-encodes `[$event => $detail]` then delegates to `trigger()`.
-- **`App::render($template, $args, htmx: true, fragment: ?, fullPage: ?)`** (formerly `App::renderHtmx()`, now a deprecated alias) — htmx-aware selection inside `App::render()`: an htmx request gets a fragment (via the `App::fragment()` mechanism), a normal request gets the full page (`$fullPageTemplate ?? $template`). Fragment = `$fragmentName`, else derived from `HX-Target` (leading `#` stripped) → `HX-Trigger-Name`, else bare partial (no `fragment` key). Falls back to the full page when there's no current request. A thin selector — does NOT touch `executeFile()`; the universal return contract + streaming are preserved. The website-page + docs-guide slug is `htmx` (must appear in the `$allowed`/`GUIDE_SLUGS` lists in `api/docs/page.php` + `src/Docs/MarkdownRenderer.php`, the docs index `template/pages/docs/index.php`, the docs sidebar `template/pages/docs/_sidebar.php`, and the top nav `template/_nav.php`).
+- **`App::render($template, $args, htmx: true, fragment: ?, fullPage: ?)`** (formerly `App::renderHtmx()`, now a deprecated alias) — htmx-aware selection inside `App::render()`: an htmx request gets a fragment (via the `App::fragment()` mechanism), a normal request gets the full page (`$fullPageTemplate ?? $template`). Fragment = `$fragmentName`, else derived from `HX-Target` (leading `#` stripped) → `HX-Trigger-Name`, else bare partial (no `fragment` key). Falls back to the full page when there's no current request. A thin selector — does NOT touch `executeFile()`; the universal return contract + streaming are preserved. The website-page + docs-guide slug is `htmx` (must appear in the `$allowed`/`GUIDE_SLUGS` lists in `api/docs/page.php` + `src/Docs/MarkdownRenderer.php`, the docs index `template/docs/index/index.php`, the docs sidebar `template/docs/components/sidebar.php`, and the top nav `template/_nav.php`).
 
 ### Separation of concerns (formerly tech debt — now enforced)
 
@@ -840,24 +840,20 @@ Single `template/_master.php` used by every page. Every `public/X.php` is 3 line
 App::render('_master', ['title' => 'ZealPHP · Routing', 'page' => 'routing', 'active' => 'routing']);
 ```
 
-`_master.php` reads `$page` and renders `template/pages/$page.php`.
+`'page'` is the public file's path (`public/learn/notes.php` → `'learn/notes'`; `public/index.php` → `'index'`), and `_master.php` renders that page's own template, `template/<page>/<last segment>.php`. The site follows [Where code goes](../docs/directory-structure.md#where-code-goes) under `ArchitectureRulesTest`.
 
 Template structure:
 ```
 template/
-  _master.php          — Universal layout (nav + content + footer)
-  _head.php            — <head> with CSS/JS links
-  _nav.php             — Top navigation
-  _footer.php          — Footer
-  components/
-    _code.php          — Syntax-highlighted code block
-    _card.php          — Feature card
-    _demo.php          — Split code + live output panel
-  pages/               — One file per website section
-    home.php, getting-started.php, routing.php, responses.php,
-    coroutines.php, streaming.php, websocket.php, middleware.php,
-    sessions.php, store.php, timers.php, http.php, api.php,
-    templates.php, legacy-apps.php
+  _master.php, _head.php, _nav.php, _footer.php   — the layout
+  components/                       — components several pages share (_code, _callout, _card, _demo, _lesson_header …)
+  index/index.php                   — public/index.php's page
+  routing/routing.php               — public/routing.php's page
+  learn/learn.php                   — public/learn.php
+  learn/notes/notes.php             — public/learn/notes.php
+  learn/notes/components/           — components only that lesson uses
+  docs/index/index.php, docs/guide/guide.php, docs/components/  — the docs pages (guide/api-* are route-rendered)
+  demos/                            — views the /demo/* routes render (no public page)
 ```
 
 CSS: `public/css/zealphp.css` — global stylesheet, CSS variables, amber accent. Page-specific styles live in `public/css/pages/{page-key}.css` (one per template, `$page` slashes→dashes); they're concatenated at boot into `public/css/pages.css` (gitignored, built in `app.php`) and loaded **eagerly** up front in `_head.php` so hx-boost navigation never flashes unstyled content. **No inline `style=`/`<script>` in templates** — the Dec-2024 sweep extracted all ~1200 inline styles + inline scripts into `public/css/pages/*.css` and `public/js/{,pages/}*.js` (the lone remaining `style=` lives inside an escaped `<pre><code>` sample). New code keeps that contract: CSS classes only, JS in `public/js/`.
@@ -886,7 +882,7 @@ All ZealPHP usage examples live as first-class project files:
 - Routes: `route/streaming.php`, `route/ws.php`, `route/timers.php`, `route/http_features.php`, `route/demo.php`
 - Public pages: `public/*.php` (website pages)
 - APIs: `api/` directory (ZealAPI pattern)
-- Templates: `template/pages/*.php`
+- Templates: `template/<page>/<page>.php`, components in `template/<page>/components/` and `template/components/`
 
 ---
 
@@ -976,7 +972,7 @@ Every release should exercise the full sample surface to catch regressions that 
 
 **Release verification checklist** (in addition to the framework's own Pre-commit gates and the CI matrix):
 
-1. ✅ `php app.php` boots + every page in `template/pages/` renders without console errors (the OSS site is the smoke test).
+1. ✅ `php app.php` boots + every page under `public/` renders without console errors (the OSS site is the smoke test).
 2. ✅ `composer create-project zealphp/project:^X.Y.Z temp-test` installs cleanly with the new version.
 3. ✅ Each `examples/*` scaffold's README boot command still works (PHP/OpenSwoole/uopz version-bump regression check).
 4. ✅ WordPress showcase loads in both default and (if wired) `cgiMode('fcgi')` configurations.
@@ -1005,9 +1001,9 @@ Use `grep -rn '\bvX\.Y\.Z-1\b' --include='*.md' --include='*.php' .` (with the *
 |---|---|
 | `CHANGELOG.md` | Insert new `[X.Y.Z] - YYYY-MM-DD` section above the previous one. Categorize Added / Changed / Fixed / Documentation (Keep a Changelog format) |
 | `README.md` | `composer create-project` example + the "How to release" tag command example |
-| `template/pages/getting-started.php` | `composer create-project` snippet |
-| `template/pages/home.php` | Quick Start panel install command — bump in **both** the span text and the `data-copy` attribute |
-| `template/pages/deployment.php` | Docker compose image tag |
+| `template/getting-started/getting-started.php` | `composer create-project` snippet |
+| `template/index/index.php` | Quick Start panel install command — bump in **both** the span text and the `data-copy` attribute |
+| `template/deployment/deployment.php` | Docker compose image tag |
 | `docs/deployment.md` | Docker `build -t` and `image:` examples |
 
 **Do NOT touch** (release-history artifacts, must remain accurate to their era):

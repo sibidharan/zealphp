@@ -45,7 +45,7 @@ jobs:
         language: [actions, javascript-typescript]
         # Note: GitHub's CodeQL has PHP as an experimental language. If/when
         # GA, add `php` to this matrix. JavaScript/TypeScript catches inline
-        # scripts in template/pages/* and public/js/. Actions catches
+        # scripts in template/ and public/js/. Actions catches
         # workflow-injection patterns.
 
     steps:

@@ -324,14 +324,14 @@ App::render('_master', ['title' => 'About Us', 'page' => 'about']);
 <body>
   <?= App::component('/_nav', ['active' => $page]) ?>
   <main>
-    <?= App::component("/pages/$page") ?>
+    <?= App::component("/$page/" . basename($page)) ?>   <!-- template/about/about.php -->
   </main>
   <?= App::component('/_footer') ?>
 </body>
 </html>
 ```
 
-This is exactly how the ZealPHP docs site works — every page in `public/` is 3 lines calling `App::render('_master', [...])`. The master renders the nav, the page content, and the footer.
+This is exactly how the ZealPHP docs site works — every page in `public/` is 3 lines calling `App::render('_master', [...])`, with `'page'` set to the public file's path. The master renders the nav, the page's own template (in the page's folder, `template/about/about.php`, next to its `components/`), and the footer.
 
 ## Editor / IDE: making injected variables visible
 
@@ -341,7 +341,7 @@ This is exactly how the ZealPHP docs site works — every page in `public/` is 3
 
 ```php
 <?php
-// template/pages/home.php
+// template/index/index.php
 return function (string $title, array $users, \ZealPHP\RequestContext $g): string {
     $rows = '';
     foreach ($users as $u) { $rows .= '<li>' . htmlspecialchars($u['name']) . '</li>'; }
