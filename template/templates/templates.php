@@ -288,6 +288,9 @@ PHP,
 ]) ?>
 
 <h2 id="streaming">SSR Streaming — yield from templates</h2>
+<div class="callout info">
+  <p>Components in a stream: <code>yield App::component(…)</code>, not <code>yield from</code>. A component is one value, so it is one chunk; <code>yield from</code> needs a Generator (<code>App::render(…, stream: true)</code>).</p>
+</div>
 <p><code>App::render($tpl, $args, stream: true)</code> returns a Generator and never echoes. If the template file returns a Generator (via IIFE), it delegates with <code>yield from</code>. If the template echoes normally, the output is captured and yielded as one chunk. <strong>Both patterns compose in the same streaming pipeline.</strong></p>
 
 <div class="tpl-split">
