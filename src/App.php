@@ -3996,19 +3996,33 @@ class App
      * worker. Outside a coroutine (boot / CLI) it falls back to the blocking
      * `App::rawExec()` implementation. Either way the return shape is the same.
      *
+     * `output` is stdout only, so a tool's log lines can't corrupt the output
+     * it prints (e.g. JSON). In a coroutine the command's stderr is discarded;
+     * redirect explicitly (`2>&1`) to capture both.
+     *
+     * `$timeout` is enforced with coreutils `timeout`: the command is stopped
+     * (SIGTERM, then SIGKILL a second later) and `code` is 124. OpenSwoole's
+     * `System::exec()` has no timeout of its own.
+     *
      * @param string     $cmd     Shell command to run.
-     * @param float|null $timeout Coroutine-mode timeout in seconds (`null` = no timeout).
+     * @param float|null $timeout Seconds before the command is stopped (`null` = no limit).
      *
      * @return array{output:string, code:int, signal:int}
      */
     public static function exec(string $cmd, ?float $timeout = null): array
     {
+        if ($timeout !== null) {
+            $cmd = self::withTimeout($cmd, $timeout);
+        }
         if (\OpenSwoole\Coroutine::getCid() >= 0) {
-            // The ide-helper stub types System::exec()'s 2nd arg as bool and its
-            // return as a bare array; the real ext-openswoole 26.2 takes a float
-            // timeout (-1 = none) and returns {output, code, signal}. See the
-            // documented ignore in phpstan.neon.
-            $r = \OpenSwoole\Coroutine\System::exec($cmd, $timeout ?? -1);
+            // Keep stderr out of the captured output (a CLI's DEBUG lines used to
+            // land in front of its JSON). The shell discards the command's stderr
+            // (stderrDiscarded()) and OpenSwoole's pipe carries stdout only. Two
+            // things that look simpler fail: get_error_stream=false, and sending
+            // stderr to this process's own stderr — on OpenSwoole 25.2 a child
+            // writing to the worker's inherited stderr took the whole process
+            // down (SIGTERM, exit 143, seen in CI).
+            $r = \OpenSwoole\Coroutine\System::exec(self::stderrDiscarded($cmd), ...self::systemExecArgs());
             if (is_array($r)) {
                 $output = $r['output'] ?? '';
                 $code = $r['code'] ?? 0;
@@ -4022,6 +4036,81 @@ class App
             return ['output' => '', 'code' => 1, 'signal' => 0];
         }
         return ['output' => (string) self::rawExec($cmd), 'code' => 0, 'signal' => 0];
+    }
+
+    /**
+     * Wrap a command so it is stopped after `$timeout` seconds.
+     *
+     * @throws \InvalidArgumentException for a non-positive timeout
+     * @throws \RuntimeException when coreutils `timeout` is not installed
+     */
+    private static function withTimeout(string $cmd, float $timeout): string
+    {
+        if (!($timeout > 0) || !is_finite($timeout)) {
+            throw new \InvalidArgumentException('App::exec(): timeout must be a positive number of seconds');
+        }
+        $bin = self::$timeout_binary ??= self::findBinary('timeout');
+        if ($bin === '') {
+            throw new \RuntimeException('App::exec(): a timeout needs coreutils `timeout`, which was not found');
+        }
+        $timed = escapeshellarg($bin) . ' -k 1 ' . sprintf('%.3F', $timeout) . ' sh -c ' . escapeshellarg($cmd);
+        // `timeout` signals its whole process group. Give it a session of its
+        // own (util-linux `setsid -w`, which waits and passes the exit code
+        // through) so that group can never include the worker that spawned it.
+        $setsid = self::$setsid_binary ??= self::findBinary('setsid');
+        return $setsid === '' ? $timed : escapeshellarg($setsid) . ' -w ' . $timed;
+    }
+
+    /** Whether System::exec()'s second parameter is a timeout (vs. bool $get_error_stream). */
+    private static ?bool $exec_second_is_timeout = null;
+
+    /**
+     * Wrap a command so its stderr is discarded unless it redirects it itself
+     * (`2>&1` still captures it).
+     */
+    private static function stderrDiscarded(string $cmd): string
+    {
+        // `exec 2>/dev/null` re-points the shell's own stderr before the command
+        // runs, so the command's own redirects (`2>&1`, subshells) behave exactly
+        // as written. (A `{ …; } 2>file` group doesn't: dash mishandles a
+        // subshell's `2>&1` inside one.)
+        return "exec 2>/dev/null\n" . $cmd;
+    }
+
+    /**
+     * Arguments after `$command` for `Coroutine\System::exec()`: no native
+     * timeout (App::exec() enforces its own) and `get_error_stream` on — the
+     * command's stderr is already discarded by stderrDiscarded(), so the pipe
+     * carries stdout only.
+     *
+     * @return list<bool|int>
+     */
+    private static function systemExecArgs(): array
+    {
+        if (self::$exec_second_is_timeout === null) {
+            $params = (new \ReflectionMethod(\OpenSwoole\Coroutine\System::class, 'exec'))->getParameters();
+            $second = $params[1] ?? null;
+            $type = $second?->getType();
+            self::$exec_second_is_timeout = $second !== null && (
+                $second->getName() === 'timeout'
+                || ($type instanceof \ReflectionNamedType && in_array($type->getName(), ['float', 'int'], true))
+            );
+        }
+        return self::$exec_second_is_timeout ? [-1, true] : [true];
+    }
+
+    /** Paths of coreutils `timeout` and util-linux `setsid` ('' when absent), found once per worker. */
+    private static ?string $timeout_binary = null;
+    private static ?string $setsid_binary = null;
+
+    private static function findBinary(string $name): string
+    {
+        foreach (['/usr/bin/', '/bin/', '/usr/local/bin/'] as $dir) {
+            if (is_executable($dir . $name)) {
+                return $dir . $name;
+            }
+        }
+        return '';
     }
 
     /**
