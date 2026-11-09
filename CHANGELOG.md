@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Documentation
+- **Which page a request is on.** [`docs/templates-and-rendering.md#which-page-is-a-request-on`](docs/templates-and-rendering.md#which-page-is-a-request-on) (and `/templates#which-page`) spells out how relative template and component names find their page: the served file's `SCRIPT_NAME`, set by `App::include()` for implicit public routes, directory index pages and your own includes; `PHP_SELF` only as a fallback with its `PATH_INFO` stripped; no page for routes, APIs and the component endpoint. Tests pin the directory-index case and that `App::include()` sets the page.
+
 ## [0.4.20] - 2026-11-09
 
 ### Added
