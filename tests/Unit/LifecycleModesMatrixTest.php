@@ -407,9 +407,23 @@ final class LifecycleModesMatrixTest extends TestCase
     public function testRefusedBothUnsafeFlagsSetSurfacesEnableCoroutineFirstWithoutExtZealphp(): void
     {
         if (\extension_loaded('zealphp')) {
-            // ext-zealphp makes both combinations safe — no exception
-            $ex = $this->validate(true, Runtime::HOOK_ALL, true);
-            $this->assertNull($ex);
+            // ext-zealphp isolates the superglobals; with the coroutine-legacy
+            // stack the combination is accepted, without it it's refused.
+            $sr = App::$silent_redeclare;
+            $ii = App::$include_isolation;
+            try {
+                App::$silent_redeclare = false;
+                $ex = $this->validate(true, Runtime::HOOK_ALL, true);
+                $this->assertInstanceOf(\RuntimeException::class, $ex);
+                $this->assertStringContainsString('MODE_COROUTINE_LEGACY', $ex->getMessage());
+                App::$silent_redeclare = true;
+                App::$include_isolation = true;
+                $this->assertNull($this->validate(true, Runtime::HOOK_ALL, true));
+                $this->assertNull($this->validate(true, Runtime::HOOK_ALL, false), 'hookAll alone counts too');
+            } finally {
+                App::$silent_redeclare = $sr;
+                App::$include_isolation = $ii;
+            }
             return;
         }
         $ex = $this->validate(true, Runtime::HOOK_ALL, true);

@@ -397,7 +397,7 @@ $app->run();
 // Parent yields on the pipe read → multiple coroutines dispatch in parallel.
 PHP]); ?>
 
-<p>With <code>ext-zealphp</code> (v0.3.0+), <code>superglobals(true) + enableCoroutine(true)</code> is now fully supported &mdash; the extension saves/restores <code>$_GET</code>/<code>$_SESSION</code> per coroutine on every yield/resume. Without ext-zealphp, the validator still refuses this combination. Mode 6 is pinned by <code>tests/Unit/LifecycleModesMatrixTest.php#testMode6CoroutineIsolatedHybrid</code>.</p>
+<p>With <code>ext-zealphp</code>, superglobals plus coroutines is supported through <code>App::mode('coroutine-legacy')</code> &mdash; the extension saves/restores <code>$_GET</code>/<code>$_SESSION</code> per coroutine on every yield/resume, and the preset isolates statics and globals. Set by hand without that stack (or without ext-zealphp), the validator refuses the combination. Mode 6 is pinned by <code>tests/Unit/LifecycleModesMatrixTest.php#testMode6CoroutineIsolatedHybrid</code>.</p>
 
 <h2 id="dual-runtime" class="legacy-mt-xl">Dual-runtime — one codebase, Apache AND ZealPHP at once</h2>
 

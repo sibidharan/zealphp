@@ -174,9 +174,29 @@ final class OverrideBuiltinTest extends TestCase
         $validator->setAccessible(true);
 
         if (extension_loaded('zealphp')) {
-            // Should NOT throw — ext-zealphp makes it safe
-            $validator->invoke(null, true, 0, true);
-            $this->addToAssertionCount(1);
+            // ext-zealphp isolates the superglobals, but the combination also
+            // needs the coroutine-legacy stack (statics/globals): bare, it's refused.
+            $sr = App::$silent_redeclare;
+            $ii = App::$include_isolation;
+            try {
+                App::$silent_redeclare = false;
+                $refused = null;
+                try {
+                    $validator->invoke(null, true, 0, true);
+                } catch (\RuntimeException $e) {
+                    $refused = $e->getMessage();
+                }
+                $this->assertIsString($refused);
+                $this->assertStringContainsString('MODE_COROUTINE_LEGACY', $refused);
+
+                App::$silent_redeclare = true;
+                App::$include_isolation = true;
+                $validator->invoke(null, true, 0, true);
+                $this->addToAssertionCount(1);
+            } finally {
+                App::$silent_redeclare = $sr;
+                App::$include_isolation = $ii;
+            }
         } else {
             // Should throw — no ext-zealphp to make it safe
             $this->expectException(\RuntimeException::class);

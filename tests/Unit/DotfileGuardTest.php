@@ -124,4 +124,57 @@ final class DotfileGuardTest extends TestCase
         $this->assertSame(0, preg_match($pat, '/foo.bar'), 'a dot in a filename (not a dot-segment) is fine');
         $this->assertSame(0, preg_match($pat, '/wellknownfile'));
     }
+
+    /**
+     * F-2: the guard handlers used `assert($app !== null)`, which production
+     * compiles out, so a missing App instance became a fatal method call on
+     * null. Without an instance they now answer with the bare status code.
+     */
+    public function testGuardHandlersAnswerWithoutAnAppInstance(): void
+    {
+        $app = self::$app;
+        $ref = new \ReflectionClass($app);
+        $routesProp = $ref->getProperty('routes');
+        $routesProp->setAccessible(true);
+        /** @var array<int, array<string, mixed>> $before */
+        $before = $routesProp->getValue($app);
+        $ignorePhp = App::$ignore_php_ext;
+        App::$ignore_php_ext = true;
+        $register = $ref->getMethod('registerImplicitRoutes');
+        $register->setAccessible(true);
+        $register->invoke($app);
+        /** @var array<int, array<string, mixed>> $routes */
+        $routes = $routesProp->getValue($app);
+        $routesProp->setValue($app, $before);
+        App::$ignore_php_ext = $ignorePhp;
+
+        $dotfile = $php = null;
+        foreach ($routes as $route) {
+            $p = $route['pattern'] ?? '';
+            if (is_string($p) && str_contains($p, 'well-known')) {
+                $dotfile = $route['handler'];
+            } elseif (is_string($p) && str_contains($p, '\\.php')) {
+                $php ??= $route['handler'];
+            }
+        }
+        $this->assertIsCallable($dotfile);
+        $this->assertIsCallable($php);
+
+        $g = \ZealPHP\RequestContext::instance();
+        $server = $g->server;
+        $g->server['REQUEST_URI'] = '/no-such-file.php';
+        $instance = $ref->getProperty('instance');
+        $instance->setAccessible(true);
+        try {
+            $instance->setValue(null, null);
+            $this->assertSame(403, $dotfile(null));
+            $this->assertSame(404, $php(null));
+            $instance->setValue(null, $app);
+            $this->assertInstanceOf(\Psr\Http\Message\ResponseInterface::class, $dotfile(null));
+            $this->assertSame(404, $php(null)->getStatusCode());
+        } finally {
+            $instance->setValue(null, $app);
+            $g->server = $server;
+        }
+    }
 }

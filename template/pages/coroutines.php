@@ -54,8 +54,8 @@ foreach ($demos as [$id, $title, $url, $code]) {
 </table>
 
 <div class="callout info coro-mt">
-  <strong>Coroutines work in both modes.</strong> With <code>ext-zealphp</code>, <code>superglobals(true) + enableCoroutine(true)</code>
-  is fully safe — <code>$_GET</code>/<code>$_SESSION</code> are saved/restored per coroutine.
+  <strong>Coroutines work in both modes.</strong> With <code>ext-zealphp</code>, <code>App::mode('coroutine-legacy')</code>
+  runs superglobals code under coroutines — <code>$_GET</code>/<code>$_SESSION</code> are saved/restored per coroutine, and the preset isolates statics and globals too.
   With <code>superglobals(false)</code> (scaffold default), each coroutine gets isolated <code>RequestContext::instance()</code> state.
   Either way, every request runs in its own coroutine.
 </div>
@@ -76,7 +76,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <tr>
     <td><code>App::mode(App::MODE_MIXED)</code><br><small>legacy / migration mode</small></td>
     <td>✅ Bridged to <code>$GLOBALS['_GET']</code> etc. on each request — both forms read &amp; write the same backing array, so they're observationally equivalent.</td>
-    <td>✅ Repopulated per request by the framework. With ext-zealphp + <code>enableCoroutine(true)</code>, superglobals are saved/restored per coroutine — concurrent requests are safe. Without ext-zealphp, sequential mode (one request at a time per worker).</td>
+    <td>✅ Repopulated per request by the framework. With ext-zealphp + <code>mode('coroutine-legacy')</code>, superglobals are saved/restored per coroutine — concurrent requests are safe. Without ext-zealphp, sequential mode (one request at a time per worker).</td>
   </tr>
   <tr>
     <td><code>App::mode(App::MODE_COROUTINE)</code><br><small>coroutine mode (recommended default)</small></td>
@@ -174,22 +174,23 @@ PHP]); ?>
 </table>
 
 <div class="callout info coro-mb">
-  <strong>v0.3.0: superglobals + coroutines now safe with ext-zealphp</strong>
+  <strong>Superglobals + coroutines: <code>App::mode('coroutine-legacy')</code></strong>
   <p>
-    With <code>ext-zealphp</code> loaded, <code>superglobals(true) + enableCoroutine(true)</code> is
-    <strong>fully supported</strong>. The extension saves and restores <code>$_GET</code> /
-    <code>$_POST</code> / <code>$_SESSION</code> per coroutine &mdash; no races, no leaks.
-    Legacy code using <code>$_GET</code> just works with concurrent coroutine I/O.
+    With <code>ext-zealphp</code> loaded, the <code>coroutine-legacy</code> preset runs
+    superglobals code with coroutine concurrency. The extension saves and restores
+    <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code> per coroutine, and the
+    preset also isolates statics and globals, which concurrent requests would otherwise share.
   </p>
   <p>
-    Without ext-zealphp (uopz fallback), the old constraint applies &mdash; these combinations
-    throw <code>RuntimeException</code> at boot to prevent process-wide superglobal races:
+    Setting <code>superglobals(true)</code> with coroutines by hand throws
+    <code>RuntimeException</code> at boot unless that isolation stack is on (since v0.4.20; without
+    ext-zealphp it always throws):
   </p>
   <ul class="coro-warn-list">
-    <li><code>superglobals(true) + enableCoroutine(true)</code> without ext-zealphp</li>
-    <li><code>superglobals(true) + hookAll(non-zero)</code> without ext-zealphp</li>
+    <li><code>superglobals(true) + enableCoroutine(true)</code></li>
+    <li><code>superglobals(true) + hookAll(non-zero)</code></li>
   </ul>
-  <p class="coro-mb"><strong>Migration path:</strong> install ext-zealphp (<code>pie install zealphp/ext</code>), set <code>App::superglobals(true)</code>, and enable coroutines. Your existing <code>$_GET</code> / <code>$_SESSION</code> code works unchanged with full concurrency.</p>
+  <p class="coro-mb"><strong>Migration path:</strong> install ext-zealphp (<code>pie install zealphp/ext</code>) and use <code>App::mode(App::MODE_COROUTINE_LEGACY)</code>. Your existing <code>$_GET</code> / <code>$_SESSION</code> code works unchanged with full concurrency.</p>
 </div>
 
 <div id="isolation-scope" class="callout warn coro-mb">
@@ -330,7 +331,7 @@ App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from nu
   <tr>
     <td>Concurrency model</td>
     <td>Coroutine scheduler enabled, <code>HOOK_ALL</code> active; thousands of concurrent requests per worker</td>
-    <td>With ext-zealphp + <code>enableCoroutine(true)</code>: ✅ full coroutine concurrency (superglobals saved/restored per coroutine). Without ext-zealphp: sequential, one request at a time per worker.</td>
+    <td>With ext-zealphp + <code>mode('coroutine-legacy')</code>: ✅ full coroutine concurrency (superglobals saved/restored per coroutine). Without ext-zealphp: sequential, one request at a time per worker.</td>
   </tr>
   <tr>
     <td>Implicit file routes (legacy <code>public/*.php</code>)</td>
@@ -345,7 +346,7 @@ App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from nu
   <tr>
     <td><code>$_GET</code>, <code>$_POST</code> direct access<br><small>(see <a href="#state-parity">the parity rule</a>)</small></td>
     <td>⚠️ Not populated by default. With ext-zealphp coroutine hooks: per-coroutine safe. <code>$g-&gt;get</code> / <code>$g-&gt;post</code> recommended (always safe, zero overhead).</td>
-    <td>✅ Populated per request. With ext-zealphp: per-coroutine safe even with <code>enableCoroutine(true)</code>. <code>$g-&gt;get</code> / <code>$g-&gt;post</code> also work — they bridge to the same arrays.</td>
+    <td>✅ Populated per request. With ext-zealphp: per-coroutine safe under <code>mode('coroutine-legacy')</code>. <code>$g-&gt;get</code> / <code>$g-&gt;post</code> also work — they bridge to the same arrays.</td>
   </tr>
   <tr>
     <td><code>header()</code>, <code>setcookie()</code> via ext-zealphp</td>
@@ -360,7 +361,7 @@ App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from nu
   <tr>
     <td><code>go()</code> inside a request handler</td>
     <td>✅ Allowed and recommended for parallel I/O</td>
-    <td>With ext-zealphp + <code>enableCoroutine(true)</code>: ✅ works — coroutine scheduler is active. Without ext-zealphp (sequential mode): ❌ scheduler not running.</td>
+    <td>With ext-zealphp + <code>mode('coroutine-legacy')</code>: ✅ works — coroutine scheduler is active. Without ext-zealphp (sequential mode): ❌ scheduler not running.</td>
   </tr>
   <tr>
     <td><code>static $cache = []</code> in user functions</td>

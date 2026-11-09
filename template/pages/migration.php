@@ -150,8 +150,8 @@ foreach ($rungs as $r):
     <strong>Per-coroutine superglobal isolation (S1).</strong>
     ext-zealphp hooks into OpenSwoole's yield/resume/close scheduler callbacks so
     <code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code> are saved and restored
-    on every context switch. <code>superglobals(true) + enableCoroutine(true)</code> just works —
-    legacy code and coroutine concurrency in the same process.
+    on every context switch. With <code>App::mode('coroutine-legacy')</code>, which adds statics and
+    globals isolation, legacy code and coroutine concurrency run in the same process.
   </li>
   <li>
     <strong>Stream-wrapper redirection.</strong>
