@@ -22,6 +22,7 @@ final class ComponentMeta
      * @param array<string, Model>                     $models  the input-bound subset
      * @param array<string, list<array{name: string, type: Type, optional: bool, default: mixed}>> $actions
      * @param list<string>                             $reactive state properties a parent's props keep updating
+     * @param array<string, list<string>>              $listeners event name → #[On] methods
      */
     private function __construct(
         public readonly string $name,
@@ -31,6 +32,7 @@ final class ComponentMeta
         public readonly array $actions,
         public readonly string $version,
         public readonly array $reactive = [],
+        public readonly array $listeners = [],
     ) {
     }
 
@@ -107,6 +109,27 @@ final class ComponentMeta
             $actions[$m->getName()] = $params;
         }
 
+        $listeners = [];
+        foreach ($rc->getMethods() as $m) {
+            $on = $m->getAttributes(On::class);
+            if ($on === []) {
+                continue;
+            }
+            $where = "{$class}::{$m->getName()}()";
+            if (!$m->isPublic() || $m->isStatic() || str_starts_with($m->getName(), '_')
+                || $m->getDeclaringClass()->getName() === Component::class) {
+                throw new \LogicException("{$where}: #[On] must be on a public, non-static method of the component whose name doesn't start with _");
+            }
+            if ($m->getNumberOfRequiredParameters() > 0) {
+                throw new \LogicException("{$where}: an #[On] method takes no arguments (events carry no data)");
+            }
+            foreach ($on as $attr) {
+                foreach ($attr->newInstance()->events as $event) {
+                    $listeners[$event][] = $m->getName();
+                }
+            }
+        }
+
         $shape = [$class];
         foreach ($props as $prop => $type) {
             $shape[] = "p:{$prop}:" . $type->describe() . (isset($models[$prop]) ? ':m' : '');
@@ -119,6 +142,6 @@ final class ComponentMeta
         }
         $version = substr(hash('sha256', implode("\n", $shape)), 0, 16);
 
-        return new self($name, $class, $props, $models, $actions, $version, $reactive);
+        return new self($name, $class, $props, $models, $actions, $version, $reactive, $listeners);
     }
 }

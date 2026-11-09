@@ -121,6 +121,21 @@ class HtmxBinder extends FormBinder
         ];
     }
 
+    /** htmx delivers it: the dispatching response's HX-Trigger event bubbles to body. */
+    public function listenerAttributes(Component $component, string $event, string $url): array
+    {
+        return [
+            // A component never hears its own events (it already re-rendered).
+            'hx-trigger' => $event . "[!event.target.closest('#" . $component->id() . "')] from:body",
+            'hx-post' => $url,
+            'hx-target' => self::target($component),
+            'hx-swap' => $this->swap(),
+            'hx-include' => '#' . $component->formId(),
+            'hx-vals' => (string) json_encode(['_zc_event' => $event], JSON_UNESCAPED_SLASHES),
+            'hx-sync' => self::target($component) . ':queue last',
+        ];
+    }
+
     public function isAsync(array $server): bool
     {
         return ($server['HTTP_HX_REQUEST'] ?? null) === 'true' || parent::isAsync($server);
@@ -136,7 +151,12 @@ class HtmxBinder extends FormBinder
     {
         $headers = [];
         if ($events !== []) {
-            $headers['HX-Trigger'] = (string) json_encode($events, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            // An event without detail goes out as {}: htmx 4's trigger() reads
+            // detail.cancelled and throws on null, so the event never fires.
+            $headers['HX-Trigger'] = (string) json_encode(
+                array_map(static fn(mixed $d): mixed => $d ?? new \stdClass(), $events),
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            );
         }
         if ($redirect !== null) {
             $headers['HX-Redirect'] = $redirect;

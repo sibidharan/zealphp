@@ -483,7 +483,7 @@ For writing a binder or a client.
 
 Everything a component sends is in its own form: the outer element when `$tag` is `'form'`, otherwise an empty `<form id="{id}-zc">` it renders first; every control and button joins it with `form="{id}-zc"`. Post that form's `FormData` and nothing else — never the fields of a component nested inside it.
 
-`{action}` is an `#[Action]` method name, `_update` (apply input and validate changed fields), or `_refresh` (apply input, re-render). For `_update`, name the field that changed in a `_zc_trigger` form field (the htmx binder does this); a `Zeal-Trigger` or `HX-Trigger-Name` header also works. Scripted clients send `Zeal-Request: 1`.
+`{action}` is an `#[Action]` method name, `_update` (apply input and validate changed fields), `_refresh` (apply input, re-render), or `_on` (run the component's `#[On]` methods for the event named in a `_zc_event` field, then re-render; 404 if it doesn't listen for that event). For `_update`, name the field that changed in a `_zc_trigger` form field (the htmx binder does this); a `Zeal-Trigger` or `HX-Trigger-Name` header also works. Scripted clients send `Zeal-Request: 1`.
 
 **Response:**
 
@@ -668,6 +668,43 @@ final class TodoRow extends Component
 - **Keys are required inside a parent**, and only need to be unique within it: a child's id is scoped by its parent's (`todo-list-main-todo-row-0`). Use the item's stable id rather than its position if rows can be reordered, so state follows the item.
 - **Limits:** nesting goes 8 levels deep. A component with `$tag = 'form'` can't contain reactive children, and a nested component can't use `$tag = 'form'` (forms can't nest) — keep the default `div`.
 
+## Events between components
+
+One component's action can make others on the page update — the cart badge after "add to cart":
+
+```php
+final class ProductCard extends Component
+{
+    public int $productId = 0;
+
+    #[Action]
+    public function add(): void
+    {
+        Cart::add($this->productId);
+        $this->dispatch('cart-updated');
+    }
+    // ...
+}
+
+final class CartBadge extends Component
+{
+    public int $count = 0;
+
+    #[On('cart-updated')]
+    public function sync(): void
+    {
+        $this->count = Cart::count();
+    }
+    // ...
+}
+```
+
+- Every component on the page with an `#[On('cart-updated')]` method runs it and re-renders, through its own snapshot and session like any other request. Events carry no data to listeners; a listener reads what it needs.
+- A component doesn't hear its own events: it already re-rendered after its action.
+- `#[On]` takes one or more event names (letters, digits, `:`, `_`, `.`, `-`) and is repeatable; the method is public and takes no arguments. `authorize()` is called with the listener's method name.
+- htmx delivers events through the response's `HX-Trigger` header (`hx-trigger="… from:body"` on a hidden element per event); `ZealJsBinder` does the same from `Zeal-Events`. Without JavaScript events aren't delivered — the next page load shows current data.
+- For other tabs and visitors, pair it with [push](#live-updates-push): `Component::invalidate('cart')` after the write.
+
 ## Running in coroutine-legacy
 
 `App::components()` loads and reflects your component classes — and the framework's own component classes — in the master, before workers fork, so none of them is compiled cold under concurrency. Instances live for one request and are never stored in statics, so they need no isolation support.
@@ -681,4 +718,4 @@ final class TodoRow extends Component
 
 ## What's next
 
-Planned ([composition design](architecture/2026-11-09-component-composition.md)): `#[On]` events between components on a page, and slots for reactive children.
+Planned ([composition design](architecture/2026-11-09-component-composition.md)): slots for reactive children.

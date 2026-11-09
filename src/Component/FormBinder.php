@@ -40,6 +40,12 @@ class FormBinder implements ComponentBinder
         return [];
     }
 
+    /** Markers a script can act on; without JavaScript nothing delivers events. */
+    public function listenerAttributes(Component $component, string $event, string $url): array
+    {
+        return ['data-zc-on' => $event, 'data-zc-url' => $url, 'data-zc-for' => $component->id()];
+    }
+
     public function isAsync(array $server): bool
     {
         return ($server['HTTP_ZEAL_REQUEST'] ?? null) === '1';

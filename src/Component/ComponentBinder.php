@@ -45,6 +45,15 @@ interface ComponentBinder
     public function modelAttributes(Component $component, string $prop, Model $model, string $updateUrl, bool $preserve): array;
 
     /**
+     * Attributes for a hidden element that delivers an event the component
+     * listens for (`#[On]`): when any component dispatches `$event`, the
+     * client posts the component's form to `$url` with `_zc_event` set.
+     *
+     * @return array<string, string|bool|null>
+     */
+    public function listenerAttributes(Component $component, string $event, string $url): array;
+
+    /**
      * Whether the request came from this binder's client script (rather than
      * a plain form post that expects a redirect back to the page).
      *

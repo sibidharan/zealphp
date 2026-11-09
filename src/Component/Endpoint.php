@@ -48,8 +48,18 @@ final class Endpoint
             if ($meta === null) {
                 throw ComponentException::notFound("Unknown component {$name}");
             }
-            if ($action !== Component::UPDATE && $action !== Component::REFRESH && !isset($meta->actions[$action])) {
+            if ($action !== Component::UPDATE && $action !== Component::REFRESH && $action !== Component::ON
+                && !isset($meta->actions[$action])) {
                 throw ComponentException::notFound("Unknown action {$action}");
+            }
+            // An event: the #[On] methods for it, each authorized by its own name.
+            $listeners = [];
+            if ($action === Component::ON) {
+                $event = $input['_zc_event'] ?? null;
+                $listeners = is_string($event) ? ($meta->listeners[$event] ?? []) : [];
+                if ($listeners === []) {
+                    throw ComponentException::notFound('This component does not listen for that event');
+                }
             }
             $wire = $input['_zc'] ?? '';
             $snapshot = Snapshot::decode(is_string($wire) ? $wire : '', $meta);
@@ -57,8 +67,10 @@ final class Endpoint
             // from its current state. Each one is verified when it's used.
             RequestContext::instance()->memo['_zc_kids'] = self::carried($input['_zc_kids'] ?? null);
             $component = Component::zcRestore($meta, $snapshot);
-            if (!$component->authorize($action)) {
-                throw ComponentException::forbidden("Not allowed: {$action}");
+            foreach ($listeners === [] ? [$action] : $listeners as $authorized) {
+                if (!$component->authorize($authorized)) {
+                    throw ComponentException::forbidden("Not allowed: {$authorized}");
+                }
             }
 
             $changed = $component->zcApplyInput($input);
@@ -77,7 +89,11 @@ final class Endpoint
                 } else {
                     $component->zcRunUpdatedHooks($changed);
                     // Don't run an action on values that didn't convert.
-                    if ($outcome === Outcome::Ok && $action !== Component::REFRESH) {
+                    if ($outcome === Outcome::Ok && $action === Component::ON) {
+                        foreach ($listeners as $method) {
+                            $component->zcListen($method);
+                        }
+                    } elseif ($outcome === Outcome::Ok && $action !== Component::REFRESH) {
                         $component->zcCall($action, self::decodeArgs($input['_zc_args'] ?? null));
                     }
                 }

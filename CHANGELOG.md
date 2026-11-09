@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added — events between components (#509 phase 4)
+- **`#[On('event')]`** runs a component method when another component on the page dispatches that event (`$this->dispatch('cart-updated')`), then re-renders the listener through its own snapshot and session. A component doesn't hear its own events. Delivered by htmx (`HX-Trigger` → `hx-trigger="… from:body"`) and by `ZealJsBinder`; not without JavaScript. Guide: [Events between components](docs/components.md#events-between-components).
+- New endpoint action `_on` (with `_zc_event`); `authorize()` is called with each listener's method name.
+- **Breaking for custom binders:** `ComponentBinder` gains `listenerAttributes()`. Binders extending `FormBinder` inherit it.
+
+### Fixed
+- **Events without detail never fired on htmx 4.** `HX-Trigger: {"name": null}` made htmx 4's `trigger()` throw (it reads `detail.cancelled`). Detail-less events now go out as `{}`.
+
 ### Added — nested reactive components (#509 phase 4)
 - **Reactive components can render reactive components.** Give each child a `key:` (required inside a parent; ids are scoped by the parent's). Guide: [Nesting components](docs/components.md#nesting-components); design and decisions: [component composition](docs/architecture/2026-11-09-component-composition.md).
 - **Each component sends only its own fields.** A component posts its own form — the outer element when `$tag` is `'form'`, otherwise an empty `<form id="{id}-zc">` it renders first — and every control and action button joins it with `form="…"`. htmx requests target the component by id and include exactly that form. Works the same with htmx 2, htmx 4, `ZealJsBinder` and without JavaScript; a `div` component with a `$submit` action now also submits on Enter without JavaScript.
