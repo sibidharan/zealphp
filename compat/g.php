@@ -39,10 +39,12 @@
  *
  * ── Which runtime gets which $g ──
  *
- *   ZealPHP loaded  → `\ZealPHP\RequestContext::instance()`. In coroutine
- *                     mode this is the per-coroutine context (the ONLY safe
- *                     accessor — superglobals are intentionally empty there).
- *                     In superglobals(true) mode it bridges to $_GET/$_SESSION.
+ *   ZealPHP loaded  → `$g` is `\ZealPHP\RequestContext::instance()`, this
+ *                     request's context (per coroutine in coroutine mode — the
+ *                     ONLY safe accessor there; superglobals are empty).
+ *                     `$GLOBALS['g']` is a `CurrentRequestContext` proxy that
+ *                     resolves the current request on every access, because
+ *                     `$GLOBALS` is shared by all the worker's requests.
  *   ZealPHP absent  → plain stdClass with &$_GET, &$_SESSION, ... references,
  *                     so reads AND writes flow through PHP's live superglobals
  *                     exactly as native Apache code expects.
@@ -56,10 +58,18 @@
  * fails if they diverge.
  */
 
-if (!isset($GLOBALS['g'])) {
-    if (class_exists('\ZealPHP\RequestContext', false)) {
-        $GLOBALS['g'] = \ZealPHP\RequestContext::instance();
-    } else {
+if (class_exists('\ZealPHP\RequestContext', false)) {
+    // $GLOBALS is shared by every request the worker serves (concurrently, in
+    // coroutine mode). Never store one request's context there: that handed
+    // request 1's $g (session, cookies, input) to every later request. The
+    // proxy resolves the current request's context on each access, and
+    // survives require_once (which runs this file once per worker).
+    if (!($GLOBALS['g'] ?? null) instanceof \ZealPHP\Compat\CurrentRequestContext) {
+        $GLOBALS['g'] = new \ZealPHP\Compat\CurrentRequestContext();
+    }
+    $g = \ZealPHP\RequestContext::instance();
+} else {
+    if (!isset($GLOBALS['g'])) {
         $GLOBALS['g'] = (object) [
             'get'     => &$_GET,
             'post'    => &$_POST,
@@ -70,6 +80,5 @@ if (!isset($GLOBALS['g'])) {
             'session' => &$_SESSION,
         ];
     }
+    $g = $GLOBALS['g'];
 }
-
-$g = $GLOBALS['g'];
