@@ -4045,21 +4045,27 @@ class App
         if (!($timeout > 0) || !is_finite($timeout)) {
             throw new \InvalidArgumentException('App::exec(): timeout must be a positive number of seconds');
         }
-        $bin = self::$timeout_binary ??= self::findTimeoutBinary();
+        $bin = self::$timeout_binary ??= self::findBinary('timeout');
         if ($bin === '') {
             throw new \RuntimeException('App::exec(): a timeout needs coreutils `timeout`, which was not found');
         }
-        return escapeshellarg($bin) . ' -k 1 ' . sprintf('%.3F', $timeout) . ' sh -c ' . escapeshellarg($cmd);
+        $timed = escapeshellarg($bin) . ' -k 1 ' . sprintf('%.3F', $timeout) . ' sh -c ' . escapeshellarg($cmd);
+        // `timeout` signals its whole process group. Give it a session of its
+        // own (util-linux `setsid -w`, which waits and passes the exit code
+        // through) so that group can never include the worker that spawned it.
+        $setsid = self::$setsid_binary ??= self::findBinary('setsid');
+        return $setsid === '' ? $timed : escapeshellarg($setsid) . ' -w ' . $timed;
     }
 
-    /** Path of coreutils `timeout` ('' when absent), found once per worker. */
+    /** Paths of coreutils `timeout` and util-linux `setsid` ('' when absent), found once per worker. */
     private static ?string $timeout_binary = null;
+    private static ?string $setsid_binary = null;
 
-    private static function findTimeoutBinary(): string
+    private static function findBinary(string $name): string
     {
-        foreach (['/usr/bin/timeout', '/bin/timeout', '/usr/local/bin/timeout'] as $candidate) {
-            if (is_executable($candidate)) {
-                return $candidate;
+        foreach (['/usr/bin/', '/bin/', '/usr/local/bin/'] as $dir) {
+            if (is_executable($dir . $name)) {
+                return $dir . $name;
             }
         }
         return '';

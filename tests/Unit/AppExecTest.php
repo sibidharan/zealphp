@@ -179,6 +179,25 @@ final class AppExecTest extends TestCase
         $this->assertLessThan(2.0, $elapsed, 'stopped long before the command would finish');
     }
 
+    public function testTimeoutStopsTheWholeProcessTreeAndNotTheCaller(): void
+    {
+        if (!is_executable('/usr/bin/timeout') && !is_executable('/bin/timeout')) {
+            $this->markTestSkipped('coreutils timeout not installed');
+        }
+        // A backgrounded grandchild must die too; and the signal must stay in
+        // the command's own session (this test process survives to assert).
+        $marker = 'sleep 9.' . random_int(100, 999);
+        $result = null;
+        \OpenSwoole\Coroutine::run(function () use (&$result, $marker) {
+            $result = App::exec("{$marker} & {$marker}; echo late", 0.3);
+        });
+        $this->assertIsArray($result);
+        $this->assertSame(124, $result['code']);
+        usleep(300000);
+        $left = (string) shell_exec('pgrep -f ' . escapeshellarg('^' . $marker . '$') . ' 2>/dev/null');
+        $this->assertSame('', trim($left), 'no process from the timed-out command is left running');
+    }
+
     public function testTimeoutDoesNotChangeAFastCommandOrQuoting(): void
     {
         $result = null;
