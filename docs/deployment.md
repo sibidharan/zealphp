@@ -121,7 +121,7 @@ systemd unit (`Environment="..."`), Docker `-e` flags, or shell.
 
 | Variable | Type | Default | Purpose |
 |---|---|---|---|
-| `ZEALPHP_LOG_DIR` | path | `$XDG_RUNTIME_DIR/zealphp`, else `/tmp/zealphp-<uid>` | Base directory for all log files |
+| `ZEALPHP_LOG_DIR` | path | `/tmp/zealphp-<uid>` (per-user) | Base directory for all log files |
 | `ZEALPHP_LOG_FILE` | path | (per-stream) | Single-file override for all streams |
 | `ZEALPHP_ACCESS_LOG_FILE` | path | `$LOG_DIR/access.log` | Per-request access log |
 | `ZEALPHP_DEBUG_LOG_FILE` | path | `$LOG_DIR/debug.log` | `elog()` output |

@@ -8,14 +8,11 @@ COMMAND="${1:-start}"
 
 # Per-user default (matches resolve_log_dir() in src/utils.php): never a shared
 # /tmp/zealphp, which another local user could create first to read or swap
-# our logs and PID files.
+# our logs and PID files. Not $XDG_RUNTIME_DIR either: it is wiped at logout
+# and unset under cron/systemd/sudo, so start and stop could disagree.
 default_log_dir() {
-    if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
-        printf '%s/zealphp' "${XDG_RUNTIME_DIR%/}"
-    else
-        local tmp="${TMPDIR:-/tmp}"
-        printf '%s/zealphp-%s' "${tmp%/}" "$(id -u)"
-    fi
+    local tmp="${TMPDIR:-/tmp}"
+    printf '%s/zealphp-%s' "${tmp%/}" "$(id -u)"
 }
 
 LOG_DIR="${ZEALPHP_LOG_DIR:-$(default_log_dir)}"
@@ -39,7 +36,7 @@ Usage:
   scripts/zealphp.sh foreground
 
 Defaults:
-  log dir  -> $XDG_RUNTIME_DIR/zealphp, else ${TMPDIR:-/tmp}/zealphp-<uid>
+  log dir  -> ${TMPDIR:-/tmp}/zealphp-<uid>
   pid file -> <log dir>/zealphp_<port>.pid
 
 `start` never stops anything: it refuses if the server is already running.

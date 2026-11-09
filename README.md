@@ -238,7 +238,7 @@ php app.php stop
 
 PID file lives at `<log dir>/zealphp_{port}.pid` (one per port — multiple
 apps on different ports are supported), where the log dir is per-user:
-`$XDG_RUNTIME_DIR/zealphp`, else `/tmp/zealphp-<uid>`. Logs go there too:
+`/tmp/zealphp-<uid>`. Logs go there too:
 `server.log`, `access.log`, `debug.log`, `zlog.log`. `php app.php logs` tails
 all four; add `--access`, `--debug`, `--server`, or `--zlog` to filter.
 

@@ -156,13 +156,16 @@ function async_logging_enabled(): bool
  *
  * Order:
  *   1. `$ZEALPHP_LOG_DIR` — explicit override, when set.
- *   2. `$XDG_RUNTIME_DIR/zealphp` — per-user runtime dir.
- *   3. `sys_get_temp_dir()/zealphp-<uid>` — per-user temp dir.
- *   4. Project-tree last resorts (`./tmp/zealphp`, `./logs/zealphp`).
+ *   2. `sys_get_temp_dir()/zealphp-<uid>` — per-user temp dir.
+ *   3. Project-tree last resorts (`./tmp/zealphp`, `./logs/zealphp`).
  *
  * There is deliberately no shared `/tmp/zealphp`: any local user can create
  * that path first (or plant symlinks in it) and so read or redirect another
  * user's logs, PID files and session files. Every default candidate is per-user.
+ * `$XDG_RUNTIME_DIR` is deliberately NOT used: it is wiped at logout (a
+ * daemonized server would lose its PID file, logs and sessions), is a
+ * size-capped tmpfs, and is unset in cron/systemd/sudo shells — so `stop` /
+ * `status` run from one of those would resolve a different directory.
  *
  * @return list<string>
  */
@@ -179,10 +182,6 @@ function zealphp_log_dir_candidates(): array
         ? (string) posix_getuid()
         : trim((string) (getenv('USER') ?: getenv('LOGNAME') ?: ''));
     if ($uid !== '') {
-        $xdg = getenv('XDG_RUNTIME_DIR');
-        if ($xdg !== false && trim((string) $xdg) !== '') {
-            $candidates[] = rtrim(trim((string) $xdg), '/') . '/zealphp';
-        }
         $safeUid = preg_replace('/[^A-Za-z0-9_-]/', '', $uid);
         if (is_string($safeUid) && $safeUid !== '') {
             $candidates[] = rtrim(sys_get_temp_dir(), '/') . '/zealphp-' . $safeUid;
