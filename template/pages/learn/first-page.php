@@ -52,8 +52,8 @@ echo "&lt;p&gt;This page was served by ZealPHP.&lt;/p&gt;";</code></pre>
     <h2>Adding dynamic content</h2>
     <p>These are PHP files, so you can use any PHP you want. Let's make the greeting personal. Depending on your <strong>Lifecycle Mode</strong>, you have two amazing ways to do this:</p>
 
-    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
-      <div style="flex: 1;">
+    <div class="lfp-compare">
+      <div class="lfp-compare-col">
         <?php App::render('/components/_code', [
           'label' => 'Coroutine Mode (Default)',
           'code'  => <<<'PHP'
@@ -65,7 +65,7 @@ echo "<h1>Hello, {$name}!</h1>";
 PHP
         ]); ?>
       </div>
-      <div style="flex: 1;">
+      <div class="lfp-compare-col">
         <?php App::render('/components/_code', [
           'label' => 'Coroutine-Legacy Mode',
           'code'  => <<<'PHP'

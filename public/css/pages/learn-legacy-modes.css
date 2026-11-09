@@ -1,0 +1,11 @@
+/* Page-scoped styles for /learn/legacy-modes — relocated from inline style= attrs. */
+
+.llgm-compare {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.llgm-compare-col {
+  flex: 1;
+}

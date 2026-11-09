@@ -73,8 +73,8 @@
       the performance and concurrency of coroutines. Let's look at what that means in practice:
     </p>
 
-    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
-      <div style="flex: 1;">
+    <div class="llgm-compare">
+      <div class="llgm-compare-col">
         <?php App::render('/components/_code', [
           'label' => 'Coroutine Mode',
           'code'  => <<<'PHP'
@@ -91,7 +91,7 @@ echo "Hello, " . $g->session['user'];
 PHP
         ]); ?>
       </div>
-      <div style="flex: 1;">
+      <div class="llgm-compare-col">
         <?php App::render('/components/_code', [
           'label' => 'Coroutine-Legacy Mode',
           'code'  => <<<'PHP'

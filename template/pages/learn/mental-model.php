@@ -168,7 +168,7 @@
       that’s the one the framework demo and every <code>composer create-project</code> scaffold ship
       with.
     </p>
-    <div class="lmm-modes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+    <div class="lmm-modes">
       <div>
         <h4 class="lmm-mode-title lmm-mode-title-coro">1. Coroutine Mode</h4>
         <pre class="mermaid">graph TD
@@ -192,7 +192,7 @@
     style H fill:#fef2f2,stroke:#f87171</pre>
         <p class="lmm-mode-caption">Concurrent · Classic PHP syntax powered by ext-zealphp</p>
       </div>
-      <div style="margin-top: 1rem;">
+      <div class="lmm-mode-spaced">
         <h4 class="lmm-mode-title lmm-mode-title-super">3. Mixed Mode</h4>
         <pre class="mermaid">graph TD
     R[Request] --> W[Warm Worker Process]
@@ -203,7 +203,7 @@
     style G fill:#fef2f2,stroke:#f87171</pre>
         <p class="lmm-mode-caption">In-process sequential · PHP-FPM drop-in</p>
       </div>
-      <div style="margin-top: 1rem;">
+      <div class="lmm-mode-spaced">
         <h4 class="lmm-mode-title lmm-mode-title-super">4. Legacy-CGI Mode</h4>
         <pre class="mermaid">graph TD
     R[Request] --> CGI[Pre-warmed subprocess pool]
