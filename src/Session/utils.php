@@ -139,6 +139,37 @@ function php_session_decode_to_array(string $data): array
  * (otherwise auto-detected from `X-Forwarded-Proto` / `HTTPS` / port `443`).
  */
 /**
+ * @internal Create `$file` as an empty file with mode `0600` when it doesn't
+ * exist yet, so a session file is never readable by other users, not even
+ * for the instant between create and chmod.
+ *
+ * fopen()'s create mode depends on the process umask, and changing the umask
+ * is process-wide (other coroutines would create files with it while this one
+ * is suspended in a hooked fopen). Instead: `tempnam()` (mkstemp: always
+ * `0600`) in the same directory, then `link()` it into place — atomic, and it
+ * fails harmlessly when a concurrent request created the file first — then
+ * drop the temp name. Callers still open the file with 'c'/'c+' and chmod it,
+ * which covers a filesystem without hard links and tightens older files.
+ */
+function zeal_session_create_private_file(string $file): void
+{
+    if (file_exists($file)) {
+        return;
+    }
+    $dir = dirname($file);
+    $tmp = @tempnam($dir, '.zsess');
+    if ($tmp === false) {
+        return;
+    }
+    // tempnam() silently falls back to the system temp dir when $dir is
+    // unusable; a link across filesystems would fail anyway, so skip it.
+    if (dirname($tmp) === (realpath($dir) ?: $dir)) {
+        @link($tmp, $file);
+    }
+    @unlink($tmp);
+}
+
+/**
  * Resolve the active custom session handler, guaranteeing the
  * `SessionHandlerInterface` contract that `open()` precedes any
  * `read()`/`write()`/`destroy()` (#369). A freshly-resolved handler —
@@ -909,6 +940,9 @@ function zeal_session_store(bool $close): bool
             /** @var array<string, mixed> $data */
             $current = $data;
             $mustExist = $g->session_loaded_digest !== [];
+            if (!$mustExist) {
+                zeal_session_create_private_file($session_file);
+            }
             $fp = @fopen($session_file, $mustExist ? 'r+' : 'c+');
             if ($fp !== false && !$mustExist) {
                 @chmod($session_file, 0600);   // native PHP's mode; 'c+' honours the umask (0644)
@@ -951,8 +985,9 @@ function zeal_session_store(bool $close): bool
             } elseif ($mustExist) {
                 $data = null;
             } else {
-                file_put_contents($session_file, php_session_encode_from_array($data));
+                zeal_session_create_private_file($session_file);
                 @chmod($session_file, 0600);
+                file_put_contents($session_file, php_session_encode_from_array($data));
             }
         }
 
