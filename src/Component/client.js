@@ -45,18 +45,12 @@
     return window.htmx && htmx.version ? parseInt(String(htmx.version), 10) : 0;
   }
 
+  // A component's own form: the outer element when it is a <form>, else the
+  // empty form it renders first; its controls join it with form="...". Never
+  // a nested child's fields.
   function values(el) {
-    if (el.tagName === 'FORM') return new FormData(el);
-    var fd = new FormData();
-    el.querySelectorAll('input[name], select[name], textarea[name]').forEach(function (input) {
-      if ((input.type === 'checkbox' || input.type === 'radio') && !input.checked) return;
-      if (input.tagName === 'SELECT' && input.multiple) {
-        Array.prototype.forEach.call(input.selectedOptions, function (o) { fd.append(input.name, o.value); });
-        return;
-      }
-      fd.append(input.name, input.value);
-    });
-    return fd;
+    var form = el.tagName === 'FORM' ? el : document.getElementById(el.id + '-zc');
+    return form ? new FormData(form) : new FormData();
   }
 
   function swap(el, html) {

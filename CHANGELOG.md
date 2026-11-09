@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added — nested reactive components (#509 phase 4)
+- **Reactive components can render reactive components.** Give each child a `key:` (required inside a parent; ids are scoped by the parent's). Guide: [Nesting components](docs/components.md#nesting-components); design and decisions: [component composition](docs/architecture/2026-11-09-component-composition.md).
+- **Each component sends only its own fields.** A component posts its own form — the outer element when `$tag` is `'form'`, otherwise an empty `<form id="{id}-zc">` it renders first — and every control and action button joins it with `form="…"`. htmx requests target the component by id and include exactly that form. Works the same with htmx 2, htmx 4, `ZealJsBinder` and without JavaScript; a `div` component with a `$submit` action now also submits on Enter without JavaScript.
+- **Children keep their state when the parent re-renders.** Each child's signed snapshot travels in its parent's form (`_zc_kids`); a parent re-render rebuilds each child from its own state, verified and used only for its own id.
+- **`#[Reactive]`** marks a child property that follows the parent's props after mount; other properties belong to the child.
+- Markup change: bound controls and action buttons carry a `form` attribute, and non-form components render a hidden form first. Templates don't change.
+
 ### Changed — one template rule for `render()` and `component()`
 - **`component()` resolves names exactly like `render()`.** One resolver serves both: a leading `/` is absolute from `template/`; otherwise nearest first: the current page's folder, that page's `components/` folder (new: colocate a component with the one page that uses it), `template/`, then `template/components/`, with `name.php` before the partial `_name.php` in each place. Existing `component('card')` calls resolve as before (`template/components/` is the last place looked). A missing template's error lists every place it looked.
 - **A component returns content only, and says so.** Stateless templates and reactive `render()` share one coercion (`App::componentMarkup()`): echo, strings, `SafeHtml`/`Stringable`, Generators, and Closures (now called with their props injected — previously printed as `{}`). A status code, array or response object used to be printed into the page (`404`, `{"ok":true}`); it now throws a `LogicException` explaining that the route or page owning the response must return it.

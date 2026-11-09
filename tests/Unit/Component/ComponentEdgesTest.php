@@ -208,7 +208,7 @@ class ComponentEdgesTest extends TestCase
         $this->assertStringContainsString('hx-vals="{&quot;_zc_args&quot;:&quot;{\\&quot;p\\&quot;:\\&quot;a/é\\&quot;}&quot;}"', $html);
     }
 
-    public function testRootGetsHxPostOnlyForAFormWithASubmitAction(): void
+    public function testADivWithASubmitActionPostsThroughItsOwnForm(): void
     {
         $div = new class extends Component {
             protected ?string $submit = 'go';
@@ -216,7 +216,13 @@ class ComponentEdgesTest extends TestCase
             public function render(): mixed { return ''; }
         };
         Registry::register($div::class, 'div-submit');
-        $this->assertStringNotContainsString('hx-post', (string) App::component('div-submit'));
+        $html = (string) App::component('div-submit');
+        $this->assertStringStartsWith(
+            '<div id="div-submit-1" data-zc="div-submit"><form method="post" action="/_zeal/c/div-submit/go" hx-post="/_zeal/c/div-submit/go" hx-target="#div-submit-1"',
+            $html,
+            'the hx-post is on the component\'s own form, not on the outer div'
+        );
+        $this->assertStringContainsString('id="div-submit-1-zc" hidden data-zc-form="div-submit-1"></form>', $html);
     }
 
     // ── endpoint outcomes ──────────────────────────────────────────

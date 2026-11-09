@@ -208,15 +208,19 @@ class ComponentHelpersTest extends TestCase
         $this->assertStringContainsString('<i>1</i>', $r['body']);
     }
 
-    public function testNoDefaultSubmitButtonOutsideForms(): void
+    public function testDefaultSubmitButtonJoinsTheComponentsOwnForm(): void
     {
+        // Enter in a field of a div component submits its own (detached) form.
         $c = new class extends Component {
             protected ?string $submit = 'go';
             #[Action] public function go(): void {}
             public function render(): mixed { return ''; }
         };
         Registry::register($c::class, 'divsub');
-        $this->assertStringNotContainsString('<button', (string) App::component('divsub'));
+        $this->assertStringContainsString(
+            '<button type="submit" hidden tabindex="-1" aria-hidden="true" formaction="/_zeal/c/divsub/go" formmethod="post" form="divsub-1-zc"></button>',
+            (string) App::component('divsub')
+        );
     }
 
     public function testCheckedComparesAsStrings(): void

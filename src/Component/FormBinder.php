@@ -21,9 +21,6 @@ class FormBinder implements ComponentBinder
 {
     public function rootAttributes(Component $component, ?string $submitUrl): array
     {
-        if ($component->tag() !== 'form') {
-            return [];
-        }
         return ['method' => 'post', 'action' => $submitUrl ?? $component->actionUrl(Component::REFRESH)];
     }
 

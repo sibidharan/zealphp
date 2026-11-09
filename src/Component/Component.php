@@ -68,6 +68,11 @@ abstract class Component
     private array $zcBadInput = [];
     /** @var array<string, string> the raw submitted text of those fields, to show back */
     private array $zcRaw = [];
+    /** @var list<string> form ids of the components this one is nested in, outermost first */
+    private array $zcAncestors = [];
+
+    /** How deep reactive components may nest. */
+    private const MAX_DEPTH = 8;
 
     /** Produce the component's inner HTML: a string, SafeHtml, or a Generator of strings. */
     abstract public function render(): mixed;
@@ -160,6 +165,18 @@ abstract class Component
         return $this->zcId;
     }
 
+    /**
+     * The id of the form this component's controls belong to: the outer
+     * element itself when `$tag` is `'form'`, otherwise an empty form the
+     * component renders as its first child. Every control and action button
+     * points at it with the `form` attribute, so a request carries exactly
+     * this component's fields — never a nested child's or the parent's.
+     */
+    public function formId(): string
+    {
+        return $this->tag === 'form' ? $this->zcId : $this->zcId . '-zc';
+    }
+
     /** The registered component name (e.g. `counter`). */
     public function name(): string
     {
@@ -191,7 +208,7 @@ abstract class Component
         }
         $json = json_encode($args === [] ? new \stdClass() : $args, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         return new SafeHtml(Attr::render(
-            App::componentBinder()->actionAttributes($this, $this->actionUrl($action), $json)
+            App::componentBinder()->actionAttributes($this, $this->actionUrl($action), $json) + ['form' => $this->formId()]
         ));
     }
 
@@ -213,8 +230,8 @@ abstract class Component
         $type = $this->meta()->props[$prop];
         // A checkbox group repeats the control, so it gets no id (ids must be unique).
         $attrs = $type->kind === 'array'
-            ? ['name' => $prop . '[]']
-            : ['name' => $prop, 'id' => $this->zcId . '-' . $prop];
+            ? ['name' => $prop . '[]', 'form' => $this->formId()]
+            : ['name' => $prop, 'id' => $this->zcId . '-' . $prop, 'form' => $this->formId()];
         if ($withValue && $type->kind !== 'array') {
             $attrs['value'] = $type->kind === 'bool' ? '1' : $this->value($prop, false);
         }
@@ -383,8 +400,43 @@ abstract class Component
         }
         $c->zcErrors = $snapshot->errors;
         $c->zcFields = array_values(array_intersect($snapshot->fields, array_keys($meta->models)));
+        $c->zcAncestors = $snapshot->ancestors;
         $c->hydrate();
         return $c;
+    }
+
+    /**
+     * Take a parent's new values for this child's `#[Reactive]` properties.
+     * The rest of the child's state stays its own.
+     *
+     * @internal
+     * @param array<string, mixed> $props
+     */
+    final public function zcApplyReactive(array $props): void
+    {
+        $meta = $this->meta();
+        foreach ($meta->reactive as $prop) {
+            if (!array_key_exists($prop, $props)) {
+                continue;
+            }
+            try {
+                $this->setProp($prop, $meta->props[$prop]->fromSnapshot($props[$prop]));
+            } catch (\InvalidArgumentException $e) {
+                throw new \LogicException("{$meta->class}::\${$prop} " . $e->getMessage(), 0, $e);
+            }
+        }
+    }
+
+    /**
+     * The reactive component whose render is running, if any: the parent of
+     * a component rendered now.
+     *
+     * @internal
+     */
+    final public static function zcParent(): ?RenderFrame
+    {
+        $frame = RequestContext::instance()->memo['_zc_parent'] ?? null;
+        return $frame instanceof RenderFrame ? $frame : null;
     }
 
     /**
@@ -556,13 +608,26 @@ abstract class Component
             throw new \LogicException(static::class . ": invalid \$tag '{$this->tag}'");
         }
         $this->zcFields = [];
+        $parent = self::zcParent();
+        if ($parent !== null) {
+            // Forms can't nest: a child's form inside a form root would be dropped.
+            if ($parent->tag === 'form') {
+                throw new \LogicException("{$parent->id} has \$tag = 'form', so it can't contain the reactive component " . static::class . "; use the default \$tag (div)");
+            }
+            if ($this->tag === 'form') {
+                throw new \LogicException(static::class . ": a nested component can't use \$tag = 'form' (forms can't nest); use the default \$tag (div)");
+            }
+            $this->zcAncestors = [...$parent->ancestors, $parent->form];
+        }
+        if (count($this->zcAncestors) >= self::MAX_DEPTH) {
+            throw new \LogicException('Reactive components nest at most ' . self::MAX_DEPTH . ' deep');
+        }
         $g = RequestContext::instance();
-        $depth = $g->memo['_zc_depth'] ?? 0;
-        $g->memo['_zc_depth'] = (is_int($depth) ? $depth : 0) + 1;
+        $g->memo['_zc_parent'] = new RenderFrame($this->zcId, $this->formId(), $this->tag, $this->zcAncestors);
         try {
             $body = App::componentMarkup($this->render(), static::class . '::render()');
         } finally {
-            $g->memo['_zc_depth'] = is_int($depth) ? $depth : 0;
+            $g->memo['_zc_parent'] = $parent;
         }
 
         $meta = $this->meta();
@@ -578,6 +643,7 @@ abstract class Component
             Snapshot::currentBinding(),
             $this->zcFields,
             $this->zcErrors,
+            ancestors: $this->zcAncestors,
         ))->encode();
 
         $submitUrl = null;
@@ -587,23 +653,41 @@ abstract class Component
             }
             $submitUrl = $this->actionUrl($this->submit);
         }
-        $attrs = Attr::merge(
-            $this->attributes,
-            App::componentBinder()->rootAttributes($this, $submitUrl),
-            ['id' => $this->zcId, 'data-zc' => $meta->name],
-        );
+        $formAttrs = App::componentBinder()->rootAttributes($this, $submitUrl);
+        $ids = ['id' => $this->zcId, 'data-zc' => $meta->name];
+        $form = '';
+        if ($this->tag === 'form') {
+            $attrs = Attr::merge($this->attributes, $formAttrs, $ids);
+        } else {
+            // An empty form of its own; controls join it with form="...". Forms
+            // never nest this way, so components can.
+            $attrs = Attr::merge($this->attributes, $ids);
+            $form = '<form ' . Attr::render(Attr::merge($formAttrs, [
+                'id' => $this->formId(), 'hidden' => true, 'data-zc-form' => $this->zcId,
+            ])) . '></form>';
+        }
         // Pressing Enter submits with the form's FIRST submit button. Put a
         // hidden one for $submit first, so an action button earlier in the
         // template (e.g. "Remove") doesn't run instead.
         $defaultSubmit = '';
-        if ($submitUrl !== null && $this->tag === 'form') {
+        if ($submitUrl !== null) {
             $defaultSubmit = '<button ' . Attr::render([
                 'type' => 'submit', 'hidden' => true, 'tabindex' => '-1', 'aria-hidden' => 'true',
-                'formaction' => $submitUrl, 'formmethod' => 'post',
+                'formaction' => $submitUrl, 'formmethod' => 'post', 'form' => $this->formId(),
             ]) . '></button>';
         }
+        // A copy of this snapshot in each enclosing component's form, so when
+        // a parent re-renders it rebuilds this child from its current state.
+        $carried = '';
+        foreach ($this->zcAncestors as $ancestorForm) {
+            $carried .= '<input ' . Attr::render([
+                'type' => 'hidden', 'name' => '_zc_kids[' . $this->zcId . ']', 'value' => $this->zcWire, 'form' => $ancestorForm,
+            ]) . '>';
+        }
         return '<' . $this->tag . ' ' . Attr::render($attrs) . '>'
-            . '<input type="hidden" name="_zc" value="' . Escape::html($this->zcWire) . '">'
+            . $form
+            . '<input type="hidden" name="_zc" value="' . Escape::html($this->zcWire) . '" form="' . Escape::html($this->formId()) . '">'
+            . $carried
             . $defaultSubmit
             . $body
             . '</' . $this->tag . '>';

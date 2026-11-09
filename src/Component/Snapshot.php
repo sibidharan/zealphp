@@ -37,6 +37,7 @@ final class Snapshot
      * @param array<string, mixed>  $props  JSON-safe values
      * @param list<string>          $fields the #[Model] fields the last render emitted controls for
      * @param array<string, string> $errors
+     * @param list<string>          $ancestors form ids of the components this one is nested in, outermost first
      */
     public function __construct(
         public readonly string $name,
@@ -47,6 +48,7 @@ final class Snapshot
         public readonly array $fields = [],
         public readonly array $errors = [],
         public readonly int $issuedAt = 0,
+        public readonly array $ancestors = [],
     ) {
     }
 
@@ -68,7 +70,7 @@ final class Snapshot
 
     public function encode(): string
     {
-        $json = json_encode([
+        $data = [
             'c' => $this->name,
             'id' => $this->id,
             'p' => $this->props === [] ? new \stdClass() : $this->props,
@@ -77,7 +79,11 @@ final class Snapshot
             'f' => $this->fields,
             'e' => $this->errors === [] ? new \stdClass() : $this->errors,
             't' => $this->issuedAt > 0 ? $this->issuedAt : time(),
-        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        ];
+        if ($this->ancestors !== []) {
+            $data['a'] = $this->ancestors;
+        }
+        $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $mac = hash_hmac('sha256', $json, AppKey::derive(self::PURPOSE), true);
         $wire = self::b64($json) . '.' . self::b64($mac);
         // decode() refuses anything bigger, so refuse it here too rather than
@@ -157,7 +163,8 @@ final class Snapshot
                 $errors[$field] = $message;
             }
         }
-        return new self($data['c'], $data['id'], $props, $data['v'], $data['s'], $fields, $errors, $data['t']);
+        $ancestors = is_array($data['a'] ?? null) ? array_values(array_filter($data['a'], 'is_string')) : [];
+        return new self($data['c'], $data['id'], $props, $data['v'], $data['s'], $fields, $errors, $data['t'], $ancestors);
     }
 
     /**

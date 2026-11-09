@@ -51,7 +51,7 @@ class ZealJsBinderTest extends TestCase
     {
         $html = (string) App::component(Counter::class, [], 'z');
         $this->assertMatchesRegularExpression(
-            '#<button type="submit" formaction="/_zeal/c/counter/increment" formmethod="post" name="_zc_args" value="[^"]*" data-zc-action>#',
+            '#<button type="submit" formaction="/_zeal/c/counter/increment" formmethod="post" name="_zc_args" value="[^"]*" data-zc-action form="counter-z-zc">#',
             $html
         );
         $this->assertStringNotContainsString('hx-', $html, 'no htmx attributes');
