@@ -24,7 +24,16 @@ use function ZealPHP\response_set_status;
 class Response
 {
     public \OpenSwoole\Http\Response $parent;
-    private \ZealPHP\RequestContext $g;
+    /**
+     * The request context this response belongs to, held weakly. The context
+     * holds this response (`$g->zealphp_response`), so a strong reference back
+     * made a cycle: the request's objects, and the upload temp files OpenSwoole
+     * deletes when its request object dies, lived until PHP's cycle collector
+     * happened to run.
+     *
+     * @var \WeakReference<\ZealPHP\RequestContext>
+     */
+    private \WeakReference $gRef;
     private ?int $statusCode = null;
 
     /**
@@ -44,7 +53,13 @@ class Response
     public function __construct(\OpenSwoole\Http\Response $response)
     {
         $this->parent = $response;
-        $this->g = \ZealPHP\RequestContext::instance();
+        $this->gRef = \WeakReference::create(\ZealPHP\RequestContext::instance());
+    }
+
+    /** This response's request context; the current one once that is gone. */
+    private function g(): \ZealPHP\RequestContext
+    {
+        return $this->gRef->get() ?? \ZealPHP\RequestContext::instance();
     }
 
     /**
@@ -104,7 +119,7 @@ class Response
     public function status(int $statusCode, string $reason = ''): bool
     {
         $this->statusCode = $statusCode;
-        $this->g->status = $statusCode;
+        $this->g()->status = $statusCode;
         return $this->parent->status($statusCode, $reason);
     }
 
@@ -153,8 +168,8 @@ class Response
             ));
         }
         $this->headersList[] = [$key, $value];
-        if (strtolower($key) === 'location' && $value && ($this->g->status === 200 || $this->g->status === null)) {
-            $this->g->status = 302;
+        if (strtolower($key) === 'location' && $value && ($this->g()->status === 200 || $this->g()->status === null)) {
+            $this->g()->status = 302;
         }
         return true;
     }
@@ -225,16 +240,16 @@ class Response
             return true; // relative / no host → same-origin
         }
         /** @var mixed $reqHostRaw */
-        $reqHostRaw = $this->g->server['HTTP_HOST'] ?? $this->g->server['SERVER_NAME'] ?? '';
+        $reqHostRaw = $this->g()->server['HTTP_HOST'] ?? $this->g()->server['SERVER_NAME'] ?? '';
         if (!is_string($reqHostRaw) || $reqHostRaw === '') {
             return true; // request origin undeterminable → don't over-block
         }
 
         // Request scheme — HTTPS via the HTTPS flag, X-Forwarded-Proto, or the
         // bound port 443.
-        $https      = strtolower((string) ($this->g->server['HTTPS'] ?? ''));
-        $xfp        = strtolower((string) ($this->g->server['HTTP_X_FORWARDED_PROTO'] ?? ''));
-        $serverPort = (string) ($this->g->server['SERVER_PORT'] ?? '');
+        $https      = strtolower((string) ($this->g()->server['HTTPS'] ?? ''));
+        $xfp        = strtolower((string) ($this->g()->server['HTTP_X_FORWARDED_PROTO'] ?? ''));
+        $serverPort = (string) ($this->g()->server['SERVER_PORT'] ?? '');
         $reqScheme  = ($https !== '' && $https !== 'off') || $xfp === 'https' || $serverPort === '443'
             ? 'https' : 'http';
 
@@ -328,7 +343,7 @@ class Response
             \ZealPHP\elog('[security] Cross-origin redirect: ' . $url, 'warn');
         }
 
-        $this->g->status = $status;
+        $this->g()->status = $status;
         $this->headersList[] = ['Location', $url];
 
         // OpenSwoole's PSR-7 emit() drops reason phrases, which makes its
@@ -339,7 +354,7 @@ class Response
         // overwrite what we just wrote.
         if ($this->parent->isWritable()) {
             $reason = self::REDIRECT_REASONS[$status] ?? '';
-            $this->g->_streaming = true;
+            $this->g()->_streaming = true;
             $this->parent->status($status, $reason);
             // Group same-name headers so multiple appends (e.g. several Link
             // preload hints emitted alongside a redirect) survive on the wire
@@ -447,14 +462,14 @@ class Response
      */
     public function stream(callable $fn): void
     {
-        $this->g->_streaming = true;
+        $this->g()->_streaming = true;
         // HEAD: emit headers only, never the streamed body — mirrors the
         // Generator streaming path in App::emitGeneratorStream() (which ends the
         // response without writing chunks). Without this, stream()/sse() (sse()
         // delegates here) would invoke $fn and write a body on a HEAD request,
         // violating RFC 9110 §9.3.2 (#238). Flush the queued headers, end the
         // connection, and return WITHOUT calling $fn.
-        $method = (string) ($this->g->server['REQUEST_METHOD'] ?? 'GET');
+        $method = (string) ($this->g()->server['REQUEST_METHOD'] ?? 'GET');
         if ($method === 'HEAD') {
             $this->flush();
             if ($this->parent->isWritable()) {
@@ -772,13 +787,13 @@ class Response
     {
         if (!file_exists($path) || !is_readable($path)) {
             $this->status(404);
-            $this->g->_streaming = true;
+            $this->g()->_streaming = true;
             $this->flush();
             $this->endParent('File not found');
             return;
         }
 
-        $this->g->_streaming = true;
+        $this->g()->_streaming = true;
         $total = filesize($path);
         if ($total === false) { $total = 0; }
 
@@ -836,7 +851,7 @@ class Response
         $this->header('ETag', $etag);
         $this->header('Last-Modified', $lastModified);
 
-        $reqHeaders = $this->g->zealphp_request->parent->header ?? [];
+        $reqHeaders = $this->g()->zealphp_request->parent->header ?? [];
         if (!is_array($reqHeaders)) {
             $reqHeaders = [];
         }
@@ -846,7 +861,7 @@ class Response
                 $condHeaders[$hk] = $hv;
             }
         }
-        $methodRaw = $this->g->server['REQUEST_METHOD'] ?? 'GET';
+        $methodRaw = $this->g()->server['REQUEST_METHOD'] ?? 'GET';
         $method    = is_string($methodRaw) && $methodRaw !== '' ? $methodRaw : 'GET';
         $cond = ConditionalRequest::evaluate($method, $condHeaders, $etag, $mtime);
         if ($cond === 304 || $cond === 412) {
@@ -1129,7 +1144,7 @@ class Response
             $this->headersList = [];
             $this->cookiesList = [];
             $this->rawCookiesList = [];
-            $this->g->status = null;
+            $this->g()->status = null;
             return true;
         }
         return false;

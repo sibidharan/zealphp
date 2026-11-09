@@ -33,7 +33,7 @@ class Request extends \OpenSwoole\HTTP\Request
     /** @var array<string, mixed>|null */
     public $post;
 
-    /** @var array<string, mixed>|null */
+    /** @var array<mixed>|null Paths of this request's upload temp files (a copy). */
     public $tmpfiles;
 
     public function __construct(\OpenSwoole\Http\Request $request)
@@ -52,8 +52,12 @@ class Request extends \OpenSwoole\HTTP\Request
         $this->files = &$request->files;
         /** @phpstan-ignore-next-line assign.propertyType — by-ref proxy to mixed-typed OpenSwoole prop */
         $this->post = &$request->post;
-        /** @phpstan-ignore-next-line assign.propertyType — by-ref proxy to mixed-typed OpenSwoole prop */
-        $this->tmpfiles = &$request->tmpfiles;
+        // A copy, never a reference: OpenSwoole deletes the upload temp files
+        // listed in its own `tmpfiles` property when the request ends, and a
+        // PHP reference on that property hides the list from it, so every
+        // multipart upload left a /tmp/swoole.upfile.* behind (disk fill).
+        $tmpfiles = $request->tmpfiles;
+        $this->tmpfiles = is_array($tmpfiles) ? $tmpfiles : null;
     }
 
     /**
