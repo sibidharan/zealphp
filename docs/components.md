@@ -24,12 +24,20 @@ Put a template in `template/components/` and render it by name:
 </article>
 ```
 
+Then call it from any page or template — here a page rendered by `public/invoices.php` (`App::render('invoices-page')`):
+
 ```php
-<?= App::component('card', [
-    'title' => 'Invoices',
-    'slot'  => App::component('ui/button', ['text' => 'New invoice']),
-]) ?>
+<?php /* template/invoices-page.php */ use ZealPHP\App; ?>
+<main>
+  <h1>Billing</h1>
+  <?= App::component('card', [
+      'title' => 'Invoices',
+      'slot'  => App::component('ui/button', ['text' => 'New invoice']),
+  ]) ?>
+</main>
 ```
+
+A stateless component needs nothing else: no registration, no key, no script.
 
 - **Lookup:** the [same rule as `render()`](templates-and-rendering.md#path-resolution), nearest first: the page's folder, the page's `components/`, `template/`, then `template/components/`; `card.php` before the partial `_card.php` in each (so existing underscore partials work as they are). `'ui/button'` names a folder.
 - **Any template:** a leading `/` renders any template, absolute from `template/`: `App::component('/emails/welcome', ['user' => $u])`. This is how you get markup from a template that isn't a component; it replaces the deprecated `App::renderToString()`.
@@ -99,10 +107,76 @@ final class Counter extends Component
 <button <?= $c->action('add', ['by' => 10]) ?>>+10</button>
 ```
 
-Put it on a page:
+### Putting it on a page, end to end
+
+Four files, plus the counter's template above. This exact set runs as-is:
+
+```
+route/components.php           registers the component (once, at boot)
+src/Components/Counter.php     the class above (Composer autoloads App\ from src/)
+template/components/counter.php   its view, above
+public/counter.php             the URL /counter
+template/counter-page.php      the page that renders it
+```
+
+**1. Register it** — `route/components.php` (route files load at boot):
 
 ```php
-<?= App::component(Counter::class, ['count' => 5], key: 'main') ?>
+<?php
+use ZealPHP\App;
+use App\Components\Counter;
+
+App::components([Counter::class]);
+```
+
+**2. Add a page** — `public/counter.php` serves `/counter` and renders a page template:
+
+```php
+<?php
+use ZealPHP\App;
+
+App::render('counter-page', ['title' => 'Counter']);
+```
+
+**3. Render the component in the page** — `template/counter-page.php`. The component is one line, `<?= App::component(...) ?>`, anywhere in the HTML; the page only has to load htmx:
+
+```php
+<?php
+use ZealPHP\App;
+use App\Components\Counter;
+use function ZealPHP\e;
+?>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title><?= e($title) ?></title>
+  <script src="https://unpkg.com/htmx.org@2.0.10" defer></script>
+</head>
+<body>
+  <h1><?= e($title) ?></h1>
+  <?= App::component(Counter::class, ['count' => 5], key: 'main') ?>
+</body>
+</html>
+```
+
+Start the server with a key (`ZEALPHP_APP_KEY=… php app.php`) and open `/counter`: the buttons update the count in place. A route works the same way as the public file:
+
+```php
+$app->route('/counter', fn() => App::render('counter-page', ['title' => 'Counter']));
+```
+
+In a site with a shared layout, put the htmx `<script>` in the layout's `<head>` once and call `App::component()` from any page template, partial or other component's template. Two optional extras also go in the layout once: `<?= App::componentPushRoot() ?>` before `</body>` for [live updates](#live-updates-push), and `ZealJsBinder::script()` instead of htmx for [pages without htmx](#without-htmx-zealjsbinder).
+
+The browser receives the component already rendered:
+
+```html
+<form method="post" action="/_zeal/c/counter/_refresh" id="counter-main" data-zc="counter">
+  <input type="hidden" name="_zc" value="eyJjIjoiY291bnRlciIs…">   <!-- the signed state -->
+  <span>5</span>
+  <button type="submit" formaction="/_zeal/c/counter/add" hx-post="/_zeal/c/counter/add" …>+1</button>
+  <button type="submit" formaction="/_zeal/c/counter/add" value="{&quot;by&quot;:10}" …>+10</button>
+</form>
 ```
 
 The template is only the inside of the component. The framework wraps it in the `$tag` element (with `id="counter-main"` and `data-zc="counter"`) and adds a hidden `_zc` input holding the signed snapshot.
