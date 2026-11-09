@@ -83,6 +83,30 @@ abstract class Component
     }
 
     /**
+     * Topics this component depends on. When any of them is invalidated
+     * (`Component::invalidate('contacts')`), open pages showing this
+     * component re-render it. Needs `App::componentPushRoot()` in the layout.
+     * Topics: 1-128 letters, digits, `:`, `_`, `.` or `-` (e.g. `contact:42`).
+     *
+     * @return list<string>
+     */
+    public function topics(): array
+    {
+        return [];
+    }
+
+    /**
+     * Mark topics stale: every open page showing a component that lists one
+     * of them in `topics()` re-renders it (this worker, the node's other
+     * workers, and other nodes with the Redis Store backend). Call it after
+     * the write that changed the data.
+     */
+    public static function invalidate(string ...$topics): void
+    {
+        Push::invalidate(...$topics);
+    }
+
+    /**
      * Whether the current user may run this action. `$action` is the method
      * name, or {@see UPDATE} / {@see REFRESH}. Return false to answer 403.
      */
@@ -528,7 +552,7 @@ abstract class Component
      */
     final public function zcToHtml(): string
     {
-        if (preg_match('/^[a-z][a-z0-9-]*$/', $this->tag) !== 1) {
+        if (preg_match('/^[a-z][a-z0-9-]*$/D', $this->tag) !== 1) {
             throw new \LogicException(static::class . ": invalid \$tag '{$this->tag}'");
         }
         $this->zcFields = [];

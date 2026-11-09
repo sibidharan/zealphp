@@ -106,4 +106,23 @@ class CounterTest extends TestCase
         }
         $this->assertSame(100, $c->get());
     }
+    public function testAnonymousZeroCounterIsSharedAcrossFork(): void
+    {
+        // Regression: `new Counter(0)` skipped the backend at construction, so
+        // the Atomic was allocated lazily after fork and each worker got its
+        // own counter. Allocated at construction, a child's write is visible
+        // to the parent.
+        if (!function_exists('pcntl_fork')) {
+            $this->markTestSkipped('pcntl not available');
+        }
+        $c = new Counter(0);
+        $pid = pcntl_fork();
+        if ($pid === 0) {
+            $c->increment(5);
+            exit(0);
+        }
+        $this->assertGreaterThan(0, $pid);
+        pcntl_waitpid($pid, $status);
+        $this->assertSame(5, $c->get());
+    }
 }

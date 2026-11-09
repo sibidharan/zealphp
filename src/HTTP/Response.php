@@ -441,6 +441,9 @@ class Response
      *
      * Use inside a coroutine route — co::sleep() or channel ops between
      * $write() calls yield the event loop so other requests aren't blocked.
+     * $write() returns false once the client has gone.
+     *
+     * @param callable(\Closure(string): bool): mixed $fn
      */
     public function stream(callable $fn): void
     {
@@ -480,20 +483,22 @@ class Response
      * Server-Sent Events endpoint. Sets the required headers and delegates
      * to stream(). The $fn callback receives an $emit() closure:
      *   $emit(string $data, string $event = '', string $id = '')
-     * which formats and sends one SSE message.
+     * which formats and sends one SSE message and returns false once the
+     * client has gone.
      */
     public function sse(callable $fn): void
     {
         $this->header('Content-Type', 'text/event-stream');
         $this->header('Cache-Control', 'no-cache');
         $this->header('X-Accel-Buffering', 'no');
-        $this->stream(function(callable $write) use ($fn) {
-            $emit = function(string $data, string $event = '', string $id = '') use ($write): void {
+        $this->stream(function(\Closure $write) use ($fn) {
+            // Returns false once the client is gone, so long-lived streams can stop.
+            $emit = function(string $data, string $event = '', string $id = '') use ($write): bool {
                 $msg = '';
                 if ($id !== '')    $msg .= "id: $id\n";
                 if ($event !== '') $msg .= "event: $event\n";
                 $msg .= "data: $data\n\n";
-                $write($msg);
+                return $write($msg);
             };
             $fn($emit);
         });

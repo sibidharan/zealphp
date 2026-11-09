@@ -26,7 +26,7 @@ final class Registry
     public static function register(string $class, ?string $name = null): ComponentMeta
     {
         $name ??= self::defaultName($class);
-        if (preg_match('/^[a-z][a-z0-9-]{0,63}$/', $name) !== 1) {
+        if (preg_match('/^[a-z][a-z0-9-]{0,63}$/D', $name) !== 1) {
             throw new \InvalidArgumentException(
                 "Component name '{$name}' must be lowercase letters, digits and dashes, starting with a letter"
             );

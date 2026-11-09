@@ -401,16 +401,95 @@ For writing a binder or a client.
 
 Headers: `Zeal-Events` (JSON object of event → detail), `Zeal-Redirect` (a path to navigate to), `Zeal-Reload: 1` (with 409). Every response is `Cache-Control: no-store`.
 
+## Live updates (push)
+
+A component can stay current while it's on screen: when data it shows changes, every open page showing it re-renders it.
+
+```php
+final class SharedLikes extends Component
+{
+    public static ?Counter $likes = null;      // created in route/ before run()
+
+    public function topics(): array
+    {
+        return ['demo:likes'];                 // what this component depends on
+    }
+
+    #[Action]
+    public function like(): void
+    {
+        self::$likes?->increment();
+        Component::invalidate('demo:likes');   // after the write
+    }
+
+    public function render(): mixed
+    {
+        return $this->view('components/live/likes', ['likes' => self::$likes?->get() ?? 0]);
+    }
+}
+```
+
+Add the push root once to your layout, after the components:
+
+```php
+<?= App::componentPushRoot() ?>
+</body>
+```
+
+It renders a `<script>` only when the page rendered a component with topics. Call `Component::invalidate()` from anywhere that changes the data — an action, an API handler, a task worker, a sidecar process, a timer.
+
+### How it works
+
+1. While rendering, each reactive component's `topics()` are recorded. The push root signs the list into a token bound to the visitor's session, so a page can only subscribe to topics it was actually shown.
+2. The page opens one connection: a WebSocket (`/_zeal/c/ws`) or an SSE stream (`/_zeal/c/stream`).
+3. `Component::invalidate('demo:likes')` delivers to this worker's connections, sends the topics to the node's other workers (OpenSwoole `sendMessage`), and, with the Redis or Tiered `Store` backend, publishes them to other nodes. From a task worker or a sidecar process it reaches every HTTP worker.
+4. A connection receives only the **ids** of its stale components, never HTML or data. The page then re-requests each one through the normal endpoint (`_refresh`), with its own cookies, so each visitor sees what *their* session is allowed to see.
+
+Invalidations to one connection are coalesced (50 ms by default), so a burst of writes costs one refresh, and what a worker invalidates within a tick goes to the other workers and nodes as one message. The page skips a component while an htmx request from it is running (an action's response already carries its new state) or while the visitor is typing in it, and runs at most one refresh per component at a time. After a reconnect it refreshes all its components, because invalidations may have been missed.
+
+### Configuration
+
+```php
+App::componentPush(transport: 'sse', maxConnections: 2000, coalesce: 0.1);   // before App::run()
+```
+
+| Setting | Default | |
+|---|---|---|
+| `transport` | `'ws'` (or `ZEALPHP_COMPONENT_PUSH=sse`) | `'ws'`: one WebSocket per page. `'sse'`: one streamed response per page. |
+| `maxConnections` | 1000 | open push connections per worker; beyond it a WebSocket is closed with 1013 (retry later) and an SSE stream asks the browser to come back in 15–45 s |
+| `coalesce` | 0.05 | seconds to gather invalidations into one message |
+
+**WebSocket or SSE.** WebSockets are the default because browsers allow only six HTTP/1.1 connections per host: with SSE, each open tab holds one, so a visitor's seventh tab of your site would stall. Use SSE over HTTP/2 (one connection carries every stream) or where a proxy blocks WebSockets. SSE holds a coroutine per open page and needs coroutine mode; without coroutines the push root uses the WebSocket regardless.
+
+Both reconnect on their own: SSE after a jittered 1–4 s, the WebSocket client with backoff (0.5 s to 60 s, jittered). A stream ends when the browser leaves (noticed at the next 15 s heartbeat) and after an hour. Navigating with hx-boost to a page without the components closes the connection.
+
+### Topics
+
+Topic names are 1–128 characters of letters, digits, `:`, `_`, `.` and `-` (`contacts`, `contact:42`, `org.7.billing`). They're coarse on purpose: a topic says *something here changed*, and the re-render decides what the visitor sees. Use a topic per record (`contact:42`) when a list of many items would otherwise refresh for every edit.
+
+- **Topics are fixed when the page renders.** A component whose topics depend on state that its actions change (`contacts:page:2` after paging) keeps the topics it was first rendered with until the page reloads. Prefer topics that don't change for an instance.
+- **Topics are visible.** They're in the page (the token is signed, not encrypted) and in the access log (the token travels in the connection URL). Don't put secrets in them; `user:42` is fine, an email address isn't.
+- An invalid topic throws in dev mode and is logged and dropped otherwise, so a bad topic built from data doesn't break the page.
+
+### Security
+
+- The token is HMAC-signed with a key derived from `ZEALPHP_APP_KEY` and bound to the session. A token from another session, or signed with a key no longer configured, is refused; the page then refreshes its components, which reload the page when their snapshots are stale too.
+- Tokens don't expire on their own: a push carries only ids, and every refresh re-checks the snapshot's age and `authorize()`.
+- Pushes carry ids only, and the refresh is an ordinary component request: `authorize()`, the session binding and the origin checks all apply. A refresh that's redirected (to a login page, say) is not swapped in.
+- `Component::invalidate()` is server-side only; clients can't trigger one.
+- **Capacity.** `maxConnections` is per worker, and a page's token can be reused for many connections. On a public site, cap connections per client in front of ZealPHP (your proxy's per-IP connection limit on `/_zeal/c/ws` and `/_zeal/c/stream`).
+
 ## Running in coroutine-legacy
 
 `App::components()` loads and reflects your component classes — and the framework's own component classes — in the master, before workers fork, so none of them is compiled cold under concurrency. Instances live for one request and are never stored in statics, so they need no isolation support.
 
 ## Limits in this version
 
+- **Push needs the root on the page.** Pages that don't include `App::componentPushRoot()` render components normally but never receive updates.
 - **No reactive nesting.** A reactive component inside another reactive component's render throws: the parent's requests would carry the child's snapshot too. Stateless components nest freely.
 - **Dev hot-reload** (`--dev`) re-registers components from `route/*.php`, but the endpoint route and the key check are set up at boot: if a reload adds the *first* component, restart. Removed components stay registered until restart.
 - **Behind a proxy that rewrites `Host`**, the `Origin` fallback and the no-JS back-link compare against the rewritten host. Modern browsers send `Sec-Fetch-Site`, which isn't affected; the back-link falls back to `/`.
 
 ## What's next
 
-Planned in [the design doc](architecture/2026-11-06-server-driven-components.md): a bundled vanilla-JS client, pushing "refresh" signals over WebSocket when server data changes (`Component::invalidate('topic')`), nested components, and benchmarks against `App::renderHtmx()` fragments.
+Planned in [the design doc](architecture/2026-11-06-server-driven-components.md): a bundled vanilla-JS client for actions and input binding, nested components, and benchmarks against `render(…, htmx: true)` fragments.

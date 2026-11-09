@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added — component push (#509 phase 3)
+- **Components update live across tabs and visitors.** A reactive component lists what it depends on in `topics()`; `Component::invalidate('contacts')` after a write makes every open page showing it re-render it. Add `<?= App::componentPushRoot() ?>` to the layout. Demo: "Live across tabs" on `/components`. Guide: [Live updates (push)](docs/components.md#live-updates-push).
+- **WebSockets or SSE.** `App::componentPush(transport: 'ws'|'sse', maxConnections:, coalesce:)`, or `ZEALPHP_COMPONENT_PUSH=sse`. One connection per page. WebSockets are the default because HTTP/1.1 browsers allow six connections per host, so SSE suits HTTP/2. Dead connections are noticed at the next heartbeat; a full worker tells clients to retry later; hx-boost navigation away closes the connection.
+- **Ids only, never data.** A connection receives the ids of its stale components and the page re-requests each through the normal endpoint with its own session, so `authorize()` and the session binding still decide what each visitor sees. Subscriptions come from a signed, session-bound token listing the components the page rendered.
+- **Cluster-wide.** Invalidations reach the node's other workers over OpenSwoole's worker pipe (also from task workers and sidecars) and, with the Redis or Tiered Store backend, other nodes over pub/sub. Messages to one connection are coalesced (50 ms default), and a worker's invalidations within a tick fan out as one message.
+
+### Fixed — pub/sub on the Tiered backend
+- **`App::subscribe()` handlers never ran with the Tiered Store backend.** `Store::publish()` already published through Tiered's Redis L2, but the subscriber runners only started for the plain Redis backend. They now subscribe through the L2 too.
+
+### Changed — SSE
+- **`$response->sse()`'s `$emit()` returns `false` once the client has gone**, like `stream()`'s `$write()`, so long-lived streams can stop. OpenSwoole's `isWritable()` can stay true after a disconnect.
+
+### Fixed — `new Counter(0)` was per-worker
+- **An anonymous counter starting at 0 wasn't shared between workers** on the default Atomic backend. Construction skipped the backend, so each worker allocated its own `OpenSwoole\Atomic` after fork. `Cache`'s hit/miss statistics and any app counter created as `new Counter(0)` were affected. The slot is now allocated at construction, before fork.
+
+### Fixed — trailing newlines in component input
+- **Validator rules `integer`, `alpha`, `alpha_num` and `alpha_dash` accepted a trailing newline** (`"abc\n"`), because `$` in a PCRE matches before a final newline. The same applied to component names, root tags and attribute names. All anchored patterns in `src/Component` now use the `D` modifier.
+
 ### Changed — gates and dev feedback
 - **~2,900 lines of `src/App.php` were invisible to coverage.** Two `// @codeCoverageIgnoreStart — reason` markers had trailing text, which php-code-coverage doesn't recognise; its parser then treated the next `@codeCoverageIgnoreEnd` as the start of a region running to the following End, silently excluding `render()`, `component()`, `run()` and more from coverage and from Codecov's patch gate. The markers are bare now, and `CoverageMarkersTest` fails on any marker with trailing text or unbalanced Start/End.
 - **`src/Component` is in the mutation gate** (`infection.json5`), at 93% covered MSI.

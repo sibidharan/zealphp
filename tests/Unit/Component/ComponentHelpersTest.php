@@ -251,6 +251,12 @@ class ComponentHelpersTest extends TestCase
         Attr::render(['on"click' => 'x']);
     }
 
+    public function testAttrRefusesATrailingNewlineInTheName(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        Attr::render(["id\n" => 'x']);
+    }
+
     public function testModelRejectsNegativeDebounce(): void
     {
         $this->expectException(\InvalidArgumentException::class);

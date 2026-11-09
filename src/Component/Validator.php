@@ -143,13 +143,13 @@ final class Validator
             case 'numeric':
                 return is_int($value) || is_float($value) || (is_string($value) && is_numeric($value));
             case 'integer':
-                return is_int($value) || (is_string($value) && preg_match('/^-?\d+$/', $value) === 1);
+                return is_int($value) || (is_string($value) && preg_match('/^-?\d+$/D', $value) === 1);
             case 'alpha':
-                return is_string($value) && preg_match('/^\p{L}+$/u', $value) === 1;
+                return is_string($value) && preg_match('/^\p{L}+$/uD', $value) === 1;
             case 'alpha_num':
-                return is_string($value) && preg_match('/^[\p{L}\p{N}]+$/u', $value) === 1;
+                return is_string($value) && preg_match('/^[\p{L}\p{N}]+$/uD', $value) === 1;
             case 'alpha_dash':
-                return is_string($value) && preg_match('/^[\p{L}\p{N}_-]+$/u', $value) === 1;
+                return is_string($value) && preg_match('/^[\p{L}\p{N}_-]+$/uD', $value) === 1;
             default:
                 throw new \LogicException("Unknown validation rule '{$name}' on {$field}");
         }

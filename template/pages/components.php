@@ -165,6 +165,49 @@ HTML]); ?>
   </div>
 </div>
 
+<h3 id="push" class="lc-mt-2">Live across tabs (push)</h3>
+<p>One like count shared by every visitor. The component lists the topic it depends on; the action invalidates it. Every open page showing the component re-renders it, over one SSE connection per page. Open this page in a second tab and click Like there.</p>
+
+<div class="lc-demo-grid">
+  <div class="lc-panel">
+    <p class="lc-panel-label">Live</p>
+    <?= $live ? App::component(\ZealPHP\Site\Components\SharedLikes::class, [], key: 'demo') : '<p>Demo disabled.</p>' ?>
+  </div>
+  <div>
+<?php App::render('/components/_code', [
+    'label' => 'src/Site/Components/SharedLikes.php',
+    'code'  => <<<'PHP'
+final class SharedLikes extends Component
+{
+    public static ?Counter $likes = null;     // shared by all workers
+
+    public function topics(): array
+    {
+        return ['demo:likes'];
+    }
+
+    #[Action]
+    public function like(): void
+    {
+        self::$likes?->increment();
+        Component::invalidate('demo:likes');   // every page showing it re-renders
+    }
+
+    public function render(): mixed
+    {
+        return $this->view('components/live/likes', ['likes' => self::$likes?->get() ?? 0]);
+    }
+}
+PHP]); ?>
+<?php App::render('/components/_code', [
+    'label' => 'template/_master.php (once, before </body>)',
+    'lang'  => 'html',
+    'code'  => <<<'HTML'
+<?= App::componentPushRoot() ?>
+HTML]); ?>
+  </div>
+</div>
+
 <h2 id="how" class="lc-mt-2">How a request works</h2>
 <ol class="lc-list">
   <li>The page renders the component with <code>App::component()</code>. The framework wraps the template output in the component's element and adds a hidden <code>_zc</code> field: the state, signed with <code>ZEALPHP_APP_KEY</code> and tied to the visitor's session.</li>

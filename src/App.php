@@ -6885,6 +6885,10 @@ class App
 
         self::onWorkerStart(function () {
             $backend = \ZealPHP\Store::defaultBackend();
+            // Tiered publishes through its L2 (Store::publish()); subscribe there too.
+            if ($backend instanceof \ZealPHP\Store\TieredBackend) {
+                $backend = $backend->l2();
+            }
             if (!($backend instanceof \ZealPHP\Store\RedisBackend)) {
                 if (self::$pubsubRegistry !== [] || self::$reliableRegistry !== []) {
                     error_log('App::onPubSub / onReliableMessage handlers are registered but the Store backend is not redis — runners NOT spawned. Set ZEALPHP_STORE_BACKEND=redis or Store::defaultBackend(\'redis\').');
@@ -8096,7 +8100,7 @@ class App
             $seq[$meta->name] = $n;
             $g->memo['_zc_seq'] = $seq;
             $key = (string) $n;
-        } elseif (preg_match('/^[A-Za-z0-9_-]{1,64}$/', $key) !== 1) {
+        } elseif (preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $key) !== 1) {
             throw new \InvalidArgumentException('Component key must be 1-64 letters, digits, - or _');
         }
         $id = $meta->name . '-' . $key;
@@ -8115,7 +8119,9 @@ class App
             }
         }
         $instance ??= Component\Component::zcMount($meta, $props, $id);
-        return new SafeHtml($instance->zcToHtml());
+        $html = $instance->zcToHtml();
+        Component\Push::recordRendered($id, $meta->name, $instance->topics());
+        return new SafeHtml($html);
     }
 
     /**
@@ -8152,6 +8158,110 @@ class App
             "Component {$name} is neither registered with App::components() nor a template at "
             . "template/{$root}{$sub}{$base}.php"
         );
+    }
+
+    /**
+     * Configure component push (see `Component::topics()` and
+     * `Component::invalidate()`). Call before `App::run()`.
+     *
+     * - `transport`: `'ws'` (default; one WebSocket per page) or `'sse'` (one
+     *   streamed response per page; best over HTTP/2, since HTTP/1.1 browsers
+     *   allow six connections per host). `ZEALPHP_COMPONENT_PUSH` sets it too.
+     * - `maxConnections`: open push connections allowed per worker (default 1000).
+     * - `coalesce`: seconds to gather invalidations into one message (default 0.05).
+     *
+     * @param string|null $transport 'sse' or 'ws'
+     */
+    public static function componentPush(?string $transport = null, ?int $maxConnections = null, ?float $coalesce = null): string
+    {
+        Component\Push::configure($transport, $maxConnections, $coalesce);
+        return Component\Push::transport();
+    }
+
+    /**
+     * The push connection for this page: a `<script>` that subscribes the
+     * page to the topics of the reactive components it rendered. Put
+     * `<?= App::componentPushRoot() ?>` once at the end of the layout, after
+     * the components; it renders nothing when no component has topics.
+     */
+    public static function componentPushRoot(): SafeHtml
+    {
+        return Component\Push::root();
+    }
+
+    /**
+     * Route handler for the SSE push stream.
+     *
+     * @internal
+     */
+    public static function componentPushStream(\ZealPHP\HTTP\Response $response): string
+    {
+        $g = RequestContext::instance();
+        $token = $g->get['t'] ?? '';
+        try {
+            if (\OpenSwoole\Coroutine::getCid() < 0) {
+                throw new Component\ComponentException('Component push needs coroutine mode', 501);
+            }
+            $subs = Component\Push::verify(is_string($token) ? $token : '');
+        } catch (Component\ComponentException $e) {
+            if ($e->getCode() === 409) {
+                // EventSource can't read a status: say "stale" as an event, so the
+                // page refreshes its components (and reloads if they're stale too).
+                $response->sse(static function (callable $emit): void {
+                    $emit('[]', 'zc-stale');
+                });
+                return '';
+            }
+            $response->status($e->getCode());
+            $response->header('Content-Type', 'text/plain; charset=utf-8');
+            return $e->getMessage();
+        }
+        $response->sse(static function (callable $emit) use ($subs, $g): void {
+            $res = $g->openswoole_response;
+            if (!$res instanceof \OpenSwoole\Http\Response) {
+                return;
+            }
+            // Reconnect delay, jittered so a restart doesn't bring every page back at once.
+            $res->write('retry: ' . random_int(1000, 4000) . "\n\n");
+            $chan = new \OpenSwoole\Coroutine\Channel(16);
+            $connId = 'sse:' . \OpenSwoole\Coroutine::getCid() . ':' . bin2hex(random_bytes(4));
+            try {
+                Component\Push::connect($connId, $subs, static function (string $msg) use ($chan): bool {
+                    if ($chan->push($msg, 0.001)) {
+                        return true;
+                    }
+                    $chan->close(); // full: end the stream so the page reconnects and refreshes
+                    return false;
+                });
+            } catch (Component\ComponentException) {
+                // Full: come back much later instead of hammering a busy worker.
+                $res->write('retry: ' . random_int(15000, 45000) . "\n\n");
+                $emit('[]', 'zc-busy');
+                return;
+            }
+            try {
+                if (!$emit('[]', 'zc-ready')) {
+                    return;
+                }
+                $until = time() + 3600; // the browser reconnects and refreshes after this
+                while (time() < $until) {
+                    $msg = $chan->pop(15);
+                    if (is_string($msg)) {
+                        $sent = $emit($msg, 'zc');
+                    } elseif ($chan->errCode === \OpenSwoole\Coroutine\Channel::CHANNEL_CLOSED) {
+                        break;
+                    } else {
+                        $sent = $res->write(": ping\n\n") !== false; // also keeps proxies from closing it
+                    }
+                    if (!$sent) {
+                        break; // the client left; isWritable() can stay true after a disconnect
+                    }
+                }
+            } finally {
+                Component\Push::disconnect($connId);
+            }
+        });
+        return '';
     }
 
     /**
@@ -10620,6 +10730,55 @@ class App
                     $response->status($r['status']);
                     return $r['body'];
                 });
+            // Push: the client script, the SSE stream and the WebSocket. The push
+            // token rides in the URL (EventSource and WebSocket can't send
+            // headers); it lists the page's component ids and topics.
+            $this->route(Component\Push::CLIENT, ['methods' => ['GET']], function (\ZealPHP\HTTP\Response $response) {
+                $response->header('Content-Type', 'text/javascript; charset=utf-8');
+                $response->header('Cache-Control', 'public, max-age=3600');
+                return (string) file_get_contents(__DIR__ . '/Component/client.js');
+            });
+            $this->route(Component\Push::STREAM, ['methods' => ['GET']], fn(\ZealPHP\HTTP\Response $response) => self::componentPushStream($response));
+            $this->ws(
+                Component\Push::SOCKET,
+                static function ($server, $frame) {},
+                static function (\OpenSwoole\WebSocket\Server $server, \OpenSwoole\Http\Request $request) {
+                    $query = is_array($request->get) ? $request->get : [];
+                    $fd = is_int($request->fd) ? $request->fd : 0;
+                    if ($fd <= 0) {
+                        return;
+                    }
+                    try {
+                        $token = $query['t'] ?? '';
+                        $subs = Component\Push::verify(is_string($token) ? $token : '');
+                        Component\Push::connect('ws:' . $fd, $subs, static fn(string $msg): bool => $server->isEstablished($fd) && $server->push($fd, $msg));
+                        // The open handler may have yielded (session start) while the
+                        // client left: its close already ran, so drop the connection here.
+                        if (!$server->isEstablished($fd)) {
+                            Component\Push::disconnect('ws:' . $fd);
+                            return;
+                        }
+                        $server->push($fd, '[]'); // accepted: the page may refresh what it missed
+                    } catch (Component\ComponentException $e) {
+                        // 4409/4400 tell the client to stop; 1013 (try again later) lets it back off and retry.
+                        $code = match ($e->getCode()) {
+                            409 => 4409,
+                            400 => 4400,
+                            default => 1013,
+                        };
+                        $server->disconnect($fd, $code, $e->getMessage());
+                    }
+                },
+                static function ($server, int $fd) {
+                    Component\Push::disconnect('ws:' . $fd);
+                },
+            );
+            // Other nodes' invalidations (Redis backend).
+            if (Component\Push::nodesShareRedis()) {
+                self::subscribe(Component\Push::CHANNEL, static function (string $payload): void {
+                    Component\Push::receive($payload);
+                });
+            }
         }
 
         # Implicit route for ignoring PHP extensions
@@ -11463,6 +11622,17 @@ class App
         // hit, graceful shutdown, or admin reload). Logs the request count,
         // peak RSS, and uptime so the max_request backstop is visible in prod
         // logs. Set ZEALPHP_RECYCLE_LOG=0 to silence.
+        // Messages between workers (component push fan-out).
+        $server->on('pipeMessage', static function ($server, int $srcWorkerId, $message): void {
+            if (!is_string($message)) {
+                return;
+            }
+            $data = json_decode($message, true);
+            if (is_array($data) && ($data['zc'] ?? null) === Component\Push::PIPE_TYPE && is_string($data['payload'] ?? null)) {
+                Component\Push::receive($data['payload']);
+            }
+        });
+
         $server->on('workerStop', function($server, $workerId) {
             // User-registered per-worker shutdown hooks run first, before the
             // recycle-log line — so a hook can flush state even if logging is off.
