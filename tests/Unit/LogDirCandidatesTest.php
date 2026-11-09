@@ -122,25 +122,24 @@ class LogDirCandidatesTest extends TestCase
         }
     }
 
-    public function testXdgRuntimeDirIsAPreferredPerUserFallback(): void
+    /**
+     * $XDG_RUNTIME_DIR is wiped at logout and unset under cron/systemd/sudo,
+     * so using it would let `stop` resolve a different dir than the running
+     * server: the per-user temp dir is the first default whatever it says.
+     */
+    public function testXdgRuntimeDirIsIgnored(): void
     {
         $origXdg = getenv('XDG_RUNTIME_DIR');
         $origLogDir = getenv('ZEALPHP_LOG_DIR');
         try {
             putenv('ZEALPHP_LOG_DIR');
             putenv('XDG_RUNTIME_DIR=/run/user/4242');
-            $candidates = zealphp_log_dir_candidates();
-            $this->assertContains('/run/user/4242/zealphp', $candidates);
-            // XDG runtime dir (per-user, well-defined) ranks before the temp-dir fallback.
-            $uid = function_exists('posix_getuid') ? (string) posix_getuid() : '';
-            if ($uid !== '') {
-                $perUserTmp = rtrim(sys_get_temp_dir(), '/') . '/zealphp-' . $uid;
-                $this->assertLessThan(
-                    array_search($perUserTmp, $candidates, true),
-                    array_search('/run/user/4242/zealphp', $candidates, true),
-                    'XDG_RUNTIME_DIR should rank before the temp-dir fallback'
-                );
-            }
+            $withXdg = zealphp_log_dir_candidates();
+            putenv('XDG_RUNTIME_DIR');
+            $withoutXdg = zealphp_log_dir_candidates();
+
+            $this->assertNotContains('/run/user/4242/zealphp', $withXdg);
+            $this->assertSame($withoutXdg, $withXdg, 'XDG_RUNTIME_DIR must not change resolution');
         } finally {
             $this->restoreEnv('XDG_RUNTIME_DIR', $origXdg);
             $this->restoreEnv('ZEALPHP_LOG_DIR', $origLogDir);

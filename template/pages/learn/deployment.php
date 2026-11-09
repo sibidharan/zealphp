@@ -29,7 +29,7 @@ php app.php stop                # stop
 php app.php restart             # cycle</code></pre>
     <p>
       The <code>-d</code> flag puts the server in the background. PID files live at
-      <code>/tmp/zealphp-&lt;uid&gt;/zealphp_{port}.pid</code> (a per-user dir; <code>$XDG_RUNTIME_DIR/zealphp</code> when set). Logs go there too.
+      <code>/tmp/zealphp-&lt;uid&gt;/zealphp_{port}.pid</code> (a per-user dir). Logs go there too.
     </p>
 
     <h2>2. Nginx reverse proxy</h2>

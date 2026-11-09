@@ -73,9 +73,9 @@ runtime dir. That's how `stop` / `status` / `restart` target a specific instance
 pass the same `-p` you started it with.
 
 **Runtime dir resolution.** The PID + log (and session) files live in a
-**per-user** dir: `$XDG_RUNTIME_DIR/zealphp` when available, otherwise
-`<temp>/zealphp-<uid>` (e.g. `/tmp/zealphp-1000`), then `./tmp/zealphp` /
-`./logs/zealphp`. A dir is only used if it is owned by you, is not a symlink and
+**per-user** dir: `<temp>/zealphp-<uid>` (e.g. `/tmp/zealphp-1000`), then
+`./tmp/zealphp` / `./logs/zealphp`. `$XDG_RUNTIME_DIR` is not used: it is wiped
+at logout and unset under cron/systemd/sudo, so `stop` could look elsewhere. A dir is only used if it is owned by you, is not a symlink and
 is not group/world-writable (created `0700`); a shared `/tmp/zealphp` is never
 used, since any local user could create it first. Resolution is deterministic, so
 `start` and `stop`/`status`/`logs` agree on the same directory. To pin an explicit
@@ -108,7 +108,7 @@ over the `app.php` defaults. The common ones:
 | `ZEALPHP_DAEMONIZE` | run detached (like `-d`) | `false` |
 | `ZEALPHP_DEV` | enable route hot-reload (like `--dev`) | `false` |
 | `ZEALPHP_PID_FILE` | custom PID-file path (like `--pid-file`) | per-port default |
-| `ZEALPHP_LOG_DIR` | directory for PID + log files (explicit override) | per-user: `$XDG_RUNTIME_DIR/zealphp`, else `<temp>/zealphp-<uid>` |
+| `ZEALPHP_LOG_DIR` | directory for PID + log files (explicit override) | per-user: `<temp>/zealphp-<uid>` |
 | `ZEALPHP_SUPERGLOBALS` | start in superglobals mode (`App::superglobals`) | `false` |
 | `ZEALPHP_PROCESS_ISOLATION` | toggle `App::processIsolation()` | follows mode |
 | `ZEALPHP_ENABLE_COROUTINE` | toggle `App::enableCoroutine()` | follows mode |

@@ -1045,8 +1045,8 @@ Examples:
   php app.php logs --access          Tail only access log
   php app.php logs --access --debug  Tail access + debug logs
 
-PID + log files: a per-user dir, $XDG_RUNTIME_DIR/zealphp or /tmp/zealphp-<uid>
-(one PID file per port; must be owned by you and not group/world-writable).
+PID + log files: a per-user dir, /tmp/zealphp-<uid> (one PID file per port;
+must be owned by you and not group/world-writable).
 Override the whole location with ZEALPHP_LOG_DIR=/path (or ZEALPHP_PID_FILE for
 just the PID).
 
