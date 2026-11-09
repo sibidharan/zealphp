@@ -49,7 +49,7 @@ BASH
 <h3 class="deploy-h3">Logging</h3>
 <table class="ztable deploy-table">
   <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-  <tr><td><code>ZEALPHP_LOG_DIR</code></td><td><code>/tmp/zealphp</code></td><td>Base directory for all log files</td></tr>
+  <tr><td><code>ZEALPHP_LOG_DIR</code></td><td><code>/tmp/zealphp-&lt;uid&gt;</code> (per-user)</td><td>Base directory for all log files</td></tr>
   <tr><td><code>ZEALPHP_LOG_FILE</code></td><td>(per-stream)</td><td>Single-file override for all log streams</td></tr>
   <tr><td><code>ZEALPHP_ACCESS_LOG_FILE</code></td><td><code>$LOG_DIR/access.log</code></td><td>Per-request access log</td></tr>
   <tr><td><code>ZEALPHP_DEBUG_LOG_FILE</code></td><td><code>$LOG_DIR/debug.log</code></td><td><code>elog()</code> output</td></tr>

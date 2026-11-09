@@ -29,7 +29,7 @@ php app.php stop                # stop
 php app.php restart             # cycle</code></pre>
     <p>
       The <code>-d</code> flag puts the server in the background. PID files live at
-      <code>/tmp/zealphp/zealphp_{port}.pid</code>. Logs default to <code>/tmp/zealphp/</code>.
+      <code>/tmp/zealphp-&lt;uid&gt;/zealphp_{port}.pid</code> (a per-user dir; <code>$XDG_RUNTIME_DIR/zealphp</code> when set). Logs go there too.
     </p>
 
     <h2>2. Nginx reverse proxy</h2>
@@ -133,7 +133,7 @@ ZEALPHP_LEARN_AI_MODEL    # Model name (default: gpt-4.1-mini)
 ZEALPHP_LEARN_DB_PATH     # SQLite path (default: storage/learn.db)
 ZEALPHP_WORKERS           # HTTP worker count (default: CPU cores)
 ZEALPHP_PORT              # Listen port (default: 8080)
-ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
+ZEALPHP_LOG_DIR           # Log directory (default: per-user /tmp/zealphp-&lt;uid&gt;)</code></pre>
 
     <h2>What you built</h2>
     <p>Over 25 lessons you created a real application:</p>

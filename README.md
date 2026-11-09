@@ -236,8 +236,9 @@ php app.php logs
 php app.php stop
 ```
 
-PID file lives at `/tmp/zealphp/zealphp_{port}.pid` (one per port — multiple
-apps on different ports are supported). Logs go to `/tmp/zealphp/`:
+PID file lives at `<log dir>/zealphp_{port}.pid` (one per port — multiple
+apps on different ports are supported), where the log dir is per-user:
+`$XDG_RUNTIME_DIR/zealphp`, else `/tmp/zealphp-<uid>`. Logs go there too:
 `server.log`, `access.log`, `debug.log`, `zlog.log`. `php app.php logs` tails
 all four; add `--access`, `--debug`, `--server`, or `--zlog` to filter.
 
@@ -274,12 +275,12 @@ docker compose run --rm --build compare
 Set `ZEALPHP_BENCH_MODE=1` to skip the demo middleware and session file I/O on
 the benchmark path. The sample auth/validation middleware is opt-in via
 `ZEALPHP_DEMO_MIDDLEWARE=1`.
-Set `ZEALPHP_LOG_DIR=/tmp/zealphp` to send `debug.log`, `access.log`, and
+Set `ZEALPHP_LOG_DIR=/var/log/zealphp` (or any dir you own) to send `debug.log`, `access.log`, and
 `zlog.log` there, and keep `ZEALPHP_LOG_ASYNC=1` so request logging is queued
 off the hot path. Use `ZEALPHP_DEBUG_LOG=0` and `ZEALPHP_ACCESS_LOG=0` for
 quiet runs.
-If `/tmp/zealphp` is not writable, ZealPHP falls back to a writable local log
-directory.
+Without it, ZealPHP uses a per-user dir it owns (`0700`), never a shared
+`/tmp/zealphp`.
 
 ---
 
