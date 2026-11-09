@@ -5044,8 +5044,10 @@ class App
      *      NOT in `trusted_proxies` — that's the real client. If every entry is
      *      trusted, fall back to the socket peer (`REMOTE_ADDR`) — NOT the
      *      leftmost entry, which a client can forge by prepending (#249/#434).
-     *   4. If `X-Forwarded-For` is absent but `X-Real-IP` is present (and the peer
-     *      is trusted), return `X-Real-IP`.
+     *      An entry that isn't a valid IP (`FILTER_VALIDATE_IP`) is never
+     *      returned; reaching one ends the walk at the socket peer.
+     *   4. If `X-Forwarded-For` is absent but a valid-IP `X-Real-IP` is present
+     *      (and the peer is trusted), return `X-Real-IP`.
      *
      * Returns the empty string when no IP can be determined (`REMOTE_ADDR` missing
      * entirely — only happens for non-request contexts like CLI invocation).
@@ -5067,6 +5069,13 @@ class App
             for ($i = count($chain) - 1; $i >= 0; $i--) {
                 $ip = $chain[$i];
                 if ($ip === '') continue;
+                if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
+                    // Not an address (`unknown`, `1.2.3.4:80`, markup, CRLF…):
+                    // never return it. Everything to its left is no more
+                    // trustworthy, so don't walk past it either — stop at the
+                    // socket peer, as when every hop is trusted.
+                    return $remote;
+                }
                 if (!self::peerInTrustedProxies($ip)) {
                     return $ip;
                 }
@@ -5080,8 +5089,8 @@ class App
             return $remote;
         }
 
-        $realIp = (string)($g->server['HTTP_X_REAL_IP'] ?? '');
-        if ($realIp !== '') {
+        $realIp = trim((string)($g->server['HTTP_X_REAL_IP'] ?? ''));
+        if ($realIp !== '' && filter_var($realIp, FILTER_VALIDATE_IP) !== false) {
             return $realIp;
         }
         return $remote;

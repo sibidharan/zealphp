@@ -92,6 +92,42 @@ final class SecurityHardeningAuditTest extends TestCase
         $this->assertSame('203.0.113.7', App::clientIp());
     }
 
+    public function testClientIpNeverReturnsANonIpForwardedEntry(): void
+    {
+        App::$trusted_proxies = ['10.0.0.0/8'];
+        $g = RequestContext::instance();
+        foreach (['<script>x</script>', "1.2.3.4\r\nX-Evil: 1", 'unknown', '1.2.3.4:8080'] as $bad) {
+            $g->server = [
+                'REMOTE_ADDR'          => '10.0.0.1',
+                'HTTP_X_FORWARDED_FOR' => '203.0.113.7, ' . $bad . ', 10.0.0.9',
+            ];
+            // The invalid hop is not returned, and the forgeable entries to its
+            // left are not promoted either: fall back to the socket peer.
+            $this->assertSame('10.0.0.1', App::clientIp(), "XFF hop: {$bad}");
+        }
+    }
+
+    public function testClientIpAcceptsValidIpv6ForwardedEntry(): void
+    {
+        App::$trusted_proxies = ['10.0.0.0/8'];
+        $g = RequestContext::instance();
+        $g->server = [
+            'REMOTE_ADDR'          => '10.0.0.1',
+            'HTTP_X_FORWARDED_FOR' => '2001:db8::7, 10.0.0.9',
+        ];
+        $this->assertSame('2001:db8::7', App::clientIp());
+    }
+
+    public function testClientIpIgnoresInvalidXRealIp(): void
+    {
+        App::$trusted_proxies = ['10.0.0.0/8'];
+        $g = RequestContext::instance();
+        $g->server = ['REMOTE_ADDR' => '10.0.0.1', 'HTTP_X_REAL_IP' => "evil\nline"];
+        $this->assertSame('10.0.0.1', App::clientIp());
+        $g->server = ['REMOTE_ADDR' => '10.0.0.1', 'HTTP_X_REAL_IP' => ' 198.51.100.4 '];
+        $this->assertSame('198.51.100.4', App::clientIp());
+    }
+
     // ── #250 — access-log CRLF injection ─────────────────────────
 
     public function testAccessLogEscapesCrlfInRequestUri(): void
