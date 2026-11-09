@@ -45,6 +45,13 @@ class ComponentPushRootTest extends TestCase
         $this->assertSame(['shared-likes-stream'], $this->scripts('/_test/push/stream'));
     }
 
+    public function testARawRouteStreamGetsTheScriptAndNoPlaceholder(): void
+    {
+        // The root is evaluated while streaming, before the component renders:
+        // it prints nothing then, and the script rides in the </body> chunk.
+        $this->assertSame(['shared-likes-raw'], $this->scripts('/_test/push/raw-stream'));
+    }
+
     public function testAFragmentHasNone(): void
     {
         $this->assertSame([], $this->scripts('/_test/push/fragment'));

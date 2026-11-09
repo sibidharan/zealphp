@@ -152,6 +152,26 @@ class PushRootTest extends TestCase
         $this->assertSame(['a'], self::scripts($html));
     }
 
+    /** @return iterable<string, array{int, array<string, string>}> */
+    public static function untouchable(): iterable
+    {
+        yield 'compressed' => [200, ['Content-Encoding' => 'gzip']];
+        yield 'a range' => [206, ['Content-Range' => 'bytes 0-6/100']];
+        yield 'a range header on a 200' => [200, ['Content-Range' => 'bytes 0-6/7']];
+        yield 'not modified' => [304, []];
+        yield 'no content' => [204, []];
+    }
+
+    /** @param array<string, string> $headers */
+    #[\PHPUnit\Framework\Attributes\DataProvider('untouchable')]
+    public function testCompressedOrRangedBodiesAreLeftAlone(int $status, array $headers): void
+    {
+        Push::deferRoot();
+        self::rendered('a');
+        $response = new Response('</body>', $status, '', $headers);
+        $this->assertSame($response, Push::finish($response));
+    }
+
     public function testContentLengthFollowsTheNewBody(): void
     {
         Push::deferRoot();

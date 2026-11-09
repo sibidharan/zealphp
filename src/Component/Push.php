@@ -167,7 +167,9 @@ final class Push
      * End of a buffered response (ResponseMiddleware): put the push script
      * where componentPushRoot() was called, or, when the layout didn't call
      * it, before `</body>`. Responses without `</body>` (htmx fragments,
-     * component refreshes, JSON) and non-HTML responses are left alone.
+     * component refreshes, JSON), non-HTML responses, and bodies already
+     * compressed or cut to a range (204/206/304, Content-Encoding,
+     * Content-Range) are left alone.
      * Costs two array lookups when the page rendered no component with topics.
      *
      * @internal
@@ -180,6 +182,16 @@ final class Push
             return $response;
         }
         if (($g->_streaming ?? false) || !self::isHtml($response->getHeaderLine('Content-Type'))) {
+            return $response;
+        }
+        // A body that middleware inside the router compressed or cut to a range
+        // can't be edited: inserting bytes would corrupt it.
+        if ($response->hasHeader('Content-Encoding') || $response->hasHeader('Content-Range')
+            || in_array($response->getStatusCode(), [204, 206, 304], true)) {
+            if (self::pending()) {
+                \ZealPHP\elog('[components] push: script not added to a ' . $response->getStatusCode()
+                    . ' response with Content-Encoding/Content-Range set inside the router; register compression globally', 'debug');
+            }
             return $response;
         }
         $body = (string) $response->getBody();

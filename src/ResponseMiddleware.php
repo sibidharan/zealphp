@@ -124,11 +124,12 @@ class ResponseMiddleware implements MiddlewareInterface
                 }
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->flush();
+                \ZealPHP\Component\Push::streaming();
                 foreach ($object as $chunk) {
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     if (!$g->openswoole_response->isWritable()) break;
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->write((string)$chunk);
+                    $g->openswoole_response->write(\ZealPHP\Component\Push::spliceStream((string)$chunk));
                     // #354 — yield only inside a coroutine; in mixed mode
                     // (enable_coroutine=false) Coroutine::sleep(0) throws and
                     // crashes the worker (status=255) with a truncated stream.
