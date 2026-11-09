@@ -191,10 +191,72 @@ if (file_put_contents($outPath, $out) === false) {
     exit(1);
 }
 
+// ── public/llms.txt + public/llms-full.txt (https://llmstxt.org) ──────────
+// llms.txt is the short index an AI assistant reads first: what ZealPHP is,
+// the structure rules it must follow (taken verbatim from
+// docs/directory-structure.md#where-code-goes, so there is one source), and a
+// link per guide. llms-full.txt is the reference above, in one file.
+$site = 'https://php.zeal.ninja';
+$guideSlugs = [];
+if (preg_match("/GUIDE_SLUGS = \\[(.*?)\\];/s", (string) file_get_contents($root . '/src/Docs/MarkdownRenderer.php'), $gm) === 1) {
+    preg_match_all("/'([^']+)'/", $gm[1], $sm);
+    $guideSlugs = $sm[1];
+}
+$structure = (string) file_get_contents($docsDir . '/directory-structure.md');
+$rules = preg_match('/^## Where code goes\n(.*?)(?=^## )/ms', $structure, $rm) === 1 ? trim($rm[1]) : '';
+if ($rules === '') {
+    fwrite(STDERR, "[build-agent-reference] docs/directory-structure.md has no '## Where code goes' section\n");
+    exit(1);
+}
+$links = [];
+foreach ($files as $base => $path) {
+    $raw = (string) file_get_contents($path);
+    $slug = basename($base, '.md');
+    $title = preg_match('/^#\s+(.+)$/m', $raw, $tm) === 1 ? trim($tm[1]) : humanizeFilename($base);
+    // First prose sentence after the title, as the link's description.
+    $desc = '';
+    foreach (preg_split('/\n\s*\n/', $raw) ?: [] as $para) {
+        $para = trim($para);
+        if ($para === '' || preg_match('/^(#|```|\||>|-|\*|<|!\[|\d+\.)/', $para) === 1) {
+            continue;
+        }
+        $para = preg_replace('/\s+/', ' ', $para) ?? $para;
+        $desc = preg_match('/^(.{20,240}?[.!?])(\s|$)/', $para, $dm) === 1 ? $dm[1] : mb_strimwidth($para, 0, 200, '…');
+        break;
+    }
+    $url = in_array($slug, $guideSlugs, true)
+        ? "{$site}/docs/guide/{$slug}"
+        : "https://github.com/sibidharan/zealphp/blob/master/docs/{$base}";
+    $links[] = "- [{$title}]({$url})" . ($desc !== '' ? ": {$desc}" : '');
+}
+$llms = "# ZealPHP\n\n"
+    . "> A PHP web framework and application server built on OpenSwoole: file-based routing, PSR-15 middleware, "
+    . "streaming SSR, WebSocket/SSE, server-driven reactive components, shared memory and task workers in one "
+    . "`php app.php` process. Coroutine mode by default; legacy request-style PHP runs through compatibility modes.\n\n"
+    . "Generated from the docs by scripts/build-agent-reference.php. Install: `composer create-project zealphp/project my-app`.\n\n"
+    . "## Rules for AI assistants\n\n"
+    . "Follow these when writing a ZealPHP app. They are the framework's structure, checked in its own test suite; "
+    . "don't put HTML in route files or build a whole page in one template.\n\n"
+    . preg_replace_callback(
+        '/\]\(([a-z0-9-]+)\.md(#[^)]*)?\)/i',
+        // Doc-relative links (hot-reload.md) → absolute site URLs.
+        static fn (array $m): string => "]({$site}/docs/guide/{$m[1]}" . ($m[2] ?? '') . ')',
+        $rules
+    ) . "\n\n"
+    . "## Docs\n\n" . implode("\n", $links) . "\n\n"
+    . "## Optional\n\n"
+    . "- [Full reference]({$site}/llms-full.txt): every guide above in one plain-text file\n";
+foreach ([$root . '/public/llms.txt' => $llms, $root . '/public/llms-full.txt' => $out] as $path => $text) {
+    if (file_put_contents($path, $text) === false) {
+        fwrite(STDERR, "[build-agent-reference] failed to write {$path}\n");
+        exit(1);
+    }
+}
+
 $sections = substr_count($out, "\n## ");
 $kb = round(strlen($out) / 1024, 1);
 fwrite(
     STDOUT,
     "[build-agent-reference] wrote {$sections} sections from {$docCount} docs "
-    . "({$kb} KB) → examples/agents/zealphp_reference.txt\n"
+    . "({$kb} KB) → examples/agents/zealphp_reference.txt, public/llms-full.txt; index → public/llms.txt\n"
 );
