@@ -39,7 +39,12 @@ class HTTPTlsVerifyTest extends TestCase
         try {
             Coroutine::run(function () use ($cert, $key, &$result): void {
                 $server = new Coroutine\Socket(AF_INET, SOCK_STREAM, 0);
-                $server->setProtocol(['open_ssl' => true, 'ssl_cert_file' => $cert, 'ssl_key_file' => $key]);
+                try {
+                    $server->setProtocol(['open_ssl' => true, 'ssl_cert_file' => $cert, 'ssl_key_file' => $key]);
+                } catch (\Throwable $e) {
+                    $result['no_ssl'] = $e->getMessage();   // OpenSwoole built without OpenSSL
+                    return;
+                }
                 $server->bind('127.0.0.1', 0);
                 $server->listen();
                 $name = $server->getsockname();
@@ -60,7 +65,14 @@ class HTTPTlsVerifyTest extends TestCase
                 });
 
                 // The server works: a client that doesn't verify gets the page.
-                $raw = new Coroutine\Http\Client('127.0.0.1', $port, true);
+                try {
+                    $raw = new Coroutine\Http\Client('127.0.0.1', $port, true);
+                } catch (\Throwable $e) {
+                    // OpenSwoole built without OpenSSL: nothing to verify.
+                    $result['no_ssl'] = $e->getMessage();
+                    $server->close();
+                    return;
+                }
                 $raw->set(['timeout' => 5]);
                 $raw->get('/');
                 $result['unverified'] = $raw->statusCode;
@@ -77,6 +89,9 @@ class HTTPTlsVerifyTest extends TestCase
             @rmdir($dir);
         }
 
+        if (isset($result['no_ssl'])) {
+            $this->markTestSkipped('OpenSwoole has no TLS support: ' . $result['no_ssl']);
+        }
         $this->assertSame(200, $result['unverified'] ?? null);
         $this->assertTrue($result['zeal_failed'] ?? false, 'HTTP::get() must refuse the self-signed certificate');
         $this->assertSame(0, $result['zeal_status'] ?? null);
