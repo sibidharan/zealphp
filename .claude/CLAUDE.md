@@ -24,7 +24,7 @@ ZEALPHP_WORKERS=16 ZEALPHP_TASK_WORKERS=0 php app.php
 ./vendor/bin/phpunit tests/Unit/ --testdox
 
 # Integration tests (server must be running on :8080)
-php app.php &
+ZEALPHP_TEST_ROUTES=1 php app.php &
 ./vendor/bin/phpunit tests/Integration/ --testdox
 
 # All tests

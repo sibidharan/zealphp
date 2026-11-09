@@ -37,7 +37,7 @@ Unit tests run without a server:
 Integration tests require the dev server to be running on port 8080:
 
 ```bash
-php app.php &
+ZEALPHP_TEST_ROUTES=1 php app.php &
 ./vendor/bin/phpunit tests/Integration/ --testdox
 ```
 

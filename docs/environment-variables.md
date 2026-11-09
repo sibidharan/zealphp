@@ -126,6 +126,7 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 | Variable | Default | Scope | Description |
 |----------|---------|-------|-------------|
 | `ZEALPHP_DEMO_MIDDLEWARE` | `false` | user | When truthy (`env_flag`), `app.php` loads `examples/demo_middleware.php` and registers the demo `RequestLogMiddleware` + `QueryDumpMiddleware` (logging-only demo middleware). |
+| `ZEALPHP_REDIS_DEMOS` | `false` | user | When truthy (`env_flag`), the demo site registers the Redis demo routes that take names from the query string: `/demo/pubsub/publish`, `/demo/pubsub/publish-reliable` (limited to `demo:` channels and streams) and `/demo/rooms/*`. They still need the Redis Store backend. Off by default so a public site on a shared Redis can't be used to publish into the framework's own channels or other rooms. |
 | `ZEALPHP_COMPRESSION_MIDDLEWARE` | `false` | user | When truthy (`env_flag`), `app.php` registers the reference `CompressionMiddleware` (intended only when OpenSwoole's built-in `http_compression` is disabled). |
 | `ZEALPHP_ASSET_VERSION` | unset → resolved at boot: git commit short hash (12 chars), else newest mtime across `public/css`+`public/js`, else `time()` | build/CI | Cache-bust token defined as a PHP constant in `app.php` (only if not already defined) and appended as `?v=…` to CSS/JS asset URLs in `template/_head.php`; auto-derived rather than typically set by the user. |
 | `ZEALPHP_LEARN_AI_MODEL` | `gpt-4.1-mini` | user | OpenAI model name used by the Learn demo's notes/chat AI agent; read via `getenv()` with a `?: 'gpt-4.1-mini'` fallback in `src/Learn/Chat.php` and `api/learn/chat_status.php`. |
@@ -155,6 +156,7 @@ These are **not** user-facing configuration. Internal vars are IPC/runtime chann
 | `ZEALPHP_LEARN_RATE_LIMIT_LOOPBACK` | unset (loopback rate-limiting bypassed) | test | When set to exactly `'1'`, re-enables Learn-demo rate limiting for loopback clients (otherwise bypassed so the integration suite can re-run without restarting); checked in `src/Learn/Auth.php::rateLimit()`. |
 | `ZEALPHP_COVERAGE_DIR` | unset (coverage collection inert) | test | Directory where the running server dumps per-process `src/` code-coverage `.cov` files; coverage instrumentation in `app.php` only activates when this is a non-empty string and a coverage driver is loaded. |
 | `ZEALPHP_BENCH_MODE` | `false` | build/CI | When truthy (`env_flag`), disables all logging for benchmark runs; read once via `env_flag('ZEALPHP_BENCH_MODE', false)` in `bench_mode_enabled()` (`src/utils.php`). |
+| `ZEALPHP_TEST_ROUTES` | `false` | test | When truthy (`env_flag`), the demo site loads the integration-test fixture routes in `route/_*.php` (`/__error_test/*`, `/__fallback_test/*`, `/_contract_test/*`, `/__pipeline_test/*`). Start the server with it before running `tests/Integration/`; CI and `scripts/coverage_full.sh` set it. |
 | `ZEALPHP_SKIP_DOCS_BUILD` | `false` | build/CI | When truthy (`env_flag`), skips the boot-time background API-docs build in `app.php` (CI sets it so an in-flight build doesn't flake timing-sensitive integration tests). |
 
 ---

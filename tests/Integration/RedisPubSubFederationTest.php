@@ -73,6 +73,7 @@ final class RedisPubSubFederationTest extends PhpUnitTestCase
             'ZEALPHP_WORKERS'        => '1',
             'ZEALPHP_TASK_WORKERS'   => '0',
             'ZEALPHP_STORE_BACKEND'  => 'redis',
+            'ZEALPHP_REDIS_DEMOS'    => '1',
             'ZEALPHP_REDIS_URL'      => self::REDIS_URL,
             'ZEALPHP_REDIS_PREFER'   => 'predis',
             'ZEALPHP_LOG_ASYNC'      => '0',

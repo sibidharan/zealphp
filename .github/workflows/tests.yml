@@ -204,6 +204,8 @@ jobs:
           # competing for CPU flakes timing-sensitive integration tests
           # (e.g. the WebSocket ticker test on slower 8.5 runners).
           ZEALPHP_SKIP_DOCS_BUILD: '1'
+          # The integration fixtures (route/_*.php) are off unless asked for.
+          ZEALPHP_TEST_ROUTES: '1'
         run: |
           # A per-run random key enables the reactive components demo, so
           # tests/Integration/ComponentsTest.php runs instead of skipping.
