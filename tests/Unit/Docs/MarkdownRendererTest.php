@@ -132,4 +132,16 @@ final class MarkdownRendererTest extends TestCase
         $md = "# Only A Heading\n\n## Another\n\n- a list item";
         $this->assertSame('', MarkdownRenderer::summary($md));
     }
+    public function testHeadingsGetGithubStyleIds(): void
+    {
+        // In-doc #anchor links (docs/components.md#live-updates-push) must
+        // resolve on the site as they do on GitHub.
+        $html = MarkdownRenderer::render("## Live updates (push)\n\n### Without htmx: `ZealJsBinder`\n\n## Templates or components?\n\n## Setup\n\n## Setup");
+        $this->assertStringContainsString('<h2 id="live-updates-push">Live updates (push)</h2>', $html);
+        $this->assertStringContainsString('<h3 id="without-htmx-zealjsbinder">', $html);
+        $this->assertStringContainsString('<h2 id="templates-or-components">', $html);
+        $this->assertStringContainsString('<h2 id="setup">', $html);
+        $this->assertStringContainsString('<h2 id="setup-1">', $html, 'duplicates get a suffix, as on GitHub');
+        $this->assertStringNotContainsString('heading-permalink', $html, 'ids only, no visible link symbol');
+    }
 }

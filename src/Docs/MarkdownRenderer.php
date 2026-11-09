@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace ZealPHP\Docs;
 
-use League\CommonMark\GithubFlavoredMarkdownConverter;
+use League\CommonMark\Environment\Environment;
+use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
+use League\CommonMark\Extension\GithubFlavoredMarkdownExtension;
+use League\CommonMark\Extension\HeadingPermalink\HeadingPermalinkExtension;
+use League\CommonMark\MarkdownConverter;
 
 /**
  * Renders the `docs/*.md` guides to HTML for the `/docs/guide/{topic}`
@@ -92,10 +96,23 @@ final class MarkdownRenderer
      */
     public static function render(string $markdown): string
     {
-        $converter = new GithubFlavoredMarkdownConverter([
+        // Headings get GitHub-style ids (`## Live updates (push)` →
+        // `id="live-updates-push"`), so the docs' `#anchor` links work on
+        // the site as they do on GitHub. No visible permalink symbol.
+        $environment = new Environment([
             'html_input' => 'strip',
             'allow_unsafe_links' => false,
+            'heading_permalink' => [
+                'insert' => 'none',
+                'apply_id_to_heading' => true,
+                'id_prefix' => '',
+                'fragment_prefix' => '',
+            ],
         ]);
+        $environment->addExtension(new CommonMarkCoreExtension());
+        $environment->addExtension(new GithubFlavoredMarkdownExtension());
+        $environment->addExtension(new HeadingPermalinkExtension());
+        $converter = new MarkdownConverter($environment);
 
         $html = (string) $converter->convert($markdown);
 
