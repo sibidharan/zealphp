@@ -1,0 +1,264 @@
+<?php use ZealPHP\App; ?>
+<section class="section">
+<div class="container">
+<h1 class="section-title">WebSocket</h1>
+<p class="section-desc"><code>App::ws($path, $onMessage, $onOpen, $onClose)</code> — register a WebSocket endpoint. ZealPHP uses <code>OpenSwoole\WebSocket\Server</code> which is backward-compatible with HTTP routes on the same port.</p>
+
+<?= App::component('/components/_code', [
+    'label' => 'WebSocket registration',
+    'code'  => <<<'PHP'
+$app->ws(
+    '/ws/chat',
+    // Each handler receives the same 3rd argument: $g — RequestContext::instance()
+    // for the coroutine the handler is dispatched in. Use $g->session for
+    // auth lookups (CoSessionManager seeds it from the upgrade request's
+    // PHPSESSID cookie before onOpen fires), Store/Counter for cross-worker
+    // shared state, or $g->server for the original upgrade request's headers.
+    onMessage: function($server, $frame, $g) {
+        // $frame->data   — message text
+        // $frame->fd     — connection id
+        // $frame->opcode — 1=TEXT, 2=BINARY (PING/PONG filtered automatically)
+        $server->push($frame->fd, 'echo: ' . $frame->data);
+    },
+    onOpen: function($server, $request, $g) {
+        // $request->fd     — connection id
+        // $request->cookie — cookies from upgrade request
+        // $request->get    — query params from ws://host/path?key=val
+        $server->push($request->fd, json_encode(['event' => 'connected']));
+    },
+    onClose: function($server, $fd, $g) {
+        // clean up per-connection state
+    }
+);
+PHP]) ?>
+
+<h2 class="ws-h2">Live demo — 6 endpoints</h2>
+
+<div class="tabs" data-group="ws"><div class="tab-btn active" data-tab="ws-echo" data-group="ws">Echo</div><div class="tab-btn" data-tab="ws-broadcast" data-group="ws">Broadcast</div><div class="tab-btn" data-tab="ws-ticker" data-group="ws">Ticker</div><div class="tab-btn" data-tab="ws-rooms" data-group="ws">Rooms</div><div class="tab-btn" data-tab="ws-auth" data-group="ws">Auth</div><div class="tab-btn" data-tab="ws-binary" data-group="ws">Binary</div></div>
+<div data-panel-group="ws">
+  <div class="tab-panel active" id="ws-echo">
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/echo</code> — mirrors every message back verbatim.</p>
+    <?= App::component('/components/_code', ['code' => '$app->ws(\'/ws/echo\', onMessage: fn($server,$frame) => $server->push($frame->fd, \'echo: \'.$frame->data));']) ?>
+  </div>
+  <div class="tab-panel" id="ws-broadcast">
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/broadcast</code> — every message goes to ALL connected clients.</p>
+    <?= App::component('/components/_code', ['code' => <<<'PHP'
+$broadcastClients = [];
+$app->ws('/ws/broadcast',
+    onMessage: function($server, $frame, $g) use (&$broadcastClients) {
+        foreach (array_keys($broadcastClients) as $fd) {
+            if ($server->isEstablished($fd))
+                $server->push($fd, json_encode(['from'=>$frame->fd,'msg'=>$frame->data]));
+        }
+    },
+    onOpen:  fn($s,$req) => $broadcastClients[$req->fd] = true,
+    onClose: fn($s,$fd)  => unset($broadcastClients[$fd])
+);
+PHP]) ?>
+  </div>
+  <div class="tab-panel" id="ws-ticker">
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/ticker</code> — server pushes every 1s using a spawned coroutine.</p>
+    <?= App::component('/components/_code', ['code' => <<<'PHP'
+$app->ws('/ws/ticker',
+    onMessage: fn($s,$f) => trim($f->data)==='stop' ? $s->close($f->fd) : null,
+    onOpen: function($server, $request, $g) {
+        $fd = $request->fd;
+        go(function() use ($server, $fd) {
+            $i = 0;
+            while ($server->isEstablished($fd)) {
+                co::sleep(1);
+                $server->push($fd, json_encode(['tick' => ++$i, 'time' => date('H:i:s')]));
+            }
+        });
+    }
+);
+PHP]) ?>
+  </div>
+  <div class="tab-panel" id="ws-rooms">
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/rooms?room=general</code> — cross-worker rooms via <code>Store</code> (OpenSwoole\Table). Every worker shares the same client registry.</p>
+    <?= App::component('/components/_code', ['code' => <<<'PHP'
+// Shared across all workers — created before run()
+Store::make('ws_rooms', 4096, [
+    'room' => [Store::TYPE_STRING, 64],
+    'uid'  => [Store::TYPE_STRING, 128],
+]);
+
+$app->ws('/ws/rooms',
+    onOpen: fn($server, $request, $g) => Store::set('ws_rooms', (string)$request->fd, [
+        'room' => $request->get['room'] ?? 'general',
+        'uid'  => $request->get['uid']  ?? 'guest_'.$request->fd,
+    ]),
+    onMessage: function($server, $frame, $g) {
+        $me = Store::get('ws_rooms', (string)$frame->fd);
+        foreach (Store::table('ws_rooms') as $fd => $info)
+            if ($info['room'] === $me['room'] && $server->isEstablished((int)$fd))
+                $server->push((int)$fd, json_encode(['from'=>$me['uid'],'msg'=>$frame->data]));
+    },
+    onClose: fn($server, $fd, $g) => Store::del('ws_rooms', (string)$fd)
+);
+PHP]) ?>
+  </div>
+  <div class="tab-panel" id="ws-auth">
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/auth?token=secret</code> — validates token in onOpen, disconnects with code 4001 if invalid.</p>
+    <?= App::component('/components/_code', ['code' => <<<'PHP'
+$app->ws('/ws/auth',
+    onOpen: function($server, $request, $g) {
+        $token = $request->get['token'] ?? null;
+        if ($token !== 'secret') {
+            $server->push($request->fd, json_encode(['error' => 'Unauthorized']));
+            $server->disconnect($request->fd, 4001, 'Unauthorized');
+            return;
+        }
+        $server->push($request->fd, json_encode(['event' => 'authenticated']));
+    },
+    onMessage: fn($server, $frame) => $server->push($frame->fd, 'secure: '.$frame->data)
+);
+PHP]) ?>
+  </div>
+  <div class="tab-panel" id="ws-binary">
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/binary</code> — checks <code>$frame->opcode</code>, echoes binary as binary. PING/PONG filtered automatically by ZealPHP.</p>
+    <?= App::component('/components/_code', ['code' => <<<'PHP'
+$app->ws('/ws/binary',
+    onMessage: function($server, $frame, $g) {
+        if ($frame->opcode === \OpenSwoole\WebSocket\Server::WEBSOCKET_OPCODE_BINARY) {
+            // Echo raw bytes back as a binary frame
+            $server->push($frame->fd, $frame->data, \OpenSwoole\WebSocket\Server::WEBSOCKET_OPCODE_BINARY);
+        } else {
+            $server->push($frame->fd, json_encode(['bytes' => strlen($frame->data)]));
+        }
+    }
+);
+PHP]) ?>
+  </div>
+	</div>
+
+	<h2 class="ws-h2" id="scaling">Scaling past one server</h2>
+	<p>Everything above lives in one OpenSwoole process tree. Run two ZealPHP instances behind a load balancer and their <code>Store</code> client registries are completely independent — a broadcast in process A doesn&rsquo;t reach clients connected to process B. As of v0.2.39, ZealPHP ships a first-class pub/sub primitive for the cross-server routing fabric:</p>
+	<?= App::component('/components/_code', [
+	    'label' => 'Cross-server WebSocket routing — Store::publish + App::subscribe',
+	    'lang'  => 'php',
+	    'code'  => <<<'PHP'
+// app.php — flip Store to Redis. ALL nodes share the same view.
+Store::defaultBackend(Store::BACKEND_REDIS);
+
+// Track which server owns each client (cross-node visible).
+Store::make('ws_owner', 4096, [
+    'server_id' => [Store::TYPE_STRING, 32],
+]);
+$myServerId = gethostname() . ':' . getmypid();
+
+// Subscribe to YOUR identity channel — only THIS server's subscriber
+// receives messages routed here.
+App::subscribe("ws:server:$myServerId", function (string $payload) use ($server, $localFds) {
+    $msg = json_decode($payload, true);
+    $fd  = $localFds[$msg['client_id']] ?? null;
+    if ($fd !== null && $server->isEstablished($fd)) {
+        $server->push($fd, $msg['data']);
+    }
+});
+
+// Anywhere — send to a specific client by id, on ANY server.
+$owner = Store::get('ws_owner', $clientId, 'server_id');
+Store::publish("ws:server:$owner", json_encode([
+    'client_id' => $clientId,
+    'data'      => json_encode($message),
+]));
+
+// Or broadcast to a room across all servers:
+App::subscribe('chat:room:42', function (string $payload) use ($server, $roomMembers) {
+    foreach ($roomMembers as $fd) {
+        if ($server->isEstablished($fd)) { $server->push($fd, $payload); }
+    }
+});
+Store::publish('chat:room:42', json_encode(['user' => 'alice', 'text' => 'hi']));
+PHP]) ?>
+	<p>The OpenSwoole <code>$fd</code> is process-local — only the server that accepted the TCP connection can push to it. Redis is the routing fabric: PUBLISH carries the message to the owning server, owner's subscriber translates client_id → local fd → <code>$server-&gt;push()</code>. ~0.5ms loopback, sub-millisecond cross-region (validated in the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md" target="_blank">pub/sub spike</a>). Scales to N servers symmetrically — no peer-to-peer state, every routing decision is one Redis lookup + PUBLISH.</p>
+	<p>For <strong>at-least-once</strong> delivery (work queues, command/event sourcing), pair with <code>Store::publishReliable</code> + <code>App::subscribeReliable</code> — Redis Streams with consumer groups. See <a href="/store#pubsub">/store#pubsub</a> + the deeper walkthrough at <a href="/learn/websocket#cross-server-routing">/learn/websocket#cross-server-routing</a>.</p>
+	<p><strong>Cross-node fan-out (roadmap).</strong> A room broadcast today reaches <em>every</em> worker on <em>every</em> node (one cluster-wide <code>ws:room:*</code> subscriber per worker) — <code>O(workers&times;nodes)</code> per message, even on nodes with no members. That&rsquo;s being reduced toward <code>O(nodes)</code>: the first step has landed — a per-room <em>server-set</em> (<code>WSRouter::roomServers()</code>, maintained race-free via atomic <code>Store::eval()</code> Lua) that tracks which nodes hold members; targeted routing and a per-node aggregator are opt-in increments. Additive groundwork only — routing is unchanged today. See the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/architecture/2026-06-03-cross-node-fanout.md" target="_blank">design &amp; rollout plan</a>.</p>
+	<?= App::component('/components/_callout', [
+	    'variant' => 'info',
+	    'title'   => 'WSRouter — production-hardened federated rooms',
+	    'body'    => '<p>The raw <code>Store::publish</code> + <code>App::subscribe</code> fabric above is what the framework builds on top of. For production use, <code>WSRouter</code> bundles all of it — cross-server client routing, federated rooms, per-connection conn_id nonce (FD-reuse race fix), optional per-channel HMAC signing, and per-client rate limiting — into a handful of calls:</p>'
+	        . '<pre><code>'
+	        . 'WSRouter::init();                              // one-time, before run()' . "\n"
+	        . 'WSRouter::setChannelHmacSecret(getenv(\'ZEALPHP_WS_HMAC\') ?: null);  // WS-3: sign pub/sub envelopes' . "\n"
+	        . 'WSRouter::setClientRateLimit(50, 10);         // WS-4: 50 ops / 10 s / client' . "\n"
+	        . 'WSRouter::own($clientId, $fd);                // onOpen' . "\n"
+	        . 'WSRouter::release($clientId);                 // onClose' . "\n"
+	        . 'WSRouter::sendToClient($clientId, $payload);  // route to any server' . "\n"
+	        . '$room = WSRouter::room(\'general\');           // Room::push/join/leave/members/onMessage/onPresence' . "\n"
+	        . '</code></pre>'
+	        . '<p>Requires <code>Store::defaultBackend(Store::BACKEND_REDIS)</code>. Close-code constants: <code>WSRouter::CLOSE_AUTH_REQUIRED</code> (4001), <code>CLOSE_CAPACITY</code> (4013), <code>CLOSE_RATE_LIMITED</code> (4029), <code>CLOSE_IDLE</code> (4040). See <a href="/learn/cross-server-chat">/learn/cross-server-chat</a> for the full walkthrough.</p>',
+	]) ?>
+	<?= App::component('/components/_callout', [
+	    'variant' => 'info',
+	    'title'   => 'Driver choice (both validated)',
+	    'body'    => '<p>Both phpredis (preferred when <code>ext-redis</code> is loaded) and predis SUBSCRIBE loops yield under <code>HOOK_ALL</code> — the production default. phpredis is ~2× faster on hot CRUD; predis works without the ext. Spike results: <a href="/store#phpredis-pubsub-caveat">/store#phpredis-pubsub-caveat</a>.</p>',
+	]) ?>
+
+	<h2 class="ws-h2">Browser JavaScript</h2>
+	<?= App::component('/components/_code', [
+	    'label' => 'HTTPS-aware browser client',
+	    'lang'  => 'javascript',
+	    'code'  => <<<'JS'
+	const endpoint = '/ws/echo';
+	const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+	const socket = new WebSocket(scheme + location.host + endpoint);
+
+	socket.addEventListener('open', () => {
+	    socket.send('Hello from the browser');
+	});
+
+	socket.addEventListener('message', event => {
+	    console.log('received:', event.data);
+	});
+
+	function sendWhenReady(message) {
+	    if (socket.readyState === WebSocket.OPEN) {
+	        socket.send(message);
+	        return;
+	    }
+
+	    socket.addEventListener('open', () => socket.send(message), { once: true });
+	}
+	JS]) ?>
+
+		<h2 class="ws-h2">Live browser client</h2>
+	<div class="ws-shell">
+	  <div class="ws-topbar">
+	    <div class="ws-status" id="ws-status" data-state="closed">
+	      <span class="ws-dot" aria-hidden="true"></span>
+	      <span id="ws-state-text">Disconnected</span>
+	    </div>
+	    <div class="ws-meta">
+	      <code id="ws-url">/ws/echo</code>
+	      <span id="ws-counts">0 sent / 0 received</span>
+	    </div>
+	  </div>
+	  <div class="ws-log" id="ws-log"><div class="ws-msg sys">Choose an endpoint and connect. Send will auto-connect if needed.</div></div>
+	  <div class="ws-quick">
+	    <button class="ws-chip" type="button" data-msg="Hello from the browser">Hello</button>
+	    <button class="ws-chip" type="button" data-msg="Broadcast test">Broadcast</button>
+	    <button class="ws-chip" type="button" data-msg="stop">Stop ticker</button>
+	    <button class="ws-chip" type="button" data-msg="Binary test payload">Binary text</button>
+	    <button class="ws-chip" type="button" data-action="clear">Clear log</button>
+	  </div>
+	  <div class="ws-controls">
+	    <select id="ws-mode" class="ws-select" onchange="wsUpdateHint()">
+	      <option value="echo">Echo (/ws/echo)</option>
+	      <option value="broadcast">Broadcast (/ws/broadcast)</option>
+	      <option value="ticker">Ticker (/ws/ticker)</option>
+      <option value="rooms">Rooms (/ws/rooms?room=general)</option>
+      <option value="auth?token=secret">Auth w/ token (/ws/auth?token=secret)</option>
+      <option value="auth">Auth NO token (/ws/auth — rejected)</option>
+      <option value="binary">Binary (/ws/binary)</option>
+	    </select>
+	    <button class="btn btn-primary btn-sm" id="ws-connect" onclick="wsConnect()">Connect</button>
+	    <button class="btn btn-ghost btn-sm" id="ws-disconnect" onclick="wsDisconnect()">Disconnect</button>
+	    <input class="ws-input" id="ws-msg" placeholder="Type a message…" onkeydown="if(event.key==='Enter')wsSend()">
+	    <button class="btn btn-primary btn-sm" id="ws-send" onclick="wsSend()">Send</button>
+	  </div>
+	</div>
+	</div>
+	</section>
+	<!-- handlers live in /js/pages/websocket.js (auto-loaded by _head.php for this page) -->

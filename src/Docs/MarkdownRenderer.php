@@ -31,7 +31,7 @@ final class MarkdownRenderer
      * sibling-guide cross-links (`../<slug>.md`) to on-site `/docs/guide/`
      * URLs; anything not listed resolves to a GitHub blob link instead.
      * Keep in sync with the whitelist in `api/docs/page.php` and the
-     * `$groups` lists in `template/pages/docs/{index,_sidebar}.php`
+     * `$groups` lists in `template/docs/index/index.php` and `template/docs/components/sidebar.php`
      * (`route/docs.php` renders any `docs/{slug}.md` regardless). Note
      * `apache-parity` is intentionally absent — its on-site home is the
      * richer `/http#parity` section, not the standalone guide.

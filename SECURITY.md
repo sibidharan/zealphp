@@ -38,7 +38,7 @@ The following areas are in scope for security reports:
 
 ### Out of Scope
 
-- Demo website content (`public/`, `template/pages/`)
+- Demo website content (`public/`, `template/`)
 - Example files (`examples/`)
 - Benchmark scripts (`scripts/`)
 

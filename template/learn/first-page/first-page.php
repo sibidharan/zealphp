@@ -1,0 +1,146 @@
+<?php use ZealPHP\App; $active = $active ?? 'learn/first-page'; ?>
+<div class="learn-layout">
+  <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
+  <article class="lesson-content">
+    <?= App::component('/components/_lesson_header', [
+      'number'   => 3,
+      'title'    => 'Your First Page',
+      'subtitle' => 'Drop a file, get a URL. The filesystem is the router.',
+      'prev'     => ['slug' => 'learn/create-app', 'title' => 'Create a ZealPHP App'],
+      'next'     => ['slug' => 'learn/mental-model', 'title' => 'The Mental Model'],
+    ]) ?>
+
+    <?= App::component('/components/_youwilllearn', ['items' => [
+      'Create a page by adding a file to public/',
+      'How implicit routing maps files to URLs',
+      'Add dynamic content with PHP',
+      'Handle query parameters',
+    ]]) ?>
+
+    <h2>The problem</h2>
+    <p>
+      In most frameworks, adding a new page means editing a routing table, creating a controller,
+      registering it somewhere, and maybe writing a view. That's a lot of ceremony for "show some HTML."
+    </p>
+    <p>
+      ZealPHP takes a different approach: <strong>the filesystem is the router</strong>.
+    </p>
+
+    <h2>Step 1: Create a file</h2>
+    <p>Create a file at <code>public/greeting.php</code>:</p>
+    <pre><code class="language-php">&lt;?php
+echo "&lt;h1&gt;Hello, World!&lt;/h1&gt;";
+echo "&lt;p&gt;This page was served by ZealPHP.&lt;/p&gt;";</code></pre>
+
+    <h2>Step 2: Visit the URL</h2>
+    <p>Open <code>http://localhost:8080/greeting</code> in your browser. That's it — no routing
+      config, no controller registration. ZealPHP saw a file at <code>public/greeting.php</code> and
+      mapped it to <code>GET /greeting</code> automatically.</p>
+
+    <h2>How implicit routing works</h2>
+    <p>
+      The <code>public/</code> folder is a filing cabinet — folders are drawers, files are documents,
+      and the URL mirrors the file path. <code>public/blog/post.php</code> → <code>/blog/post</code>.
+      The <code>.php</code> extension is stripped automatically. No routing table, no config.
+    </p>
+    <p>
+      That covers static pages with PHP. For URL parameters (<code>/users/{id}</code>), REST APIs,
+      and the priority order between routing styles, see the <a href="/learn/routes">How Routes Work</a>
+      lesson in Foundations.
+    </p>
+
+    <h2>Adding dynamic content</h2>
+    <p>These are PHP files, so you can use any PHP you want. Let's make the greeting personal. Depending on your <strong>Lifecycle Mode</strong>, you have two amazing ways to do this:</p>
+
+    <div class="lfp-compare">
+      <div class="lfp-compare-col">
+        <?= App::component('/components/_code', [
+          'label' => 'Coroutine Mode (Default)',
+          'code'  => <<<'PHP'
+<?php
+// $g gives you the current request's data safely.
+$g    = \ZealPHP\G::instance();
+$name = htmlspecialchars($g->get['name'] ?? 'World');
+echo "<h1>Hello, {$name}!</h1>";
+PHP
+        ]) ?>
+      </div>
+      <div class="lfp-compare-col">
+        <?= App::component('/components/_code', [
+          'label' => 'Coroutine-Legacy Mode',
+          'code'  => <<<'PHP'
+<?php
+// Classic PHP syntax just works!
+$name = htmlspecialchars($_GET['name'] ?? 'World');
+echo "<h1>Hello, {$name}!</h1>";
+PHP
+        ]) ?>
+      </div>
+    </div>
+
+    <p>Visit <code>/greeting?name=Alice</code> and the page greets Alice by name.</p>
+    <p>
+      <strong>Which one should I use?</strong> For brand new apps, <strong>Coroutine Mode</strong> (the default) is the fastest and uses <code>$g-&gt;get</code> to prevent global state leaks.
+      However, if you are migrating an older application or simply prefer writing classic PHP syntax, you can flip the switch in your <code>app.php</code> to <code>App::mode(App::MODE_COROUTINE_LEGACY)</code>. This leverages <code>ext-zealphp</code> to magically isolate <code>$_GET</code> and other superglobals per-coroutine! 
+      <a href="/learn/mental-model">Lesson 4</a> explains the mental model, and <a href="/learn/legacy-modes">Lesson 26</a> details the caveats you should be careful about when using the experimental coroutine-legacy mode.
+    </p>
+
+    <?= App::component('/components/_tryit', [
+      'title' => 'See it live',
+      'body'  => '<p>This very site uses implicit routing. The page you\'re reading right now is served from <code>public/learn.php</code>. Every page in the docs — <a href="/routing">/routing</a>, <a href="/streaming">/streaming</a>, <a href="/ws">/ws</a> — is a file in <code>public/</code>.</p>
+<p>Try it: <a href="/api/learn/demo/greeting?name=ZealPHP" target="_blank">Open the greeting demo →</a></p>',
+    ]) ?>
+
+    <h2>What about messy URLs?</h2>
+    <p>
+      "But I don't want <code>.php</code> in my URLs!" — you won't see them. ZealPHP strips the
+      extension automatically. <code>public/about.php</code> responds at <code>/about</code>, not
+      <code>/about.php</code>. Requesting <code>/about.php</code> directly returns 403.
+    </p>
+
+    <h2>Using a layout</h2>
+    <p>
+      Right now, your page outputs raw HTML with no <code>&lt;head&gt;</code>, no stylesheet, no navigation.
+      Every real page needs a shared layout. The next nine Foundations lessons cover the request
+      lifecycle, routing, and the response model that makes layouts work;
+      <a href="/learn/components">Lesson 13 (Layouts &amp; Components)</a> teaches you how to wrap pages
+      in a layout template using <code>App::render()</code>.
+    </p>
+    <p>Here's a preview — this is how most pages in ZealPHP apps look:</p>
+    <pre><code class="language-php">&lt;?php use ZealPHP\App;
+App::render('/_master', [
+    'title' =&gt; 'About',
+    'page'  =&gt; 'about',
+]);</code></pre>
+    <p>That's the entire file. Three lines. The master template handles the HTML shell, nav,
+      footer, and CSS — your page template only has the content.</p>
+
+    <?= App::component('/components/_concept_check', [
+      'id'       => 'routing1',
+      'question' => 'If you create a file at public/blog/post.php, what URL will serve it?',
+      'correct'  => 'b',
+      'explain'  => 'ZealPHP maps the file path (minus public/ and .php) to the URL. So public/blog/post.php → /blog/post.',
+      'options'  => [
+        'a' => '/blog/post.php',
+        'b' => '/blog/post',
+        'c' => '/public/blog/post',
+      ],
+    ]) ?>
+
+    <?= App::component('/components/_keytakeaways', ['items' => [
+      'Files in <code>public/</code> automatically become URLs — no routing config needed',
+      'The URL mirrors the file path: <code>public/blog/post.php</code> → <code>/blog/post</code>',
+      'Use <code>$g-&gt;get</code> or switch to Coroutine-Legacy mode for classic <code>$_GET</code> — both are safe!',
+      '<code>.php</code> extensions are stripped — clean URLs by default',
+    ]]) ?>
+
+    <div class="lesson-chips">
+      <a class="lesson-chip lesson-chip-prev" href="/learn/create-app"
+         hx-get="/api/learn/page?slug=learn/create-app" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/create-app">← Create a ZealPHP App</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/mental-model"
+         hx-get="/api/learn/page?slug=learn/mental-model" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/mental-model">The Mental Model →</a>
+    </div>
+  </article>
+</div>
