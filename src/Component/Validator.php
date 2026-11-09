@@ -9,6 +9,13 @@ namespace ZealPHP\Component;
  * (`'required|email|max:120'`) or a list mixing rule strings and closures
  * `fn(mixed $value, string $field): ?string` that return an error message or null.
  *
+ * Syntax: `name` or `name:argument`, joined by `|`. List arguments are
+ * comma-separated (`in:free,pro`, `between:3,20`); `regex:` takes the rest of
+ * the string. Rules run left to right and stop at the first failure, so each
+ * field gets at most one message. A malformed rule (unknown name, `min:x`,
+ * a bad pattern) throws a LogicException: at registration for
+ * `#[Model(rules: …)]`, otherwise on the first validation, empty value or not.
+ *
  * Rules:
  *
  * | Rule | Passes when |
@@ -22,13 +29,16 @@ namespace ZealPHP\Component;
  * | `regex:/pattern/` | matches; put it last or use the list form if the pattern contains `\|` |
  * | `numeric`, `integer` | numeric / a whole number |
  * | `alpha`, `alpha_num`, `alpha_dash` | letters / letters+digits / plus `-` and `_` |
- * | `accepted` | `true`, `1`, `'1'`, `'on'`, `'yes'` |
+ * | `accepted` | `true`, `1`, `'1'`, `'on'`, `'yes'`, `'true'` |
  *
  * Every rule except `required` and `accepted` skips empty values, so
  * `'email'` alone allows an empty field and `'required|email'` doesn't.
  */
 final class Validator
 {
+    /** Rules that take no argument. */
+    private const FLAGS = ['required', 'accepted', 'email', 'url', 'numeric', 'integer', 'alpha', 'alpha_num', 'alpha_dash'];
+
     /**
      * Validate each field and return the first error per failing field.
      *
@@ -43,6 +53,9 @@ final class Validator
         foreach ($rules as $field => $fieldRules) {
             $value = $values[$field] ?? null;
             foreach (self::parse($fieldRules) as $rule) {
+                if (is_string($rule)) {
+                    self::assertRule($rule, (string) $field);
+                }
                 $error = $rule instanceof \Closure
                     ? self::runClosure($rule, $value, $field)
                     : self::check($rule, $value, $field, $messages);
@@ -77,6 +90,62 @@ final class Validator
             $rest = $pos === false ? '' : trim(substr($rest, $pos + 1));
         }
         return array_values(array_filter($out, static fn(string $r): bool => $r !== ''));
+    }
+
+    /**
+     * Throw if any rule is malformed: an unknown name, a missing or
+     * non-numeric argument, an argument on a rule that takes none, or a
+     * pattern that doesn't compile. Closures are not checked.
+     *
+     * @param string|list<string|\Closure> $rules
+     * @throws \LogicException
+     */
+    public static function assertRules(string|array $rules, string $field): void
+    {
+        foreach (self::parse($rules) as $rule) {
+            if (is_string($rule)) {
+                self::assertRule($rule, $field);
+            }
+        }
+    }
+
+    private static function assertRule(string $rule, string $field): void
+    {
+        [$name, $arg] = array_pad(explode(':', $rule, 2), 2, '');
+        $where = "validation rule '{$rule}' on {$field}";
+        if (in_array($name, self::FLAGS, true)) {
+            if ($arg !== '') {
+                throw new \LogicException("Invalid {$where}: '{$name}' takes no argument");
+            }
+            return;
+        }
+        switch ($name) {
+            case 'min':
+            case 'max':
+                self::number($arg, $name);
+                return;
+            case 'between':
+                $bounds = explode(',', $arg);
+                if (count($bounds) !== 2) {
+                    throw new \LogicException("Validation rule 'between' needs two values on {$field}");
+                }
+                self::number($bounds[0], 'between');
+                self::number($bounds[1], 'between');
+                return;
+            case 'in':
+            case 'not_in':
+                if ($arg === '') {
+                    throw new \LogicException("Invalid {$where}: '{$name}' needs a list, like {$name}:a,b");
+                }
+                return;
+            case 'regex':
+                if (@preg_match($arg, '') === false) {
+                    throw new \LogicException("Invalid regex in validation rule for {$field}: {$arg}");
+                }
+                return;
+            default:
+                throw new \LogicException("Unknown validation rule '{$name}' on {$field}");
+        }
     }
 
     private static function runClosure(\Closure $rule, mixed $value, string $field): ?string
@@ -121,25 +190,17 @@ final class Validator
             case 'max':
                 return self::size($value) <= self::number($arg, 'max');
             case 'between':
-                $bounds = explode(',', $arg, 2);
-                if (count($bounds) !== 2) {
-                    throw new \LogicException("Validation rule 'between' needs two values on {$field}");
-                }
+                // assertRule() has checked the two bounds.
+                [$low, $high] = array_pad(explode(',', $arg, 2), 2, '');
                 $size = self::size($value);
-                return $size >= self::number($bounds[0], 'between') && $size <= self::number($bounds[1], 'between');
+                return $size >= self::number($low, 'between') && $size <= self::number($high, 'between');
             case 'in':
                 return is_scalar($value) && in_array((string) $value, explode(',', $arg), true);
             case 'not_in':
                 return is_scalar($value) && !in_array((string) $value, explode(',', $arg), true);
             case 'regex':
-                if (!is_scalar($value)) {
-                    return false;
-                }
-                $r = @preg_match($arg, (string) $value);
-                if ($r === false) {
-                    throw new \LogicException("Invalid regex in validation rule for {$field}: {$arg}");
-                }
-                return $r === 1;
+                // assertRule() has checked that the pattern compiles.
+                return is_scalar($value) && preg_match($arg, (string) $value) === 1;
             case 'numeric':
                 return is_int($value) || is_float($value) || (is_string($value) && is_numeric($value));
             case 'integer':

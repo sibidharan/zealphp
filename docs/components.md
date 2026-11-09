@@ -332,6 +332,46 @@ A submitted value that can't convert to the property's type (`"old"` for an `int
 
 ## Validation
 
+Validation rules are checks that run on the server against a field's value after input is applied. Each failing field gets one message, shown by `$c->error('field')`.
+
+### Rule syntax
+
+A rule string is rules joined by `|`. Each rule is a name, or a name, a colon and an argument:
+
+```text
+required|min:3|max:20|alpha_dash
+└──┬───┘ └─┬─┘ └─┬──┘ └───┬────┘
+  flag   name:argument   flag
+```
+
+| Form | Examples | Notes |
+|---|---|---|
+| `name` | `required`, `email`, `alpha_dash` | Takes no argument |
+| `name:n` | `min:3`, `max:120` | A number |
+| `name:a,b` | `between:3,20`, `in:free,pro`, `not_in:admin,root` | Comma-separated; spaces are part of a value |
+| `regex:pattern` | `regex:/^[A-Z]{2}\d+$/` | Takes the **rest of the string**, `\|` included, so put it last |
+
+The same rules as a list: `['required', 'min:3', fn($v) => …]`. Use the list form for closures, or for a regex that isn't last.
+
+How a rule string is evaluated:
+
+- **Left to right, first failure wins.** `'required|email'` on an empty field reports "required" and never runs `email`. Order rules from most basic to most specific.
+- **Empty values skip every rule except `required` and `accepted`.** `null`, `''` and `[]` count as empty. So `'email'` alone makes a field optional but well-formed if filled, and `'required|email'` makes it mandatory.
+- **A malformed rule is an error, not a pass.** An unknown name (`requird`), a missing or non-numeric argument (`min:x`, `between:1`), an argument on a rule that takes none (`required:true`), an empty list (`in:`) or a pattern that doesn't compile throws a `LogicException`. For `#[Model(rules: …)]` that happens when the component is registered (boot); for `rules()`, on the first validation.
+
+### When rules run
+
+| Trigger | Fields checked |
+|---|---|
+| A `live` or `blur` field changes | Only the fields that changed |
+| An action calls `$this->validate()` | Every field with rules; `$this->validate(['email'])` checks only those |
+| An action that doesn't call `validate()` | None: rules don't run on their own before an action |
+| `updated{Prop}()` throws `ValidationException` or calls `addError()` | Adds to the errors after the rules ran |
+
+Rules run on the server only. `model()` doesn't add `required`, `maxlength` or `pattern` to the control; write those yourself if you also want the browser to check before sending.
+
+### Where rules come from
+
 Rules come from `#[Model(rules: …)]` and from an optional `rules()` method, which wins for the same field:
 
 ```php
@@ -352,16 +392,18 @@ protected function messages(): array
 | Rule | Passes when |
 |---|---|
 | `required` | not `null`, `''` or `[]` |
-| `accepted` | `true`, `1`, `'1'`, `'on'`, `'yes'` |
+| `accepted` | `true`, `1`, `'1'`, `'on'`, `'yes'`, `'true'` (a checkbox that must be ticked) |
 | `email`, `url` | a valid email / an http(s) URL |
 | `min:n`, `max:n`, `between:a,b` | string length, number value, or array count is in range |
 | `in:a,b`, `not_in:a,b` | the value is / isn't one of these |
 | `regex:/pattern/` | matches (put it last, or use the list form if the pattern has `\|`) |
 | `numeric`, `integer` | a number / a whole number |
 | `alpha`, `alpha_num`, `alpha_dash` | letters / plus digits / plus `-` and `_` |
-| closure `fn($value, $field)` | returns `null` (an error message string fails) |
+| closure `fn($value, $field)` | returns `null` or `true`. A string is the error message; anything else fails with ":field is invalid." List form only; runs on empty values too |
 
-Every rule except `required` and `accepted` skips empty values, so `'email'` allows an empty field and `'required|email'` doesn't. `:field` in a message becomes the field's label (`first_name` → "First name").
+`messages()` keys are `'field.rule'` (one field) or `'rule'` (every field); the field-specific key wins. `:field` in a message becomes the field's label (`first_name` → "First name").
+
+The syntax follows Laravel's validation rules, so `required|email|max:255` reads the same here. Only the rules in the table exist.
 
 `$c->error('field')` prints `<span class="zc-error" role="alert">` with the message, or nothing. `$c->hasError()` and `$c->errors()` are there for custom markup.
 

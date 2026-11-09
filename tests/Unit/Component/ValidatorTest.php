@@ -181,6 +181,12 @@ class ValidatorTest extends TestCase
         yield 'min without number' => ['min:x'];
         yield 'between one value' => ['between:1'];
         yield 'invalid regex' => ['regex:/(/'];
+        yield 'between three values' => ['between:1,2,3'];
+        yield 'max without number' => ['max:'];
+        yield 'an argument on a flag' => ['required:true'];
+        yield 'in without a list' => ['in:'];
+        yield 'not_in without a list' => ['not_in'];
+        yield 'misspelled' => ['requird|email'];
     }
 
     #[DataProvider('badRules')]
@@ -188,5 +194,59 @@ class ValidatorTest extends TestCase
     {
         $this->expectException(\LogicException::class);
         Validator::validate(['f' => 'value'], ['f' => $rule]);
+    }
+
+    /** Every rule but required/accepted skips empty values; a typo must still surface. */
+    #[DataProvider('badRules')]
+    public function testMisconfiguredRulesThrowOnAnEmptyValueToo(string $rule): void
+    {
+        $this->expectException(\LogicException::class);
+        Validator::validate(['f' => ''], ['f' => $rule]);
+    }
+
+    #[DataProvider('badRules')]
+    public function testAssertRulesRefusesMisconfiguredRules(string $rule): void
+    {
+        $this->expectException(\LogicException::class);
+        Validator::assertRules($rule, 'f');
+    }
+
+    public function testAssertRulesAcceptsEveryRule(): void
+    {
+        Validator::assertRules('required|accepted|email|url|numeric|integer|alpha|alpha_num|alpha_dash', 'f');
+        Validator::assertRules('min:3|max:2.5|between:-1,10|in:a,b|not_in:c|regex:/a|b/', 'f');
+        Validator::assertRules(['required', fn() => null, 'max:3'], 'f');
+        Validator::assertRules('', 'f');
+        $this->expectNotToPerformAssertions();
+    }
+
+    /** A #[Model] rule typo stops registration (boot), not the first submit. */
+    public function testModelRulesAreCheckedAtRegistration(): void
+    {
+        $c = new class extends \ZealPHP\Component\Component {
+            #[\ZealPHP\Component\Model(rules: 'required|min:three')] public string $name = '';
+            public function render(): mixed { return ''; }
+        };
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage("Validation rule 'min' needs a number, got 'three'");
+        \ZealPHP\Component\ComponentMeta::reflect('typo', $c::class);
+    }
+
+    public function testMessagesNameTheRuleAndField(): void
+    {
+        try {
+            Validator::assertRules('required:yes', 'email');
+            $this->fail('expected LogicException');
+        } catch (\LogicException $e) {
+            $this->assertSame("Invalid validation rule 'required:yes' on email: 'required' takes no argument", $e->getMessage());
+        }
+        try {
+            Validator::assertRules('in:', 'plan');
+            $this->fail('expected LogicException');
+        } catch (\LogicException $e) {
+            $this->assertSame("Invalid validation rule 'in:' on plan: 'in' needs a list, like in:a,b", $e->getMessage());
+        }
+        $this->expectExceptionMessage("Unknown validation rule 'requird' on name");
+        Validator::assertRules('requird', 'name');
     }
 }

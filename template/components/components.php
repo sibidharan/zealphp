@@ -209,6 +209,28 @@ HTML]) ?>
   </div>
 </div>
 
+<h3 id="validation" class="lc-mt-2">Validation rules</h3>
+<p>A rule string is rules joined by <code>|</code>: a bare name (<code>required</code>, <code>email</code>), or a name, a colon and an argument (<code>min:3</code>, <code>between:3,20</code>, <code>in:free,pro</code>). <code>regex:</code> takes the rest of the string, so put it last. The syntax follows Laravel's validation rules.</p>
+<ul>
+<li><strong>Left to right, first failure wins:</strong> each field gets one message.</li>
+<li><strong>Empty values skip every rule except <code>required</code> and <code>accepted</code>:</strong> <code>'email'</code> means optional but well-formed, <code>'required|email'</code> means mandatory.</li>
+<li><strong>When they run:</strong> a <code>live</code> or <code>blur</code> change checks the changed field; an action checks every field when it calls <code>$this->validate()</code>, and nothing otherwise.</li>
+<li><strong>A typo is an error, not a pass:</strong> <code>requird</code> or <code>min:x</code> in <code>#[Model(rules: …)]</code> stops boot with a <code>LogicException</code>.</li>
+<li><strong>Server only:</strong> <code>model()</code> adds no <code>required</code>/<code>maxlength</code>; write them yourself for browser checks.</li>
+</ul>
+<table class="ztable">
+<tr><th>Rule</th><th>Passes when</th></tr>
+<tr><td><code>required</code> / <code>accepted</code></td><td>not <code>null</code>, <code>''</code> or <code>[]</code> / ticked (<code>true</code>, <code>1</code>, <code>'on'</code>, <code>'yes'</code>, <code>'true'</code>)</td></tr>
+<tr><td><code>email</code>, <code>url</code></td><td>a valid email / an http(s) URL</td></tr>
+<tr><td><code>min:n</code>, <code>max:n</code>, <code>between:a,b</code></td><td>string length, number value, or array count is in range</td></tr>
+<tr><td><code>in:a,b</code>, <code>not_in:a,b</code></td><td>the value is / isn't one of these</td></tr>
+<tr><td><code>numeric</code>, <code>integer</code></td><td>a number / a whole number</td></tr>
+<tr><td><code>alpha</code>, <code>alpha_num</code>, <code>alpha_dash</code></td><td>letters / plus digits / plus <code>-</code> and <code>_</code></td></tr>
+<tr><td><code>regex:/pattern/</code></td><td>the pattern matches</td></tr>
+<tr><td><code>fn($value, $field)</code> (list form)</td><td>returns <code>null</code>; a returned string is the error message</td></tr>
+</table>
+<p>Full reference: <a href="/docs/guide/components#validation">Validation</a> in the components guide.</p>
+
 <h3 id="push" class="lc-mt-2">Live across tabs (push)</h3>
 <p>One like count shared by every visitor. The component lists the topic it depends on; the action invalidates it. Every open page showing the component re-renders it, over one SSE connection per page. Open this page in a second tab and click Like there.</p>
 
