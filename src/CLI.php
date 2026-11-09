@@ -223,15 +223,15 @@ class CLI
                 // the next command (issue #17). Fall through to start.
             default:
                 $pidFile = self::resolvePidFile($flags);
-                if ($command === 'start' && file_exists($pidFile)) {
-                    $pid = (int)trim((string)file_get_contents($pidFile));
-                    if ($pid > 0 && @posix_kill($pid, 0)) {
-                        $port = $flags['port'] ?? (App::instance() ? App::instance()->port : 8080);
-                        echo "ZealPHP is already running (pid {$pid}, port {$port})\n";
-                        echo "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n";
-                        exit(0);
+                if ($command === 'start') {
+                    // `start` never signals anything: it refuses when a server
+                    // (ours or not) already has the PID file or the port.
+                    $startPort = $flags['port'] ?? (App::instance() !== null ? App::instance()->port : 8080);
+                    $blocker = self::startBlocker($pidFile, $startPort);
+                    if ($blocker !== null) {
+                        echo $blocker[1];
+                        exit($blocker[0]);
                     }
-                    @unlink($pidFile);
                 }
 
                 $overrides = [];
@@ -344,10 +344,8 @@ class CLI
             return "{$dir}/zealphp_{$port}.pid";
         }
         // No explicit --pid-file / ZEALPHP_PID_FILE / ZEALPHP_LOG_DIR: share the
-        // same resolver the logger uses. It defaults to /tmp/zealphp but falls
-        // back to a per-user dir when /tmp/zealphp is owned by another user — so
-        // start and stop/status agree on the same writable dir instead of both
-        // failing to write the PID file (issue: root-owned /tmp/zealphp).
+        // same resolver the logger uses (a per-user dir owned by us, never a
+        // shared /tmp/zealphp), so start and stop/status agree on one dir.
         $dir = \ZealPHP\resolve_log_dir() ?? sys_get_temp_dir();
         self::ensurePidDir($dir);
         return "{$dir}/zealphp_{$port}.pid";
@@ -359,19 +357,18 @@ class CLI
      */
     private static function ensurePidDir(string $dir): void
     {
+        // Created 0700 and never chmod-ed wider: a world-writable PID dir lets
+        // any local user swap the PID file and aim stop/restart at their pick.
         if (!is_dir($dir)) {
-            if (!@mkdir($dir, 0777, true) && !is_dir($dir)) {
+            if (!@mkdir($dir, 0700, true) && !is_dir($dir)) {
                 @elog('warn', "Cannot create PID directory {$dir} — check permissions or set ZEALPHP_PID_FILE");
             }
-        }
-        if (is_dir($dir) && !is_writable($dir)) {
-            @chmod($dir, 0777);
         }
     }
 
     /**
      * Pull the port number from a default-shaped pid file path like
-     * /tmp/zealphp/zealphp_8080.pid. Returns 0 when the caller passed a
+     * <log dir>/zealphp_8080.pid. Returns 0 when the caller passed a
      * --pid-file override that doesn't match the convention.
      */
     private static function extractPortFromPidFile(string $pidFile): int
@@ -383,20 +380,19 @@ class CLI
     }
 
     /**
-     * Returns the PID listening on $port, or null when nothing's listening
-     * or it can't be determined (non-Linux, /proc unreadable). Linux-only:
-     * /proc/net/tcp + tcp6 give the LISTEN-state socket inode; /proc/[pid]/fd/*
-     * resolves inode → owner pid. We deliberately avoid stream_socket_server /
-     * socket_bind here — those are intercepted by OpenSwoole's runtime hook
-     * (HOOK_ALL) and become coroutine-only, which would crash this CLI path.
+     * Inodes of the LISTEN-state TCP sockets bound to $port, from
+     * /proc/net/tcp + tcp6. Null when /proc/net/tcp is unreadable (non-Linux),
+     * an empty list when nothing listens on the port.
+     *
+     * @return list<string>|null
      */
-    private static function findPortOwnerPid(int $port): ?int
+    private static function listenInodes(int $port): ?array
     {
         if ($port <= 0 || !is_readable('/proc/net/tcp')) {
             return null;
         }
         $hexPort = strtoupper(str_pad(dechex($port), 4, '0', STR_PAD_LEFT));
-        $inode   = null;
+        $inodes  = [];
         foreach (['/proc/net/tcp', '/proc/net/tcp6'] as $tcpFile) {
             $lines = @file($tcpFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
             if ($lines === false) {
@@ -413,20 +409,36 @@ class CLI
                 if (!str_ends_with($parts[1], ':' . $hexPort)) {
                     continue;
                 }
-                $candidate = $parts[9];
-                if ($candidate !== '' && $candidate !== '0') {
-                    $inode = $candidate;
-                    break 2;
+                if ($parts[9] !== '' && $parts[9] !== '0') {
+                    $inodes[] = $parts[9];
                 }
             }
         }
-        if ($inode === null) {
+        return $inodes;
+    }
+
+    /**
+     * Returns the PID listening on $port, or null when nothing's listening
+     * or it can't be determined (non-Linux, /proc unreadable). Linux-only:
+     * /proc/net/tcp + tcp6 give the LISTEN-state socket inode; /proc/[pid]/fd/*
+     * resolves inode → owner pid. We deliberately avoid stream_socket_server /
+     * socket_bind here — those are intercepted by OpenSwoole's runtime hook
+     * (HOOK_ALL) and become coroutine-only, which would crash this CLI path.
+     */
+    private static function findPortOwnerPid(int $port): ?int
+    {
+        $inodes = self::listenInodes($port);
+        if ($inodes === null || $inodes === []) {
             return null;
         }
-        $target = "socket:[{$inode}]";
-        $fds    = glob('/proc/[0-9]*/fd/*') ?: [];
+        $targets = [];
+        foreach ($inodes as $inode) {
+            $targets["socket:[{$inode}]"] = true;
+        }
+        $fds = glob('/proc/[0-9]*/fd/*') ?: [];
         foreach ($fds as $fd) {
-            if (@readlink($fd) !== $target) {
+            $link = @readlink($fd);
+            if ($link === false || !isset($targets[$link])) {
                 continue;
             }
             if (preg_match('#^/proc/(\d+)/#', $fd, $m) === 1) {
@@ -471,11 +483,214 @@ class CLI
     }
 
     /**
-     * Recover from an orphaned-daemon situation: pid file missing or stale
-     * but the port is still held. If the listener is a ZealPHP process,
-     * graceful-then-force kill it. Returns true when an orphan was
-     * cleaned up, false when there's nothing to do (port free, or held by
-     * something that isn't ours).
+     * True when $pid exists. posix_kill($pid, 0) fails with EPERM for a live
+     * process owned by another user — that is still a live process.
+     */
+    private static function pidAlive(int $pid): bool
+    {
+        if ($pid <= 0) {
+            return false;
+        }
+        if (@posix_kill($pid, 0)) {
+            return true;
+        }
+        return posix_get_last_error() === 1;   // EPERM
+    }
+
+    /**
+     * True when $pid runs as the current effective uid. Linux reads the owner
+     * of /proc/$pid; elsewhere posix_kill() is the only gate, and it already
+     * refuses another user's process.
+     */
+    private static function pidOwnedByUs(int $pid): bool
+    {
+        $owner = @fileowner("/proc/{$pid}");
+        if ($owner === false) {
+            return !is_dir('/proc/self');
+        }
+        return $owner === posix_geteuid();
+    }
+
+    /**
+     * True when $pid holds a LISTEN socket for $port. Permissive (true) when
+     * the port is unknown (custom --pid-file name) or /proc is unavailable.
+     */
+    private static function pidListensOn(int $pid, int $port): bool
+    {
+        $inodes = self::listenInodes($port);
+        if ($inodes === null) {
+            return true;
+        }
+        if ($inodes === []) {
+            return false;
+        }
+        $targets = array_map(static fn (string $i): string => "socket:[{$i}]", $inodes);
+        foreach (glob("/proc/{$pid}/fd/*") ?: [] as $fd) {
+            $link = @readlink($fd);
+            if ($link !== false && in_array($link, $targets, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Classify the pid a PID file (or a port lookup) names, before anything
+     * acts on it:
+     *  - 'dead'    — no such process; the PID file is stale.
+     *  - 'ours'    — a php `app.php` process owned by the current user that
+     *                listens on $port (port check skipped when $port is 0).
+     *  - 'foreign' — alive but not that: another user's process, a recycled
+     *                pid, or a ZealPHP server for a different port. Never
+     *                signalled; callers report it.
+     *
+     * @return 'dead'|'ours'|'foreign'
+     */
+    public static function classifyPid(int $pid, int $port): string
+    {
+        if (!self::pidAlive($pid)) {
+            return 'dead';
+        }
+        if ($pid <= 1 || $pid === getmypid()) {
+            return 'foreign';
+        }
+        if (!self::pidOwnedByUs($pid) || !self::processIsZealphp($pid)) {
+            return 'foreign';
+        }
+        if ($port > 0 && !self::pidListensOn($pid, $port)) {
+            return 'foreign';
+        }
+        return 'ours';
+    }
+
+    /**
+     * Read the pid a PID file names (0 when unreadable or not a number).
+     */
+    private static function readPidFile(string $pidFile): int
+    {
+        $raw = @file_get_contents($pidFile);
+        if ($raw === false || preg_match('/^\s*(\d+)\s*$/', $raw, $m) !== 1) {
+            return 0;
+        }
+        return (int)$m[1];
+    }
+
+    /**
+     * Pids of every live descendant of $pid that runs as the current user,
+     * read from /proc/<pid>/stat. Used by the SIGKILL fallback so the manager
+     * and workers of a hung master go with it, without signalling a whole
+     * process group (which could contain unrelated processes).
+     *
+     * @return list<int>
+     */
+    private static function ownDescendants(int $pid): array
+    {
+        $children = [];
+        foreach (glob('/proc/[0-9]*/stat') ?: [] as $statFile) {
+            $stat = @file_get_contents($statFile);
+            if ($stat === false) {
+                continue;
+            }
+            $close = strrpos($stat, ')');
+            if ($close === false) {
+                continue;
+            }
+            $fields = explode(' ', trim(substr($stat, $close + 2)));
+            if (!isset($fields[1])) {
+                continue;
+            }
+            $children[(int)$fields[1]][] = (int)basename(dirname($statFile));
+        }
+        $out   = [];
+        $queue = [$pid];
+        while ($queue !== []) {
+            $parent = array_shift($queue);
+            foreach ($children[$parent] ?? [] as $child) {
+                if ($child > 1 && !in_array($child, $out, true) && self::pidOwnedByUs($child)) {
+                    $out[]   = $child;
+                    $queue[] = $child;
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * SIGTERM $pid (an OpenSwoole master shuts its manager + workers down
+     * itself), wait up to 10 s, then SIGKILL the master and its own
+     * descendants individually. Only ever signals positive pids > 1.
+     * Returns true when the process exited after SIGTERM.
+     */
+    private static function terminate(int $pid): bool
+    {
+        if ($pid <= 1) {
+            return false;
+        }
+        posix_kill($pid, SIGTERM);
+        // OpenSwoole graceful shutdown (workers finish current requests, master
+        // tears down listeners) typically takes 5-7 seconds. Poll for up to 10s
+        // before falling back to SIGKILL.
+        for ($i = 0; $i < 10; $i++) {       // first 500ms: fast poll
+            usleep(50000);
+            if (!@posix_kill($pid, 0)) {
+                return true;
+            }
+        }
+        for ($i = 0; $i < 95; $i++) {       // next 9.5s: slower poll
+            usleep(100000);
+            if (!@posix_kill($pid, 0)) {
+                return true;
+            }
+        }
+        $descendants = self::ownDescendants($pid);
+        posix_kill($pid, SIGKILL);
+        foreach ($descendants as $child) {
+            @posix_kill($child, SIGKILL);
+        }
+        usleep(200000);
+        return false;
+    }
+
+    /**
+     * Start-time guard for `start` / bare `php app.php`. It never signals
+     * anything: a running server, a foreign PID file or a port held by a
+     * process we can see all refuse the start with a message; only a PID file
+     * naming a dead process is removed.
+     *
+     * @return array{int, string}|null [exit code, message] to refuse with, or null to proceed
+     */
+    public static function startBlocker(string $pidFile, int $port): ?array
+    {
+        if (file_exists($pidFile)) {
+            $pid = self::readPidFile($pidFile);
+            $kind = self::classifyPid($pid, $port);
+            if ($kind === 'ours') {
+                return [0, "ZealPHP is already running (pid {$pid}, port {$port})\n"
+                    . "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n"];
+            }
+            if ($kind === 'foreign') {
+                return [1, "PID file {$pidFile} names pid {$pid}, which is not your ZealPHP server on port {$port}.\n"
+                    . "Not touching it. Remove the file if it is stale, or use another port / ZEALPHP_LOG_DIR.\n"];
+            }
+            @unlink($pidFile);
+        }
+        $holder = self::findPortOwnerPid($port);
+        if ($holder !== null) {
+            $what = self::classifyPid($holder, $port) === 'ours'
+                ? "a ZealPHP server (pid {$holder}) with no PID file here. Stop it with 'php app.php stop -p {$port}' from its app directory"
+                : "pid {$holder}, which is not your ZealPHP server";
+            return [1, "Port {$port} is already in use by {$what}.\n"];
+        }
+        return null;
+    }
+
+    /**
+     * Recover from an orphaned-daemon situation on `stop`: pid file missing or
+     * stale but the port is still held. If the listener is our own ZealPHP
+     * server from this app directory, stop it (SIGTERM to its master, then
+     * SIGKILL fallback). Returns true when an orphan was cleaned up, false
+     * when there's nothing to do (port free, or held by something that isn't
+     * ours). Never called from `start`.
      *
      * Orphan recovery is rare and notable, so messages always print even
      * when called from a "quiet" code path (cliStop during restart) —
@@ -491,9 +706,24 @@ class CLI
         if ($ownerPid === null) {
             return false;
         }
-        if (!self::processIsZealphp($ownerPid)) {
-            echo "Port {$port} is held by pid {$ownerPid} (not a ZealPHP process) — refusing to touch it.\n";
+        if (self::classifyPid($ownerPid, $port) !== 'ours') {
+            echo "Port {$port} is held by pid {$ownerPid} (not your ZealPHP process) — refusing to touch it.\n";
             return false;
+        }
+        // The first fd match may be a worker; walk up to the master (the
+        // topmost ancestor that is still our ZealPHP listener on this port).
+        for ($depth = 0; $depth < 4; $depth++) {
+            $stat = @file_get_contents("/proc/{$ownerPid}/stat");
+            $close = is_string($stat) ? strrpos($stat, ')') : false;
+            if (!is_string($stat) || $close === false) {
+                break;
+            }
+            $fields = explode(' ', trim(substr($stat, $close + 2)));
+            $ppid = (int)($fields[1] ?? 0);
+            if ($ppid <= 1 || self::classifyPid($ppid, $port) !== 'ours') {
+                break;
+            }
+            $ownerPid = $ppid;
         }
         // Only reclaim our OWN orphan: a ZealPHP server started from another
         // app directory is somebody's running server whose pid file simply
@@ -508,83 +738,62 @@ class CLI
             return false;
         }
         echo "Found orphaned ZealPHP daemon on port {$port} (pid {$ownerPid}, no PID file) — cleaning up.\n";
-        $pgid      = @posix_getpgid($ownerPid);
-        $killGroup = $pgid && $pgid !== posix_getpgid(posix_getpid());
-        $killGroup ? posix_kill(-$pgid, SIGTERM) : posix_kill($ownerPid, SIGTERM);
-        for ($i = 0; $i < 100; $i++) {      // up to 10s
-            usleep(100000);
-            if (!@posix_kill($ownerPid, 0)) {
-                echo "Orphan cleaned up.\n";
-                return true;
-            }
-        }
-        echo "Orphan ignored graceful SIGTERM — force killing.\n";
-        $killGroup ? posix_kill(-$pgid, SIGKILL) : posix_kill($ownerPid, SIGKILL);
-        usleep(200000);
+        echo self::terminate($ownerPid)
+            ? "Orphan cleaned up.\n"
+            : "Orphan ignored graceful SIGTERM — force killed.\n";
         return true;
     }
 
     /**
      * Stop the server identified by `$pidFile`.
      *
-     * Sends `SIGTERM` to the process group (or PID), polls up to 10 s for graceful
-     * shutdown, then falls back to `SIGKILL`. Removes the PID file on success.
-     * When the PID file is missing or stale, calls `claimOrphanIfAny()` to handle
-     * a running-but-unregistered daemon. Output is suppressed when `$quiet` is `true`.
+     * Signals the pid only after `classifyPid()` says it is our own ZealPHP
+     * server for that port: SIGTERM, up to 10 s for graceful shutdown, then
+     * SIGKILL. A PID file naming a dead process is removed; one naming a live
+     * process that isn't ours is reported and left alone. When the PID file is
+     * missing or stale, calls `claimOrphanIfAny()` to handle a
+     * running-but-unregistered daemon. Output is suppressed when `$quiet` is `true`.
      */
     private static function cliStop(string $pidFile, bool $quiet = false): void
     {
         $say = function (string $msg) use ($quiet): void {
             if (!$quiet) { echo $msg; }
         };
+        $port = self::extractPortFromPidFile($pidFile);
 
         if (!file_exists($pidFile)) {
             // Pid file gone but the port might still be held by an orphaned
             // daemon. Auto-recover instead of silently passing through; the
             // alternative is the next start/restart binding the port and
             // failing without ever telling the user why.
-            $port = self::extractPortFromPidFile($pidFile);
             if (self::claimOrphanIfAny($port)) {
                 return;
             }
             $say("ZealPHP is not running (no PID file: {$pidFile})\n");
             return;
         }
-        $pid = (int)trim((string)file_get_contents($pidFile));
-        if ($pid <= 0 || !@posix_kill($pid, 0) || !self::processIsZealphp($pid)) {
+        $pid = self::readPidFile($pidFile);
+        $kind = self::classifyPid($pid, $port);
+        if ($kind === 'foreign') {
+            // Always printed: this needs the user's attention even on restart.
+            echo "PID file {$pidFile} names pid {$pid}, which is not your ZealPHP server"
+                . ($port > 0 ? " on port {$port}" : '') . ". Not signalling it; remove the file if it is stale.\n";
+            return;
+        }
+        if ($kind === 'dead') {
             $say("ZealPHP is not running (stale PID file)\n");
             @unlink($pidFile);
             // Stale pid file gone, but an orphan listener may still be there.
-            $port = self::extractPortFromPidFile($pidFile);
             self::claimOrphanIfAny($port);
             return;
         }
-        $pgid = @posix_getpgid($pid);
-        $killGroup = $pgid && $pgid !== posix_getpgid(posix_getpid());
         $say("Stopping ZealPHP (pid {$pid})...\n");
-        $killGroup ? posix_kill(-$pgid, SIGTERM) : posix_kill($pid, SIGTERM);
-        // OpenSwoole graceful shutdown (workers finish current requests, master
-        // tears down listeners) typically takes 5-7 seconds. Poll for up to 10s
-        // before falling back to SIGKILL.
-        for ($i = 0; $i < 10; $i++) {       // first 500ms: fast poll
-            usleep(50000);
-            if (!@posix_kill($pid, 0)) {
-                @unlink($pidFile);
-                $say("Stopped.\n");
-                return;
-            }
+        if (self::terminate($pid)) {
+            @unlink($pidFile);
+            $say("Stopped.\n");
+            return;
         }
-        for ($i = 0; $i < 95; $i++) {       // next 9.5s: slower poll
-            usleep(100000);
-            if (!@posix_kill($pid, 0)) {
-                @unlink($pidFile);
-                $say("Stopped.\n");
-                return;
-            }
-        }
-        $say("Graceful shutdown timed out, force killing...\n");
-        $killGroup ? posix_kill(-$pgid, SIGKILL) : posix_kill($pid, SIGKILL);
-        usleep(100000);
+        $say("Graceful shutdown timed out, force killed.\n");
         @unlink($pidFile);
     }
 
@@ -599,24 +808,25 @@ class CLI
     {
         $logDir = getenv('ZEALPHP_LOG_DIR');
         if ($logDir === false || trim((string)$logDir) === '') {
-            // Same resolution as resolvePidFile()'s default — falls back to the
-            // per-user dir when /tmp/zealphp is owned by another user, so
-            // stop/status glob the same dir the running server wrote its PID into.
-            $logDir = \ZealPHP\resolve_log_dir() ?: (is_dir('/tmp/zealphp') ? '/tmp/zealphp' : '/tmp');
+            // Same resolution as resolvePidFile()'s default, so stop/status
+            // glob the same per-user dir the running server wrote its PID into.
+            $logDir = \ZealPHP\resolve_log_dir() ?? sys_get_temp_dir();
         }
         $pidFiles = glob(rtrim(trim((string)$logDir), '/') . '/zealphp_*.pid') ?: [];
         $running = [];
         foreach ($pidFiles as $f) {
-            $pid = (int)trim((string)file_get_contents($f));
-            // Pids get recycled — a bare posix_kill check will report a long-
-            // dead ZealPHP daemon as "running" if its PID was reused by an
-            // unrelated process. processIsZealphp() reads /proc/$pid/cmdline
-            // to confirm the listener is actually ours.
-            if ($pid > 0 && @posix_kill($pid, 0) && self::processIsZealphp($pid)) {
+            $pid = self::readPidFile($f);
+            // Pids get recycled and PID files can be stale or planted:
+            // classifyPid() checks owner uid, cmdline and the listen socket
+            // before a pid is treated as ours. Dead → prune; foreign → report.
+            $kind = self::classifyPid($pid, self::extractPortFromPidFile($f));
+            if ($kind === 'ours') {
                 $port = preg_match('/zealphp_(\d+)\.pid$/', $f, $m) ? $m[1] : '?';
                 $running[] = ['file' => $f, 'pid' => $pid, 'port' => $port];
-            } else {
+            } elseif ($kind === 'dead') {
                 @unlink($f);
+            } else {
+                echo "Ignoring {$f}: pid {$pid} is not your ZealPHP server.\n";
             }
         }
         if (empty($running)) {
@@ -647,10 +857,9 @@ class CLI
 
         $logDir = getenv('ZEALPHP_LOG_DIR');
         if ($logDir === false || trim((string)$logDir) === '') {
-            // Same resolution as resolvePidFile()'s default — falls back to the
-            // per-user dir when /tmp/zealphp is owned by another user, so
-            // stop/status glob the same dir the running server wrote its PID into.
-            $logDir = \ZealPHP\resolve_log_dir() ?: (is_dir('/tmp/zealphp') ? '/tmp/zealphp' : '/tmp');
+            // Same resolution as resolvePidFile()'s default, so stop/status
+            // glob the same per-user dir the running server wrote its PID into.
+            $logDir = \ZealPHP\resolve_log_dir() ?? sys_get_temp_dir();
         }
         $pidFiles = glob(rtrim(trim((string)$logDir), '/') . '/zealphp_*.pid') ?: [];
         if (empty($pidFiles)) {
@@ -660,11 +869,16 @@ class CLI
 
         $found = 0;
         foreach ($pidFiles as $pidFile) {
-            $pid = (int)trim((string)file_get_contents($pidFile));
-            // Pid liveness + cmdline check: posix_kill(0) only tells us the
-            // PID exists, not that it's ours — recycled PIDs would lie.
-            if ($pid <= 0 || !@posix_kill($pid, 0) || !self::processIsZealphp($pid)) {
-                @unlink($pidFile);
+            $pid = self::readPidFile($pidFile);
+            // posix_kill(0) only tells us the PID exists, not that it's ours —
+            // recycled PIDs would lie. Dead → prune; foreign → report only.
+            $kind = self::classifyPid($pid, self::extractPortFromPidFile($pidFile));
+            if ($kind !== 'ours') {
+                if ($kind === 'dead') {
+                    @unlink($pidFile);
+                } else {
+                    echo "Ignoring {$pidFile}: pid {$pid} is not your ZealPHP server.\n";
+                }
                 continue;
             }
             $port = '?';
@@ -688,11 +902,16 @@ class CLI
             echo "ZealPHP is not running\n";
             exit(1);
         }
-        $pid = (int)trim((string)file_get_contents($pidFile));
-        // Cmdline verification guards against PID recycling (see cliStatus).
-        if ($pid <= 0 || !@posix_kill($pid, 0) || !self::processIsZealphp($pid)) {
+        $pid = self::readPidFile($pidFile);
+        // Owner/cmdline/port verification guards against PID recycling (see cliStatus).
+        $kind = self::classifyPid($pid, self::extractPortFromPidFile($pidFile));
+        if ($kind === 'dead') {
             echo "ZealPHP is not running (stale PID file)\n";
             @unlink($pidFile);
+            exit(1);
+        }
+        if ($kind === 'foreign') {
+            echo "ZealPHP is not running ({$pidFile} names pid {$pid}, which is not your ZealPHP server)\n";
             exit(1);
         }
         $port = '?';
@@ -826,9 +1045,10 @@ Examples:
   php app.php logs --access          Tail only access log
   php app.php logs --access --debug  Tail access + debug logs
 
-PID + log files: /tmp/zealphp/ (one PID file per port). If that dir is owned by
-another user, ZealPHP falls back to a per-user dir automatically. Override the
-whole location with ZEALPHP_LOG_DIR=/path (or ZEALPHP_PID_FILE for just the PID).
+PID + log files: a per-user dir, $XDG_RUNTIME_DIR/zealphp or /tmp/zealphp-<uid>
+(one PID file per port; must be owned by you and not group/world-writable).
+Override the whole location with ZEALPHP_LOG_DIR=/path (or ZEALPHP_PID_FILE for
+just the PID).
 
 HELP;
     }

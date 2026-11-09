@@ -6,7 +6,19 @@ PHP_BIN="${PHP_BIN:-php}"
 APP_FILE="${APP_FILE:-$ROOT_DIR/app.php}"
 COMMAND="${1:-start}"
 
-LOG_DIR="${ZEALPHP_LOG_DIR:-/tmp/zealphp}"
+# Per-user default (matches resolve_log_dir() in src/utils.php): never a shared
+# /tmp/zealphp, which another local user could create first to read or swap
+# our logs and PID files.
+default_log_dir() {
+    if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+        printf '%s/zealphp' "${XDG_RUNTIME_DIR%/}"
+    else
+        local tmp="${TMPDIR:-/tmp}"
+        printf '%s/zealphp-%s' "${tmp%/}" "$(id -u)"
+    fi
+}
+
+LOG_DIR="${ZEALPHP_LOG_DIR:-$(default_log_dir)}"
 PORT="${ZEALPHP_PORT:-8080}"
 PID_FILE="${ZEALPHP_PID_FILE:-$LOG_DIR/zealphp_${PORT}.pid}"
 SERVER_LOG_FILE="${ZEALPHP_SERVER_LOG_FILE:-$LOG_DIR/server.log}"
@@ -27,8 +39,12 @@ Usage:
   scripts/zealphp.sh foreground
 
 Defaults:
-  log dir  -> /tmp/zealphp
-  pid file -> /tmp/zealphp/zealphp.pid
+  log dir  -> $XDG_RUNTIME_DIR/zealphp, else ${TMPDIR:-/tmp}/zealphp-<uid>
+  pid file -> <log dir>/zealphp_<port>.pid
+
+`start` never stops anything: it refuses if the server is already running.
+Only a process owned by you, running `php ... app.php` and listening on the
+port is ever signalled; a stale or foreign PID file is reported, not acted on.
 
 Background mode uses OpenSwoole daemonize plus file logs.
 USAGE
@@ -43,30 +59,30 @@ have() {
     command -v "$1" >/dev/null 2>&1
 }
 
-port_pid() {
-    local port="$1"
-    if have ss; then
-        ss -ltnp "sport = :$port" 2>/dev/null \
-            | awk -F 'pid=' '/users:\(\("php"/ { split($2, parts, ","); print parts[1]; exit }'
-        return 0
+# Create $1 (0700) if missing, then insist it is a real directory owned by us
+# and not group/world-writable.
+ensure_private_dir() {
+    local dir="$1"
+    [[ -L "$dir" ]] && die "$dir is a symlink; refusing to use it"
+    if [[ ! -d "$dir" ]]; then
+        (umask 077 && mkdir -p "$dir") || die "cannot create $dir"
     fi
-    if have lsof; then
-        lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n1
-        return 0
+    [[ -O "$dir" ]] || die "$dir is not owned by you; set ZEALPHP_LOG_DIR to a directory you own"
+    local mode
+    mode="$(stat -c '%a' "$dir" 2>/dev/null || stat -f '%Lp' "$dir")"
+    if (( (8#$mode & 8#022) != 0 )); then
+        chmod 700 "$dir" || die "$dir is group/world-writable and cannot be tightened"
     fi
-    return 1
 }
 
 ensure_dirs() {
-    mkdir -p "$LOG_DIR"
+    if [[ -z "${ZEALPHP_LOG_DIR:-}" ]]; then
+        ensure_private_dir "$LOG_DIR"
+    else
+        mkdir -p "$LOG_DIR"
+    fi
     mkdir -p "$(dirname "$PID_FILE")"
     touch "$SERVER_LOG_FILE" "$ACCESS_LOG_FILE" "$DEBUG_LOG_FILE" "$ZLOG_FILE"
-}
-
-read_pid() {
-    if [[ -f "$PID_FILE" ]]; then
-        trim <"$PID_FILE"
-    fi
 }
 
 trim() {
@@ -77,137 +93,151 @@ trim() {
     printf '%s' "$value"
 }
 
-pid_cmdline() {
+read_pid() {
+    if [[ -f "$PID_FILE" ]]; then
+        trim <"$PID_FILE"
+    fi
+}
+
+# True when $1 is a plain positive integer > 1 naming a live process.
+pid_alive() {
     local pid="$1"
-    ps -p "$pid" -o args= 2>/dev/null | trim || true
+    [[ "$pid" =~ ^[0-9]+$ ]] && (( pid > 1 )) || return 1
+    kill -0 "$pid" >/dev/null 2>&1 && return 0
+    # EPERM: alive but someone else's.
+    ps -p "$pid" >/dev/null 2>&1
 }
 
-pid_group() {
+# True when $1 listens on $PORT (permissive when neither ss nor lsof exists).
+pid_listens_on_port() {
     local pid="$1"
-    ps -p "$pid" -o pgid= 2>/dev/null | trim || true
+    if have ss; then
+        local out
+        out="$(ss -Hltnp "sport = :$PORT" 2>/dev/null || true)"
+        [[ "$out" == *"pid=${pid},"* ]]
+        return
+    fi
+    if have lsof; then
+        lsof -a -p "$pid" -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1
+        return
+    fi
+    return 0
 }
 
-shell_group() {
-    ps -p $$ -o pgid= 2>/dev/null | trim || true
-}
-
-pid_is_running() {
+# True only for OUR server: a live process owned by the current uid whose argv0
+# is a php binary, whose args include app.php, and which listens on $PORT.
+pid_is_ours() {
     local pid="$1"
-    [[ -n "$pid" ]] || return 1
-    kill -0 "$pid" >/dev/null 2>&1 || return 1
-    local args
-    args="$(pid_cmdline "$pid")"
-    [[ "$args" == *"app.php"* ]]
+    pid_alive "$pid" || return 1
+    local uid
+    uid="$(ps -o uid= -p "$pid" 2>/dev/null | trim)"
+    [[ "$uid" == "$(id -u)" ]] || return 1
+    local argv0 args
+    if [[ -r "/proc/$pid/cmdline" ]]; then
+        IFS= read -r -d '' argv0 <"/proc/$pid/cmdline" || true
+        args="$(tr '\0' ' ' <"/proc/$pid/cmdline")"
+    else
+        args="$(ps -p "$pid" -o args= 2>/dev/null | trim)"
+        argv0="${args%% *}"
+    fi
+    [[ "$(basename -- "$argv0")" =~ ^php([0-9.].*)?$ ]] || return 1
+    [[ "$args" == *"app.php"* ]] || return 1
+    pid_listens_on_port "$pid"
 }
 
-wait_for_shutdown() {
-    local i pid
-    for i in $(seq 1 100); do
-        pid="$(server_pid || true)"
-        if [[ -z "$pid" ]]; then
-            rm -f "$PID_FILE"
+port_pid() {
+    if have ss; then
+        ss -Hltnp "sport = :$PORT" 2>/dev/null \
+            | awk -F 'pid=' '/users:\(\("php"/ { split($2, parts, ","); print parts[1]; exit }'
+        return 0
+    fi
+    if have lsof; then
+        lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -n1
+        return 0
+    fi
+    return 1
+}
+
+# Our server's master pid, from the PID file or (failing that) the port.
+# A PID file naming a dead process is removed; one naming a live process that
+# isn't ours is reported and left alone.
+server_pid() {
+    local pid
+    pid="$(read_pid || true)"
+    if [[ -n "$pid" ]]; then
+        if pid_is_ours "$pid"; then
+            printf '%s' "$pid"
             return 0
         fi
+        if pid_alive "$pid"; then
+            echo "zealphp.sh: $PID_FILE names pid $pid, which is not your ZealPHP server on port $PORT; ignoring it" >&2
+        else
+            rm -f "$PID_FILE"
+        fi
+    fi
+
+    pid="$(port_pid || true)"
+    if [[ -n "$pid" ]] && pid_is_ours "$pid"; then
+        # The first listener found may be a worker: climb to the topmost
+        # ancestor that is still our server.
+        local ppid
+        while ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | trim)" && [[ -n "$ppid" ]] && pid_is_ours "$ppid"; do
+            pid="$ppid"
+        done
+        printf '%s' "$pid"
+        return 0
+    fi
+
+    return 1
+}
+
+wait_for_exit() {
+    local pid="$1" i
+    for i in $(seq 1 100); do
+        pid_alive "$pid" || return 0
         sleep 0.1
     done
     return 1
 }
 
-kill_server_group() {
-    local pid="$1"
-    local pgid
-    pgid="$(pid_group "$pid" || true)"
-    if [[ -n "$pgid" ]] && [[ "$pgid" != "$(shell_group || true)" ]]; then
-        kill -TERM -- "-$pgid" >/dev/null 2>&1 || true
-    else
-        kill -TERM "$pid" >/dev/null 2>&1 || true
-    fi
+# Live descendants of $1 owned by us (manager + workers of a master).
+own_descendants() {
+    local parent="$1" child
+    for child in $(ps -o pid= --ppid "$parent" 2>/dev/null || pgrep -P "$parent" 2>/dev/null || true); do
+        [[ "$(ps -o uid= -p "$child" 2>/dev/null | trim)" == "$(id -u)" ]] || continue
+        echo "$child"
+        own_descendants "$child"
+    done
 }
 
-kill_server_group_force() {
-    local pid="$1"
-    local pgid
-    pgid="$(pid_group "$pid" || true)"
-    if [[ -n "$pgid" ]] && [[ "$pgid" != "$(shell_group || true)" ]]; then
-        kill -KILL -- "-$pgid" >/dev/null 2>&1 || true
-    else
-        kill -KILL "$pid" >/dev/null 2>&1 || true
-    fi
-}
-
-cleanup_stale_pidfile() {
-    local pid
-    pid="$(read_pid || true)"
-    if [[ -n "$pid" ]] && ! pid_is_running "$pid"; then
-        rm -f "$PID_FILE"
-    fi
-}
-
-server_pid() {
-    local pid
-    pid="$(read_pid || true)"
-    if [[ -n "$pid" ]] && pid_is_running "$pid"; then
-        printf '%s' "$pid"
-        return 0
-    fi
-
-    pid="$(port_pid "$PORT" || true)"
-    if [[ -n "$pid" ]] && pid_is_running "$pid"; then
-        printf '%s' "$pid"
-        return 0
-    fi
-
-    return 1
-}
-
-confirm_restart() {
-    local pid="$1"
-    if [[ ! -t 0 ]]; then
-        die "server already running as pid $pid; run 'scripts/zealphp.sh stop' first"
-    fi
-
-    printf 'ZealPHP is already running as pid %s.\n' "$pid" >&2
-    read -r -p "Kill and restart? [y/N] " answer
-    case "${answer:-}" in
-        y|Y|yes|YES)
-            stop_pid "$pid"
-            ;;
-        *)
-            die "aborted"
-            ;;
-    esac
-}
-
+# SIGTERM the verified master (OpenSwoole shuts its manager + workers down);
+# after 10 s, SIGKILL the master and its own descendants one pid at a time.
+# Never signals a process group.
 stop_pid() {
     local pid="$1"
-    if ! pid_is_running "$pid"; then
-        rm -f "$PID_FILE"
-        return 0
-    fi
+    pid_is_ours "$pid" || die "pid $pid is not your ZealPHP server on port $PORT; not signalling it"
 
-    kill_server_group "$pid"
-    if wait_for_shutdown; then
-        return 0
+    kill -TERM "$pid" >/dev/null 2>&1 || true
+    if ! wait_for_exit "$pid"; then
+        local kids
+        kids="$(own_descendants "$pid")"
+        kill -KILL "$pid" >/dev/null 2>&1 || true
+        local kid
+        for kid in $kids; do
+            kill -KILL "$kid" >/dev/null 2>&1 || true
+        done
+        wait_for_exit "$pid" || true
     fi
-
-    kill_server_group_force "$pid"
     rm -f "$PID_FILE"
-    wait_for_shutdown || true
 }
 
 start_server() {
-    local force_restart="${1:-0}"
     ensure_dirs
-    cleanup_stale_pidfile
 
     local pid
     pid="$(server_pid || true)"
     if [[ -n "$pid" ]]; then
-        if [[ "$force_restart" == "1" ]]; then
-            stop_pid "$pid"
-        else
-            confirm_restart "$pid"
-        fi
+        die "server already running as pid $pid; use 'scripts/zealphp.sh restart' or 'stop' first"
     fi
 
     export ZEALPHP_LOG_DIR="$LOG_DIR"
@@ -228,7 +258,7 @@ start_server() {
     local i
     for i in $(seq 1 50); do
         pid="$(read_pid || true)"
-        if [[ -n "$pid" ]] && pid_is_running "$pid"; then
+        if [[ -n "$pid" ]] && pid_is_ours "$pid"; then
             echo "Started as pid $pid"
             echo "Logs:"
             echo "  $SERVER_LOG_FILE"
@@ -246,18 +276,16 @@ start_server() {
 
 restart_server() {
     ensure_dirs
-    cleanup_stale_pidfile
 
     local pid
     pid="$(server_pid || true)"
     if [[ -n "$pid" ]]; then
         stop_pid "$pid"
     fi
-    start_server 1
+    start_server
 }
 
 stop_server() {
-    cleanup_stale_pidfile
     local pid
     pid="$(server_pid || true)"
     if [[ -z "$pid" ]]; then
@@ -286,12 +314,11 @@ tail_logs() {
 
 foreground_server() {
     ensure_dirs
-    cleanup_stale_pidfile
 
     local pid
     pid="$(server_pid || true)"
     if [[ -n "$pid" ]]; then
-        confirm_restart "$pid"
+        die "server already running as pid $pid; run 'scripts/zealphp.sh stop' first"
     fi
 
     export ZEALPHP_LOG_DIR="$LOG_DIR"

@@ -148,6 +148,205 @@ class CliLifecycleHelpersTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────
+    // classifyPid() / startBlocker() / terminate() — E-3: only our own
+    // server for that port is ever signalled; start never signals.
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Spawn `php app.php` (a stand-in ZealPHP server) listening on $port.
+     *
+     * @return array{int, string} [pid, fixture dir]
+     */
+    private function spawnListener(int $port): array
+    {
+        $dir = sys_get_temp_dir() . '/zp_listener_' . getmypid() . '_' . $port;
+        @mkdir($dir);
+        file_put_contents("$dir/app.php", '<?php $s = stream_socket_server("tcp://127.0.0.1:' . $port . '"); sleep(30);');
+        $pid = (int) trim((string) shell_exec('cd ' . escapeshellarg($dir) . ' && '
+            . escapeshellarg(PHP_BINARY) . ' app.php > /dev/null 2>&1 & echo $!'));
+        for ($i = 0; $i < 50 && $this->invoke('findPortOwnerPid', $port) === null; $i++) {
+            usleep(100000);
+        }
+        $this->assertNotNull($this->invoke('findPortOwnerPid', $port), 'fixture listener did not come up');
+        return [$pid, $dir];
+    }
+
+    private function spawnSleeper(): int
+    {
+        return (int) trim((string) shell_exec('sleep 30 > /dev/null 2>&1 & echo $!'));
+    }
+
+    private function reap(int $pid, ?string $dir = null): void
+    {
+        @posix_kill($pid, SIGKILL);
+        if ($dir !== null) {
+            @unlink("$dir/app.php");
+            @rmdir($dir);
+        }
+    }
+
+    public function testClassifyPidDeadForMissingOrInvalidPid(): void
+    {
+        $this->assertSame('dead', CLI::classifyPid(self::DEAD_PID, 0));
+        $this->assertSame('dead', CLI::classifyPid(0, 0));
+        $this->assertSame('dead', CLI::classifyPid(-5, 0));
+    }
+
+    public function testClassifyPidForeignForInitSelfAndNonPhp(): void
+    {
+        $this->assertSame('foreign', CLI::classifyPid(1, 0));
+        $this->assertSame('foreign', CLI::classifyPid((int) getmypid(), 0));
+        $sleeper = $this->spawnSleeper();
+        try {
+            $this->assertSame('foreign', CLI::classifyPid($sleeper, 0));
+        } finally {
+            $this->reap($sleeper);
+        }
+    }
+
+    public function testClassifyPidOursOnlyForTheMatchingPort(): void
+    {
+        if (!is_dir('/proc/self')) {
+            $this->markTestSkipped('needs /proc');
+        }
+        [$pid, $dir] = $this->spawnListener(59982);
+        try {
+            $this->assertSame('ours', CLI::classifyPid($pid, 59982));
+            $this->assertSame('ours', CLI::classifyPid($pid, 0), 'port unknown → port check skipped');
+            $this->assertSame('foreign', CLI::classifyPid($pid, 59983), 'a server for another port is not ours');
+        } finally {
+            $this->reap($pid, $dir);
+        }
+    }
+
+    public function testStartBlockerRemovesDeadPidFileAndProceeds(): void
+    {
+        $pidFile = sys_get_temp_dir() . '/zealphp_59984.pid';
+        file_put_contents($pidFile, (string) self::DEAD_PID);
+        $this->assertNull(CLI::startBlocker($pidFile, 59984));
+        $this->assertFileDoesNotExist($pidFile);
+    }
+
+    public function testStartBlockerRefusesForeignPidFileWithoutTouchingIt(): void
+    {
+        $pidFile = sys_get_temp_dir() . '/zealphp_59985.pid';
+        $sleeper = $this->spawnSleeper();
+        file_put_contents($pidFile, (string) $sleeper);
+        try {
+            $blocker = CLI::startBlocker($pidFile, 59985);
+            $this->assertNotNull($blocker);
+            $this->assertSame(1, $blocker[0]);
+            $this->assertStringContainsString('not your ZealPHP server', $blocker[1]);
+            $this->assertFileExists($pidFile);
+            $this->assertTrue(posix_kill($sleeper, 0), 'start must not signal the pid');
+        } finally {
+            $this->reap($sleeper);
+            @unlink($pidFile);
+        }
+    }
+
+    public function testStartBlockerReportsRunningServerAndHeldPortWithoutKilling(): void
+    {
+        if (!is_dir('/proc/self')) {
+            $this->markTestSkipped('needs /proc');
+        }
+        $port = 59986;
+        $pidFile = sys_get_temp_dir() . "/zealphp_{$port}.pid";
+        [$pid, $dir] = $this->spawnListener($port);
+        try {
+            file_put_contents($pidFile, (string) $pid);
+            $running = CLI::startBlocker($pidFile, $port);
+            $this->assertNotNull($running);
+            $this->assertSame(0, $running[0]);
+            $this->assertStringContainsString('already running', $running[1]);
+
+            unlink($pidFile);   // orphan: no PID file, port still held
+            $held = CLI::startBlocker($pidFile, $port);
+            $this->assertNotNull($held);
+            $this->assertSame(1, $held[0]);
+            $this->assertStringContainsString("Port {$port} is already in use", $held[1]);
+            $this->assertTrue(posix_kill($pid, 0), 'start must not kill an orphan');
+        } finally {
+            $this->reap($pid, $dir);
+            @unlink($pidFile);
+        }
+    }
+
+    public function testCliStopLeavesForeignPidAlone(): void
+    {
+        $pidFile = sys_get_temp_dir() . '/zealphp_59987.pid';
+        $sleeper = $this->spawnSleeper();
+        file_put_contents($pidFile, (string) $sleeper);
+        try {
+            ob_start();
+            $this->invoke('cliStop', $pidFile, true);
+            $out = (string) ob_get_clean();
+            $this->assertStringContainsString('Not signalling it', $out, 'reported even when quiet');
+            $this->assertTrue(posix_kill($sleeper, 0), 'a foreign pid must not be signalled');
+            $this->assertFileExists($pidFile);
+        } finally {
+            $this->reap($sleeper);
+            @unlink($pidFile);
+        }
+    }
+
+    public function testCliStopTerminatesOwnServer(): void
+    {
+        if (!is_dir('/proc/self')) {
+            $this->markTestSkipped('needs /proc');
+        }
+        $port = 59988;
+        $pidFile = sys_get_temp_dir() . "/zealphp_{$port}.pid";
+        [$pid, $dir] = $this->spawnListener($port);
+        try {
+            file_put_contents($pidFile, (string) $pid);
+            ob_start();
+            $this->invoke('cliStop', $pidFile, false);
+            $out = (string) ob_get_clean();
+            $this->assertStringContainsString('Stopped.', $out);
+            $this->assertFileDoesNotExist($pidFile);
+            $this->assertSame('dead', CLI::classifyPid($pid, 0));
+        } finally {
+            $this->reap($pid, $dir);
+            @unlink($pidFile);
+        }
+    }
+
+    public function testOwnDescendantsListsChildrenOfAProcess(): void
+    {
+        if (!is_dir('/proc/self')) {
+            $this->markTestSkipped('needs /proc');
+        }
+        $parent = (int) trim((string) shell_exec('sh -c "sleep 30 & sleep 30 & wait" > /dev/null 2>&1 & echo $!'));
+        try {
+            $kids = [];
+            for ($i = 0; $i < 50 && count($kids) < 2; $i++) {
+                usleep(50000);
+                /** @var list<int> $kids */
+                $kids = $this->invoke('ownDescendants', $parent);
+            }
+            $this->assertCount(2, $kids);
+            $this->assertNotContains($parent, $kids);
+        } finally {
+            foreach ($kids as $kid) {
+                @posix_kill($kid, SIGKILL);
+            }
+            $this->reap($parent);
+        }
+    }
+
+    public function testReadPidFileRejectsNonNumericContent(): void
+    {
+        $f = sys_get_temp_dir() . '/zealphp_pidparse_' . getmypid() . '.pid';
+        file_put_contents($f, "-1234\n");
+        $this->assertSame(0, $this->invoke('readPidFile', $f));
+        file_put_contents($f, " 4321\n");
+        $this->assertSame(4321, $this->invoke('readPidFile', $f));
+        @unlink($f);
+        $this->assertSame(0, $this->invoke('readPidFile', $f));
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // cliStop() — no-server + stale-PID branches (private)
     // ─────────────────────────────────────────────────────────────
 

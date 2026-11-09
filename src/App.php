@@ -10153,22 +10153,16 @@ class App
         ];
         // @phpstan-ignore-next-line — settings is array<string, mixed>; pid_file coerced to string at boundary
         $pidFile = (string)($settings['pid_file'] ?? $default_settings['pid_file']);
-        if (file_exists($pidFile)) {
-            $existingPid = (int)trim((string)file_get_contents($pidFile));
-            // processIsZealphp() guards against recycled PIDs falsely
-            // reporting "already running" when the original daemon is gone.
-            if ($existingPid > 0 && @posix_kill($existingPid, 0) && \ZealPHP\CLI::processIsZealphp($existingPid)) {
-                echo "ZealPHP is already running (pid {$existingPid}, port {$this->port})\n";
-                echo "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n";
-                exit(0);
-            }
-            @unlink($pidFile);
+        // Starting never signals anything. startBlocker() refuses when our
+        // server already runs, when the PID file names a live process that
+        // isn't ours, or when something already holds the port (an orphaned
+        // daemon is reported with the `stop` command to run, not killed —
+        // without this, OpenSwoole's bind would fail with no explanation).
+        $blocker = \ZealPHP\CLI::startBlocker($pidFile, $this->port);
+        if ($blocker !== null) {
+            echo $blocker[1];
+            exit($blocker[0]);
         }
-        // Catch the orphan case the pid-file check above can't see: pid file
-        // missing or stale, but a previous daemon is still bound to the port.
-        // Without this, OpenSwoole's bind would fail silently and the user
-        // would see "could not confirm" with no actionable explanation.
-        \ZealPHP\CLI::claimOrphanIfAny($this->port);
 
         self::$server = $server = new \OpenSwoole\WebSocket\Server($this->host, $this->port);
         if ($settings == null){
