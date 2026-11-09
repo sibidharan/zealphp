@@ -44,7 +44,7 @@ ${basename(__FILE__, '.php')} = function () {
     }
     header('Content-Type: text/html; charset=utf-8');
     if (empty($notesList)) {
-        $this->response('<p class="notes-empty">No notes yet. Add one above.</p>', 200);
+        $this->response((string) App::component('/components/notes_empty'), 200);
         return;
     }
     $html = '';

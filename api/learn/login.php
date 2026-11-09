@@ -1,4 +1,5 @@
 <?php
+use ZealPHP\App;
 use ZealPHP\G;
 use ZealPHP\Learn\DB;
 use ZealPHP\Learn\Auth;
@@ -20,7 +21,7 @@ ${basename(__FILE__, '.php')} = function () use ($ERROR_MESSAGES) {
             $this->response($this->json(['error' => $code]), $status);
         } else {
             header('Content-Type: text/html; charset=utf-8');
-            $this->response('<p class="auth-error">' . htmlspecialchars($msg) . '</p>', $status);
+            $this->response((string) App::component('/components/auth_error', ['message' => $msg]), $status);
         }
     };
 
