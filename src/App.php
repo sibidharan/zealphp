@@ -4015,10 +4015,13 @@ class App
             $cmd = self::withTimeout($cmd, $timeout);
         }
         if (\OpenSwoole\Coroutine::getCid() >= 0) {
-            // OpenSwoole 26.2: System::exec(string $command, bool $get_error_stream).
-            // Passing anything truthy (the old `$timeout ?? -1`) merged stderr into
-            // the output — a CLI's DEBUG lines then landed in front of its JSON.
-            $r = \OpenSwoole\Coroutine\System::exec($cmd, false);
+            // System::exec()'s second parameter differs between OpenSwoole builds:
+            // 26.2 is (string $command, bool $get_error_stream); others take a
+            // float timeout first. The old `$timeout ?? -1` was truthy on 26.2 and
+            // merged stderr into every output (a CLI's DEBUG lines landed in front
+            // of its JSON); a bare `false` would be a 0 s timeout on the others.
+            // Pass the stderr-off arguments for whichever signature is loaded.
+            $r = \OpenSwoole\Coroutine\System::exec($cmd, ...self::systemExecArgs());
             if (is_array($r)) {
                 $output = $r['output'] ?? '';
                 $code = $r['code'] ?? 0;
@@ -4055,6 +4058,29 @@ class App
         // through) so that group can never include the worker that spawned it.
         $setsid = self::$setsid_binary ??= self::findBinary('setsid');
         return $setsid === '' ? $timed : escapeshellarg($setsid) . ' -w ' . $timed;
+    }
+
+    /** Whether System::exec()'s second parameter is a timeout (vs. bool $get_error_stream). */
+    private static ?bool $exec_second_is_timeout = null;
+
+    /**
+     * Arguments after `$command` for `Coroutine\System::exec()`: no native
+     * timeout (App::exec() enforces its own) and stderr not captured.
+     *
+     * @return list<bool|int>
+     */
+    private static function systemExecArgs(): array
+    {
+        if (self::$exec_second_is_timeout === null) {
+            $params = (new \ReflectionMethod(\OpenSwoole\Coroutine\System::class, 'exec'))->getParameters();
+            $second = $params[1] ?? null;
+            $type = $second?->getType();
+            self::$exec_second_is_timeout = $second !== null && (
+                $second->getName() === 'timeout'
+                || ($type instanceof \ReflectionNamedType && in_array($type->getName(), ['float', 'int'], true))
+            );
+        }
+        return self::$exec_second_is_timeout ? [-1, false] : [false];
     }
 
     /** Paths of coreutils `timeout` and util-linux `setsid` ('' when absent), found once per worker. */
