@@ -509,39 +509,35 @@ class UtilsLoggingTest extends TestCase
 
     // ── async-log sink registry (#55 regression) ─────────────────
     //
-    // log_sink_for() memoizes the async Channel sink + consumer-spawn guard on
-    // the BOOT-CLASS static LogSinkRegistry, NOT function-local statics. Under
-    // coroutine-legacy, function statics reset every request (Stage 11), which
-    // emptied the guard and spawned a fresh Channel + detached consumer go() per
-    // request — accumulating to OpenSwoole's max_coroutine cap (#55). A boot
-    // class static survives the per-request reset. The full no-leak behaviour is
-    // integration-verified (needs a live coroutine scheduler); here we pin the
-    // structural contract that the memoisation lives on the class static.
+    // log_sink_for() keeps its queues in LogSinkRegistry's state OBJECT, not in
+    // function statics or static arrays. Under coroutine-legacy, function statics
+    // reset every request (Stage 11), which spawned a fresh queue + writer per
+    // request until OpenSwoole's max_coroutine cap (#55); class-static arrays are
+    // isolated per coroutine, which would hide the writer's running flag from
+    // the requests that queue lines. An object on a boot-class static is shared.
 
-    public function testLogSinkRegistryIsBootClassWithStaticArrayState(): void
+    public function testLogSinkRegistryKeepsOneStateObject(): void
     {
         $rc = new \ReflectionClass(LogSinkRegistry::class);
         $this->assertTrue($rc->isFinal(), 'LogSinkRegistry should be final');
-        foreach (['sinks', 'started'] as $name) {
-            $prop = $rc->getProperty($name);
-            $this->assertTrue($prop->isStatic(), "$name must be static (boot-class state)");
-            $this->assertTrue($prop->isPublic(), "$name must be public");
+        $this->assertSame(LogSinkRegistry::state(), LogSinkRegistry::state());
+        foreach (['queues', 'writing', 'handles'] as $name) {
+            $prop = new \ReflectionProperty(\ZealPHP\LogSinkState::class, $name);
+            $this->assertFalse($prop->isStatic(), "$name must live on the state object, not a static");
         }
     }
 
-    public function testLogSinkForMemoizesViaRegistryClassStatic(): void
+    public function testLogSinkForMemoizesViaRegistryState(): void
     {
-        // A pre-seeded registry entry short-circuits log_sink_for() at the top
-        // (before any coroutine/async gate), proving the function reads the
-        // boot-class static — so the guard survives per-request resets and the
-        // consumer go() is spawned at most once per path per worker.
+        // A pre-seeded queue short-circuits log_sink_for() at the top (before
+        // any coroutine/async gate), proving it reads the shared state object.
         $path = sys_get_temp_dir() . '/zealphp-test-sink-' . uniqid() . '.log';
         $channel = new \OpenSwoole\Coroutine\Channel(1);
-        LogSinkRegistry::$sinks[$path] = $channel;
+        LogSinkRegistry::state()->queues[$path] = $channel;
         try {
             $this->assertSame($channel, log_sink_for($path));
         } finally {
-            unset(LogSinkRegistry::$sinks[$path]);
+            unset(LogSinkRegistry::state()->queues[$path]);
         }
     }
 }

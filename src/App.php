@@ -6172,6 +6172,35 @@ class App
     }
 
     /**
+     * Cancel this worker's recurring timers (`App::tick()`, `OpenSwoole\Timer::tick()`).
+     *
+     * Runs on `workerExit`. A stopping worker waits until its event loop has
+     * nothing left to run, and a recurring timer always has a next run, so a
+     * worker with one (worker 0's session GC, the dev route watcher, Cache and
+     * WSRouter sweeps, any app `tick()`) waited out `max_wait_time` (3 s) and was
+     * then killed. One-shot `after()` timers are left to fire; coroutine sleeps
+     * are not PHP timers and aren't touched.
+     *
+     * @internal
+     * @return int how many timers were cancelled
+     */
+    public static function clearRecurringTimers(): int
+    {
+        $cleared = 0;
+        foreach (\OpenSwoole\Timer::list() as $id) {
+            if (!is_int($id)) {
+                continue;
+            }
+            $info = \OpenSwoole\Timer::info($id);
+            if (is_array($info) && is_numeric($info['interval'] ?? null) && $info['interval'] > 0) {
+                \OpenSwoole\Timer::clear($id);
+                $cleared++;
+            }
+        }
+        return $cleared;
+    }
+
+    /**
      * Register a callback to run inside every worker's `workerStart` event.
      * Use this to start per-worker timers, warm caches, open connections, etc.
      * Called as: `$fn($server, $workerId)`
@@ -11835,6 +11864,12 @@ class App
             if (is_array($data) && ($data['zc'] ?? null) === Component\Push::PIPE_TYPE && is_string($data['payload'] ?? null)) {
                 Component\Push::receive($data['payload']);
             }
+        });
+
+        // OpenSwoole calls workerExit while a stopping worker still has work
+        // registered; workerStop only runs after the event loop is gone.
+        $server->on('workerExit', static function (): void {
+            self::clearRecurringTimers();
         });
 
         $server->on('workerStop', function($server, $workerId) {
