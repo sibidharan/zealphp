@@ -33,7 +33,7 @@ abstract class ZealPHP\Component\Component
   protected function rules(): array
   public function selected(string $prop, mixed $option): string
   public function slot(): ?ZealPHP\SafeHtml
-  public function tag(): string  @deprecated
+  public function tag(): string
   public function topics(): array
   protected function validate(?array $only = null): void
   public function value(string $prop, bool $escape = true): string

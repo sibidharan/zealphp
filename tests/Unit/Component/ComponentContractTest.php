@@ -254,16 +254,14 @@ class ComponentContractTest extends TestCase
         $this->assertSame(['Component::value($prop, false) is deprecated: unescaped output goes in 1.0'], $notices);
     }
 
-    public function testTagAccessorIsDeprecated(): void
+    public function testTagIsReadableFromTemplates(): void
     {
         $c = new class extends Component {
             protected string $tag = 'section';
             public function render(): mixed { return $this->tag(); }
         };
         Registry::register($c::class, 'tag-c');
-        [$html, $notices] = self::deprecations(static fn(): string => (string) App::component('tag-c'));
-        $this->assertStringContainsString('>section</section>', $html);
-        $this->assertSame(['Component::tag() is deprecated: use the $tag property; tag() goes in 1.0'], $notices);
+        $this->assertStringContainsString('>section</section>', (string) App::component('tag-c'));
     }
 
     /**
