@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.4.21] - 2026-11-10
+
 ### Added
 - **The components API is locked.** `tests/Unit/Component/PublicApiLockTest.php` compares the public API (the `Component` base class, the attributes, binders, `Tester`, `Validator`, `App::component*()`) with `tests/fixtures/api/components.txt`; any signature change fails CI until it's made on purpose with `make api-lock`. `ProtocolContractTest` pins the wire protocol and the template variables. The policy, what's covered and what isn't, is in [`docs/components.md#api-stability`](docs/components.md#api-stability): no breaking change within a major version, deprecate before removing, and the binder interface doesn't grow.
 
