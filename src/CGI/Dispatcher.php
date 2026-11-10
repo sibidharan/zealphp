@@ -888,6 +888,11 @@ class Dispatcher
         // then-return-body idiom) — exactly matching executeFile().
         if ($hasReturn && $returnValue !== null && $returnValue !== 1) {
             if (is_string($returnValue) && $body !== '') {
+                // Joining copies both; check the room as for any append.
+                if (!self::outputFits(strlen($body), strlen($returnValue))) {
+                    elog("cgiSubprocess: output too large for $path", 'error');
+                    return 500;
+                }
                 return $body . $returnValue;
             }
             return $returnValue;
@@ -1250,6 +1255,13 @@ class Dispatcher
 
         if ($stderr !== '') {
             elog("[cgi] stderr: " . rtrim($stderr), "cgi");
+        }
+
+        // Splitting headers from the body copies the body. Check again: another
+        // request in this worker may have used the room since the last append.
+        if (!self::outputFits(0, strlen($raw))) {
+            elog("cgiInterpreterResponse: no memory left to split the response for $path", 'error');
+            return 500;
         }
 
         // No header block at all. If the script produced nothing and exited

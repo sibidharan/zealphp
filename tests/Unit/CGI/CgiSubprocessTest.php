@@ -182,12 +182,14 @@ class CgiSubprocessTest extends TestCase
     public function testDrainTimeoutStopsTheScript(): void
     {
         $saved = App::$cgi_timeout;
-        App::$cgi_timeout = 1;
+        // 2 s, so a slow-to-start child still sends its metadata in time and
+        // the drain timeout (not the metadata timeout) is what fires.
+        App::$cgi_timeout = 2;
         try {
-            $f = $this->fixture('slow.php', "<?php\necho 'x';\nflush();\nsleep(6);\n");
+            $f = $this->fixture('slow.php', "<?php\necho 'x';\nflush();\nsleep(8);\n");
             $t0 = microtime(true);
             $this->assertSame(500, Dispatcher::cgiSubprocess($f));
-            $this->assertLessThan(5.0, microtime(true) - $t0, 'the timeout is not waited out');
+            $this->assertLessThan(6.0, microtime(true) - $t0, 'the script is stopped, not waited out');
         } finally {
             App::$cgi_timeout = $saved;
         }
