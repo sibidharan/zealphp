@@ -193,8 +193,12 @@ final class CgiProcHardeningTest extends TestCase
             $this->assertSame(Dispatcher::CGI_OUTPUT_CAP_BYTES, Dispatcher::outputCap(), 'no limit: full cap');
             ini_set('memory_limit', '4G');
             $this->assertSame(Dispatcher::CGI_OUTPUT_CAP_BYTES, Dispatcher::outputCap(), 'large limit: full cap');
-            $limit = memory_get_usage(true) + 200 * 1024 * 1024;
-            ini_set('memory_limit', (string) $limit);
+            // Above current usage (or ini_set refuses it), below 4x the cap.
+            $limit = max(128 * 1024 * 1024, memory_get_usage(true) + 32 * 1024 * 1024);
+            if ($limit >= 4 * Dispatcher::CGI_OUTPUT_CAP_BYTES) {
+                $this->markTestSkipped('memory use too high to set a limit under 4x the cap');
+            }
+            $this->assertNotFalse(ini_set('memory_limit', (string) $limit));
             $this->assertSame(intdiv($limit, 4), Dispatcher::outputCap(), 'smaller limit: a quarter of it');
         } finally {
             ini_set('memory_limit', $saved);
