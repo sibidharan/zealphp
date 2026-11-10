@@ -285,13 +285,9 @@ final class CgiProcHardeningTest extends TestCase
                 });
                 $done->pop();
                 $done->pop();
-                // Logging inside this loop started an async writer coroutine
-                // that waits on its channel: close it, or the loop never ends.
-                foreach (LogSinkRegistry::$sinks as $sink) {
-                    $sink->close();
-                }
-                LogSinkRegistry::$sinks = [];
-                LogSinkRegistry::$started = [];
+                // Drop the queues this loop's logging created (the writers exit
+                // on their own once their queue is empty).
+                LogSinkRegistry::reset();
             });
         } finally {
             Runtime::enableCoroutine($hooks);

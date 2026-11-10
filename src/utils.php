@@ -447,105 +447,142 @@ function log_file_for(string $kind): ?string
 }
 
 /**
- * Return (or create) the async `Channel`-backed log sink for `$path`.
+ * A worker's async-log state: one queue per log file, which files have a writer
+ * running, and the open file handles.
  *
- * When async logging is enabled and a coroutine scheduler is running, this
- * function returns an `OpenSwoole\Coroutine\Channel` that a background `go()`
- * consumer drains to the file at `$path`. Callers push log lines onto the
- * channel; the consumer does the actual `fwrite()` without blocking the request.
+ * Kept in an object, not in static arrays: coroutine-legacy isolates class-static
+ * arrays per coroutine, which would hide a writer's state from the requests that
+ * queue lines (the same reason as `Component\PushState`).
  *
- * Returns `null` when async logging is disabled, no scheduler is running, or
- * `go()` is unavailable — callers fall back to a synchronous `fopen`/`fwrite`.
- *
- * The consumer goroutine falls back to `php://stderr` when the file cannot be
- * opened (avoids silent log loss). Results are memoised per path.
+ * @internal
  */
+final class LogSinkState
+{
+    /** @var array<string, \OpenSwoole\Coroutine\Channel> queued lines, per log file */
+    public array $queues = [];
+
+    /** @var array<string, true> log files whose writer coroutine is running */
+    public array $writing = [];
+
+    /** @var array<string, resource> open append handles, per log file */
+    public array $handles = [];
+}
+
 /**
- * Per-worker registry for the async-log sinks and their consumer-spawn guard.
+ * Per-worker registry for the async-log state.
  *
- * Held on a BOOT CLASS static — defined here in src/utils.php (a composer
- * `files` autoload entry, loaded at worker boot) ON PURPOSE. Under
- * `coroutine-legacy` mode, function-local `static` variables are isolated
- * per-coroutine (Stage 5a) AND reset to their template at the end of every
- * request (Stage 11). `log_sink_for()` previously memoised `$sinks`/`$started`
- * as function statics, so the consumer-spawn guard was empty on EVERY request →
- * a fresh `Channel` + detached consumer `go()` was spawned per request, blocked
- * forever on `pop()`, accumulating until OpenSwoole's `max_coroutine` cap was
- * hit (issue #55). A boot-class static is exempt from the per-request reset, so
- * the memoisation correctly survives for the worker's lifetime.
+ * Held on a BOOT CLASS static, defined here in src/utils.php (a composer `files`
+ * autoload entry, loaded at boot) on purpose. Under `coroutine-legacy`,
+ * function-local `static` variables are isolated per coroutine (Stage 5a) and
+ * reset at the end of every request (Stage 11). `log_sink_for()` used to keep its
+ * state in function statics, so every request spawned a fresh channel and writer,
+ * accumulating until OpenSwoole's `max_coroutine` cap was hit (issue #55).
+ *
+ * @internal
  */
 final class LogSinkRegistry
 {
-    /** @var array<string, \OpenSwoole\Coroutine\Channel> */
-    public static array $sinks = [];
-    /** @var array<string, bool> */
-    public static array $started = [];
+    private static ?LogSinkState $state = null;
+
+    public static function state(): LogSinkState
+    {
+        return self::$state ??= new LogSinkState();
+    }
+
+    /** Drop every queue and close every handle. For tests. */
+    public static function reset(): void
+    {
+        foreach (self::state()->handles as $handle) {
+            @fclose($handle);
+        }
+        self::$state = new LogSinkState();
+    }
 }
 
+/**
+ * Return (or create) the async log queue for `$path`.
+ *
+ * Callers push log lines onto the queue and then call `log_sink_wake()`, which
+ * starts a writer coroutine that appends them to the file, so a request never
+ * waits on disk.
+ *
+ * Returns `null` when async logging is disabled, no scheduler is running, or
+ * `go()` is unavailable; callers then write synchronously.
+ */
 function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
 {
-    /** @var array<string, \OpenSwoole\Coroutine\Channel> $sinks */
-    $sinks = &LogSinkRegistry::$sinks;
-    /** @var array<string, bool> $started */
-    $started = &LogSinkRegistry::$started;
-
-    if (isset($sinks[$path])) {
-        return $sinks[$path];
+    $state = LogSinkRegistry::state();
+    if (isset($state->queues[$path])) {
+        return $state->queues[$path];
     }
 
     if (!async_logging_enabled() || co::getCid() < 0 || !function_exists('go')) {
         return null;
     }
 
-    // The async sink spawns a detached `go()` consumer that loops on
-    // Channel::pop() until the channel closes. It only runs when async logging
-    // is enabled inside a live coroutine scheduler — never reached by the unit
-    // suite (no scheduler) and deliberately disabled in every coverage server
-    // pass (ZEALPHP_LOG_ASYNC=0), since exercising the consumer risks a
-    // pop()-loop deadlock at coverage-dump time. Verified by live integration
-    // use, not measured as a coverage unit.
-    // @codeCoverageIgnoreStart
-    $queue = new \OpenSwoole\Coroutine\Channel(8192);
-    $sinks[$path] = $queue;
+    return $state->queues[$path] = new \OpenSwoole\Coroutine\Channel(8192);
+}
 
-    if (!isset($started[$path])) {
-        $started[$path] = true;
-        go(static function () use ($queue, $path): void {
-            if (!str_contains($path, '://')) {
-                $dir = dirname($path);
-                if ($dir !== '.' && !is_dir($dir)) {
-                    @mkdir($dir, 0775, true);
-                }
-            }
-
-            $handle = @fopen($path, 'ab');
-            if ($handle === false) {
-                while (($message = $queue->pop()) !== false) {
-                    // Last-resort sink — write to stderr directly, NOT error_log():
-                    // error_log() is uopz-overridden to route into log_write(), so
-                    // calling it here would recurse. stderr is where error_log(0)
-                    // lands under the CLI SAPI anyway. pop() returns mixed.
-                    if (is_scalar($message)) {
-                        @file_put_contents('php://stderr', (string)$message);
-                    }
-                }
-                return;
-            }
-
-            stream_set_write_buffer($handle, 0);
-            while (($message = $queue->pop()) !== false) {
-                if ($message === '') {
-                    continue;
-                }
-                // @phpstan-ignore-next-line — OpenSwoole\Coroutine\Channel::pop() returns mixed
-                fwrite($handle, (string)$message);
-            }
-            fclose($handle);
-        });
+/**
+ * Start a writer for `$path` unless one is already running.
+ *
+ * The writer drains the queue and returns as soon as it is empty; the next line
+ * queued starts a new one. No coroutine ever waits on an empty queue. A writer
+ * parked in `pop()` for the whole life of the worker was still asleep when the
+ * worker stopped, and OpenSwoole reported "all coroutines are asleep -
+ * deadlock!" on every shutdown.
+ *
+ * Checking the queue and clearing the running flag happen with no yield in
+ * between, and so do pushing a line and checking the flag, so a line queued
+ * while the writer is mid-write is picked up by that writer.
+ */
+function log_sink_wake(string $path, \OpenSwoole\Coroutine\Channel $queue): void
+{
+    $state = LogSinkRegistry::state();
+    if (isset($state->writing[$path])) {
+        return;
     }
+    $state->writing[$path] = true;
 
-    return $queue;
-    // @codeCoverageIgnoreEnd
+    go(static function () use ($state, $path, $queue): void {
+        try {
+            while (!$queue->isEmpty()) {
+                $message = $queue->pop();
+                if (is_scalar($message) && $message !== '') {
+                    log_sink_append($state, $path, (string) $message);
+                }
+            }
+        } finally {
+            unset($state->writing[$path]);
+        }
+    });
+}
+
+/**
+ * Append one line to `$path`, opening the file on first use and keeping it open
+ * for the worker's lifetime. When the file can't be opened, the line goes to
+ * stderr (not `error_log()`, which is overridden to route back into
+ * `log_write()`), and the next line tries the file again.
+ */
+function log_sink_append(LogSinkState $state, string $path, string $message): void
+{
+    $handle = $state->handles[$path] ?? null;
+    if ($handle === null) {
+        if (!str_contains($path, '://')) {
+            $dir = dirname($path);
+            if ($dir !== '.' && !is_dir($dir)) {
+                @mkdir($dir, 0775, true);
+            }
+        }
+        $opened = @fopen($path, 'ab');
+        if ($opened === false) {
+            @file_put_contents('php://stderr', $message);
+            return;
+        }
+        stream_set_write_buffer($opened, 0);
+        $handle = $state->handles[$path] = $opened;
+    }
+    fwrite($handle, $message);
 }
 
 /**
@@ -564,7 +601,7 @@ function log_write(string $message, string $kind = 'debug'): void
 {
     $path = log_file_for($kind);
     if ($path === null) {
-        // stderr, not error_log() — see the consumer's fallback note above
+        // stderr, not error_log() — see log_sink_append()
         // (error_log() is overridden to route back into log_write()).
         @file_put_contents('php://stderr', $message);
         return;
@@ -577,6 +614,7 @@ function log_write(string $message, string $kind = 'debug'): void
     // script, or any sync-mode boot code).
     if ($sink instanceof \OpenSwoole\Coroutine\Channel && \OpenSwoole\Coroutine::getCid() >= 0) {
         if ($sink->push($message, 0.001)) {
+            log_sink_wake($path, $sink);
             return;
         }
     }

@@ -24,6 +24,11 @@ parameters:
         -
             message: '#^Static method OpenSwoole\\Timer::clear\(\) invoked with 1 parameter, 0 required\.$#'
             path: src/App.php
+        # Same for OpenSwoole\Timer::info($timerId): the stub declares no
+        # parameters; the ext takes the timer id.
+        -
+            message: '#^Static method OpenSwoole\\Timer::info\(\) invoked with 1 parameter, 0 required\.$#'
+            path: src/App.php
         # OpenSwoole\Timer::tick()/after() stubs claim bool|int return but at
         # runtime ext-openswoole always returns the timer id (int).
         -
