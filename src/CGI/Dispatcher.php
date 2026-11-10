@@ -32,17 +32,26 @@ class Dispatcher
      */
     public const CGI_OUTPUT_CAP_BYTES = IPC::MAX_FRAME_BYTES;
 
+    /** Floor for outputCap(), so a nearly full worker still serves small responses. */
+    private const MIN_OUTPUT_CAP_BYTES = 1024 * 1024;
+
     /**
-     * The output cap in effect: CGI_OUTPUT_CAP_BYTES, lowered to a quarter of
-     * memory_limit when that is smaller. Buffering a response briefly needs
+     * The output cap in effect for the next CGI response: CGI_OUTPUT_CAP_BYTES,
+     * lowered to a quarter of the memory still free under memory_limit when
+     * that is smaller (never below 1 MB). Buffering a response briefly needs
      * about three times its size (the buffer, its regrowth, the header/body
-     * split), so a 64 MB cap under the default 128 MB limit let a large CGI
-     * response kill the worker with a fatal error instead of failing with 500.
+     * split), so a fixed 64 MB cap under the default 128 MB limit let a large
+     * CGI response kill the worker with a fatal error instead of failing with
+     * 500. No memory_limit (-1) keeps the full cap.
      */
     public static function outputCap(): int
     {
         $limit = ini_parse_quantity((string) ini_get('memory_limit'));
-        return $limit > 0 ? min(self::CGI_OUTPUT_CAP_BYTES, intdiv($limit, 4)) : self::CGI_OUTPUT_CAP_BYTES;
+        if ($limit <= 0) {
+            return self::CGI_OUTPUT_CAP_BYTES;
+        }
+        $quarterOfFree = intdiv($limit - memory_get_usage(), 4);
+        return max(self::MIN_OUTPUT_CAP_BYTES, min(self::CGI_OUTPUT_CAP_BYTES, $quarterOfFree));
     }
 
     /** Most stderr kept per CGI request for the log; the rest is read and dropped. */
@@ -785,6 +794,8 @@ class Dispatcher
         $body = $bodyHead;
         $open = [1 => $pipes[1], 2 => $pipes[2]];
         $drainDeadline = microtime(true) + App::$cgi_timeout;
+        $cap = self::outputCap();
+        $overCap = false;
         while ($open !== []) {
             if (microtime(true) >= $drainDeadline) {
                 elog("cgiSubprocess: stdout/stderr drain timeout after " . App::$cgi_timeout . "s for $path", "error");
@@ -804,13 +815,30 @@ class Dispatcher
                     unset($open[$fd]);
                     continue;
                 }
-                if ($fd === 1) { $body .= $chunk; } else { $stderrRemainder .= $chunk; }
+                if ($fd === 1) {
+                    if (strlen($body) + strlen($chunk) > $cap) {
+                        $overCap = true;
+                        break 2;
+                    }
+                    $body .= $chunk;
+                } elseif (strlen($stderrRemainder) < self::DIAG_CAP_BYTES) {
+                    $stderrRemainder .= $chunk;
+                }
             }
+        }
+        if ($overCap) {
+            // Stop the script first: it may be blocked writing to the pipe,
+            // and proc_close() would wait for it.
+            proc_terminate($process, 9);
         }
         foreach ($open as $stream) { @fclose($stream); }
         proc_close($process);
         if ($stderrRemainder !== '') {
             elog("[cgi_worker] stderr: " . rtrim($stderrRemainder), "cgi_worker");
+        }
+        if ($overCap) {
+            elog("cgiSubprocess: output exceeds $cap bytes for $path", 'error');
+            return 500;
         }
 
         // Surface the file's return value when it was explicit (int / array /
@@ -920,6 +948,7 @@ class Dispatcher
         $buf = [1 => '', 2 => '', 3 => ''];
         $meta = '';
         $outCap = self::outputCap();
+        $full = [];
         while (true) {
             $nl = strpos($buf[3], "\n");
             if ($nl !== false) {
@@ -947,10 +976,14 @@ class Dispatcher
                     }
                     continue;
                 }
+                // Past the cap the stream is still drained but nothing more is
+                // kept, so the kept bytes are always a prefix (no gaps).
                 $cap = $fd === 2 ? self::DIAG_CAP_BYTES : $outCap;
-                if (strlen($buf[$fd]) + strlen($data) <= $cap) {
-                    $buf[$fd] .= $data;
+                if (isset($full[$fd]) || strlen($buf[$fd]) + strlen($data) > $cap) {
+                    $full[$fd] = true;
+                    continue;
                 }
+                $buf[$fd] .= $data;
             }
         }
         @fclose($pipes[3]);

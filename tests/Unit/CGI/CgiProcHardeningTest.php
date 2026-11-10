@@ -185,21 +185,23 @@ final class CgiProcHardeningTest extends TestCase
         $this->assertSame(500, Dispatcher::cgiSubprocess($sh, '/bin/sh'));
     }
 
-    public function testOutputCapIsAQuarterOfMemoryLimitWhenSmaller(): void
+    public function testOutputCapIsAQuarterOfFreeMemoryWhenSmaller(): void
     {
         $saved = (string) ini_get('memory_limit');
         try {
             ini_set('memory_limit', '-1');
             $this->assertSame(Dispatcher::CGI_OUTPUT_CAP_BYTES, Dispatcher::outputCap(), 'no limit: full cap');
-            ini_set('memory_limit', '4G');
-            $this->assertSame(Dispatcher::CGI_OUTPUT_CAP_BYTES, Dispatcher::outputCap(), 'large limit: full cap');
-            // Above current usage (or ini_set refuses it), below 4x the cap.
-            $limit = max(128 * 1024 * 1024, memory_get_usage(true) + 32 * 1024 * 1024);
-            if ($limit >= 4 * Dispatcher::CGI_OUTPUT_CAP_BYTES) {
-                $this->markTestSkipped('memory use too high to set a limit under 4x the cap');
-            }
+
+            ini_set('memory_limit', (string) (memory_get_usage(true) + 1024 * 1024 * 1024));
+            $this->assertSame(Dispatcher::CGI_OUTPUT_CAP_BYTES, Dispatcher::outputCap(), '1 GB free: full cap');
+
+            $limit = memory_get_usage(true) + 40 * 1024 * 1024;
             $this->assertNotFalse(ini_set('memory_limit', (string) $limit));
-            $this->assertSame(intdiv($limit, 4), Dispatcher::outputCap(), 'smaller limit: a quarter of it');
+            $before = memory_get_usage();
+            $cap = Dispatcher::outputCap();
+            $after = memory_get_usage();
+            $this->assertGreaterThanOrEqual(intdiv($limit - max($before, $after), 4), $cap, 'a quarter of what is free');
+            $this->assertLessThanOrEqual(intdiv($limit - min($before, $after), 4), $cap, 'a quarter of what is free');
         } finally {
             ini_set('memory_limit', $saved);
         }

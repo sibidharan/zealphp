@@ -143,6 +143,25 @@ class CgiSubprocessTest extends TestCase
         $this->assertSame(200000, strlen($out));
     }
 
+    /**
+     * Regression: the .php path buffered the script's whole output with no cap,
+     * so ~40 MB under a limit with 48 MB free killed the parent with a fatal.
+     */
+    public function testPhpOutputOverTheCapFailsWithoutAFatal(): void
+    {
+        $saved = (string) ini_get('memory_limit');
+        $limit = memory_get_usage(true) + 48 * 1024 * 1024;
+        if (ini_set('memory_limit', (string) $limit) === false) {
+            $this->markTestSkipped('could not set memory_limit');
+        }
+        try {
+            $f = $this->fixture('huge.php', "<?php\necho str_repeat('A', 40 * 1024 * 1024);\n");
+            $this->assertSame(500, Dispatcher::cgiSubprocess($f));
+        } finally {
+            ini_set('memory_limit', $saved);
+        }
+    }
+
     public function testStderrWarningsDoNotWedgeTheResponse(): void
     {
         // error_log() writes to the child's stderr; the concurrent drain must
