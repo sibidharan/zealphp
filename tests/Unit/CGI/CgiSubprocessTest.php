@@ -178,6 +178,21 @@ class CgiSubprocessTest extends TestCase
         }
     }
 
+    /** A huge return value fails the request instead of killing the worker. */
+    public function testHugeReturnValueFailsWithoutAFatal(): void
+    {
+        $saved = (string) ini_get('memory_limit');
+        if (ini_set('memory_limit', (string) (memory_get_usage(true) + 52 * 1024 * 1024)) === false) {
+            $this->markTestSkipped('could not set memory_limit');
+        }
+        try {
+            $f = $this->fixture('bigreturn.php', "<?php\nreturn str_repeat('r', 20 * 1024 * 1024);\n");
+            $this->assertSame(500, Dispatcher::cgiSubprocess($f));
+        } finally {
+            ini_set('memory_limit', $saved);
+        }
+    }
+
     /** A script still running when the body drain times out is stopped. */
     public function testDrainTimeoutStopsTheScript(): void
     {
