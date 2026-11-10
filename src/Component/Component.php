@@ -187,12 +187,9 @@ abstract class Component
         return $this->meta()->name;
     }
 
-    /**
-     * @deprecated The `$tag` property is the API; this accessor goes in 1.0.
-     */
+    /** The outer element's tag name (`$tag`), for templates. */
     public function tag(): string
     {
-        trigger_error('Component::tag() is deprecated: use the $tag property; tag() goes in 1.0', E_USER_DEPRECATED);
         return $this->tag;
     }
 

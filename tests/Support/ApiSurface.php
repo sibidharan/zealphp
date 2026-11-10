@@ -44,7 +44,8 @@ final class ApiSurface
             $head .= ($rc->isInterface() ? ' extends ' : ' implements ') . implode(', ', $own);
         }
         foreach ($rc->getAttributes(\Attribute::class) as $attr) {
-            $head = '#[Attribute(' . self::attributeFlags((int) ($attr->getArguments()[0] ?? \Attribute::TARGET_ALL)) . ')] ' . $head;
+            // Through the instance, so a named `flags:` argument counts too.
+            $head = '#[Attribute(' . self::attributeFlags($attr->newInstance()->flags) . ')] ' . $head;
         }
         $lines = [$head];
 

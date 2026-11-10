@@ -2504,9 +2504,9 @@ Components are built on HTTP, HTML forms and a signed snapshot, none of which ch
 ### What's covered
 
 - **Everything in the [API lock](https://github.com/sibidharan/zealphp/blob/master/tests/fixtures/api/components.txt):** the `Component` base class (its public and protected methods, properties and constants: what you call and what you override), the attributes `#[Action]`, `#[Model]`, `#[On]` and `#[Reactive]`, the `ComponentBinder` interface and the shipped binders, `Tester`, `Validator::validate()`/`assertRules()`, `ValidationException`, `ComponentException`, `Outcome`, and `App::component()`, `components()`, `componentBinder()`, `componentPush()`, `componentPushRoot()`, `componentMaxAge()`.
-- **Template contract:** a component template gets its props as variables, `$c`, `$errors` and `$slot`.
+- **Template contract:** a component template gets its props as variables, `$c`, `$errors` and `$slot`. Pinned by `tests/Unit/Component/ProtocolContractTest.php`.
 - **The validation rule syntax** and the rules listed in [Validation](#validation).
-- **The wire protocol a non-htmx client uses:** the endpoint URLs (`/_zeal/c/{name}/{action}`, `_update`, `_refresh`), the `_zc`, `_zc_args` and `_zc_trigger` fields, and the `Zeal-*` request and response headers.
+- **The wire protocol a non-htmx client uses:** the endpoint URLs (`/_zeal/c/{name}/{action}`, `_update`, `_refresh`), the `_zc`, `_zc_args` and `_zc_trigger` fields, the `Zeal-Request`/`Zeal-Trigger` request headers, and the `Zeal-Events`/`Zeal-Redirect`/`Zeal-Reload` response headers with statuses 200/422/409. Pinned by `ProtocolContractTest`.
 
 ### What isn't
 
@@ -2524,13 +2524,12 @@ Components are built on HTTP, HTML forms and a signed snapshot, none of which ch
 
 ### How it's enforced
 
-`tests/Unit/Component/PublicApiLockTest.php` reflects over the public API and compares it with the lock file. Any change to a covered signature fails the build until the lock is updated, and that update shows up as a diff in review. To change the API on purpose: follow the rules above, run `make api-lock`, and commit the lock with the change.
+`tests/Unit/Component/PublicApiLockTest.php` reflects over the public API and compares it with the lock file; `ProtocolContractTest` pins what reflection can't see (the wire protocol and the template variables). Any change to a covered signature fails the build until the lock is updated, and that update shows up as a diff in review. To change the API on purpose: follow the rules above, run `make api-lock`, and commit the lock with the change.
 
 ### Deprecated now, removed in 1.0
 
 | Deprecated | Use instead |
 |---|---|
-| `$c->tag()` | the `$tag` property |
 | `$c->value('prop', false)` (unescaped) | `$c->value('prop')`; attribute values go through `$c->model()` |
 
 ## Components — Limits in this version
