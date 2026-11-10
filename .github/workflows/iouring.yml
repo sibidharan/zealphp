@@ -105,7 +105,9 @@ jobs:
         if: matrix.mode != 'baseline'
         continue-on-error: true
         working-directory: ${{ env.OPENSWOOLE_SRC }}
-        run: make test TESTS=tests/openswoole_io_uring NO_INTERACTION=1 2>&1 | tail -40
+        # Not `make test`: it runs php -n, so the sockets extension OpenSwoole
+        # needs is not loaded first and every test skips.
+        run: php run-tests.php -P -q --show-diff tests/openswoole_io_uring 2>&1 | tail -60
 
       - name: Build and install ext-zealphp
         run: |
@@ -142,23 +144,56 @@ jobs:
           echo "Server failed to start"; cat /tmp/zealphp-server.log; exit 1
 
       - name: Throughput (ab, informational)
+        continue-on-error: true
         run: |
-          for path in /demo/inject/url/42 / /docs/routing; do
-            ab -q -k -c 64 -n 2000 "http://127.0.0.1:8080$path" > /dev/null 2>&1 || true
-            out=$(ab -q -k -c 64 -n 10000 "http://127.0.0.1:8080$path" 2>&1)
-            rps=$(echo "$out" | awk '/Requests per second/ {print $4}')
-            failed=$(echo "$out" | awk '/Failed requests/ {print $3}')
-            non2xx=$(echo "$out" | awk '/Non-2xx/ {print $3}')
-            line="${{ matrix.mode }} $path rps=$rps failed=$failed non2xx=${non2xx:-0}"
-            echo "$line"
-            echo "- \`$line\`" >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          # Three shapes, so a hang can be pinned to keep-alive or concurrency.
+          # -s 10: a stuck request fails the run in 10 s instead of 30.
+          for path in /demo/inject/url/42 / /docs/guide/routing; do
+            for shape in "-c 1 -k" "-c 64" "-c 64 -k"; do
+              out=$(ab -q -s 10 $shape -n 3000 "http://127.0.0.1:8080$path" 2>&1); rc=$?
+              rps=$(echo "$out" | awk '/Requests per second/ {print $4}')
+              done_n=$(echo "$out" | awk '/Complete requests/ {print $3}')
+              non2xx=$(echo "$out" | awk '/Non-2xx/ {print $3}')
+              err=$(echo "$out" | grep -E '^apr_|timeout|Total of' | head -1)
+              line="${{ matrix.mode }} $path [$shape] rc=$rc rps=${rps:-none} complete=${done_n:-0} non2xx=${non2xx:-0} ${err}"
+              echo "$line"
+              echo "- \`$line\`" >> "$GITHUB_STEP_SUMMARY"
+            done
           done
+
+      - name: Restart the server if it stopped answering
+        if: always()
+        env:
+          ZEALPHP_SKIP_DOCS_BUILD: '1'
+          ZEALPHP_TEST_ROUTES: '1'
+        run: |
+          if curl -fsS -m 5 http://127.0.0.1:8080/demo/inject/url/1 >/dev/null; then echo "server answering"; exit 0; fi
+          echo "::warning::server stopped answering after the throughput step (${{ matrix.mode }})"
+          sh scripts/iouring/evidence.sh
+          ss -tanp 2>/dev/null | grep -c ':8080' || true
+          tail -40 /tmp/zealphp-server.log
+          kill "$(cat /tmp/zealphp-server.pid)"; sleep 3; pkill -9 -P "$(cat /tmp/zealphp-server.pid)" 2>/dev/null || true
+          kill -9 "$(cat /tmp/zealphp-server.pid)" 2>/dev/null || true
+          export ZEALPHP_APP_KEY="base64:$(php -r 'echo base64_encode(random_bytes(32));')"
+          php app.php >/tmp/zealphp-server.log 2>&1 &
+          echo $! > /tmp/zealphp-server.pid
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/ >/dev/null && exit 0; sleep 1; done
+          echo "restart failed"; exit 1
 
       - name: io_uring evidence (after warmup)
         run: sh scripts/iouring/evidence.sh | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Run tests
+        if: always()
         run: ./vendor/bin/phpunit
+
+      - name: Re-run the CLI lifecycle tests (flake check)
+        if: always()
+        run: |
+          for i in 1 2 3 4 5; do
+            ./vendor/bin/phpunit tests/Unit/CliLifecycleHelpersTest.php 2>&1 | grep -E '^(OK|Tests:)' | sed "s/^/run $i: /"
+          done
 
       - name: io_uring evidence (after tests)
         if: always()
