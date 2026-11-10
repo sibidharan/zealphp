@@ -35,7 +35,8 @@ final class GracefulShutdownTest extends TestCase
         @shell_exec('fuser -k ' . self::PORT . '/tcp 2>/dev/null');
         usleep(200000);
         $cmd = sprintf(
-            'ZEALPHP_LOG_DIR=%s %s -d opcache.enable_cli=0 %s %d > %s 2>&1 & echo $!',
+            // Async logging pinned on: the coverage script turns it off globally.
+            'ZEALPHP_LOG_ASYNC=1 ZEALPHP_LOG_DIR=%s %s -d opcache.enable_cli=0 %s %d > %s 2>&1 & echo $!',
             escapeshellarg($this->dir),
             escapeshellarg(PHP_BINARY),
             escapeshellarg(__DIR__ . '/fixtures/graceful_shutdown_server.php'),

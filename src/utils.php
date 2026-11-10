@@ -489,11 +489,14 @@ final class LogSinkRegistry
         return self::$state ??= new LogSinkState();
     }
 
-    /** Drop every queue and close every handle. For tests. */
+    /** Drop every queue and close the handles no writer is using. For tests. */
     public static function reset(): void
     {
-        foreach (self::state()->handles as $handle) {
-            @fclose($handle);
+        $state = self::state();
+        foreach ($state->handles as $path => $handle) {
+            if (!isset($state->writing[$path])) {
+                @fclose($handle);
+            }
         }
         self::$state = new LogSinkState();
     }
@@ -544,7 +547,7 @@ function log_sink_wake(string $path, \OpenSwoole\Coroutine\Channel $queue): void
     }
     $state->writing[$path] = true;
 
-    go(static function () use ($state, $path, $queue): void {
+    $writer = static function () use ($state, $path, $queue): void {
         try {
             while (!$queue->isEmpty()) {
                 $message = $queue->pop();
@@ -555,7 +558,14 @@ function log_sink_wake(string $path, \OpenSwoole\Coroutine\Channel $queue): void
         } finally {
             unset($state->writing[$path]);
         }
-    });
+    };
+
+    // go() fails when the worker is at max_coroutine. Drain here instead, so
+    // the flag is never left set with no writer (which would stop this file
+    // being written for the rest of the worker's life).
+    if (@go($writer) === false) {
+        $writer();
+    }
 }
 
 /**

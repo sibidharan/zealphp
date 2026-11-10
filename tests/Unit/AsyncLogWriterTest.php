@@ -10,6 +10,7 @@ use PHPUnit\Framework\TestCase;
 use ZealPHP\LogSinkRegistry;
 
 use function ZealPHP\async_logging_enabled;
+use function ZealPHP\log_sink_append;
 use function ZealPHP\log_sink_for;
 use function ZealPHP\log_sink_wake;
 
@@ -149,5 +150,51 @@ final class AsyncLogWriterTest extends TestCase
         $this->assertInstanceOf(Channel::class, $queues[0]);
         $this->assertSame($queues[0], $queues[1]);
         $this->assertSame($queues[0], LogSinkRegistry::state()->queues[$this->path]);
+    }
+
+    public function testWhenNoCoroutineCanStartTheCallerWritesTheQueue(): void
+    {
+        $result = [];
+        // go() fails at max_coroutine; its warning would reach PHPUnit's
+        // handler from inside a coroutine, where it can't find the test.
+        \set_error_handler(static fn (): bool => true);
+        Coroutine::set(['max_coroutine' => 3]);
+        try {
+            Coroutine::run(function () use (&$result): void {
+                $hold = new Channel(1);
+                Coroutine::create(static fn () => $hold->pop(0.2)); // main + 2 = the limit
+                Coroutine::create(static fn () => $hold->pop(0.2));
+                $queue = new Channel(16);
+                $queue->push("at the limit\n");
+                log_sink_wake($this->path, $queue);
+                $result['writing'] = isset(LogSinkRegistry::state()->writing[$this->path]);
+                $result['left'] = $queue->length();
+            });
+        } finally {
+            Coroutine::set(['max_coroutine' => \OPENSWOOLE_DEFAULT_MAX_CORO_NUM]);
+            \restore_error_handler();
+        }
+
+        $this->assertFalse($result['writing'], 'the running flag must not be left set');
+        $this->assertSame(0, $result['left']);
+        $this->assertSame("at the limit\n", (string) file_get_contents($this->path));
+    }
+
+    public function testFileThatCantBeOpenedIsTriedAgainOnTheNextLine(): void
+    {
+        // A regular file where the log directory should be: mkdir and fopen fail.
+        $blocker = dirname($this->path);
+        @mkdir(dirname($blocker), 0700, true);
+        file_put_contents($blocker, 'not a directory');
+        $state = LogSinkRegistry::state();
+
+        // An empty line, so the stderr fallback prints nothing.
+        log_sink_append($state, $this->path, '');
+        $this->assertSame([], $state->handles, 'a failed open is not cached');
+
+        unlink($blocker);
+        log_sink_append($state, $this->path, "now it opens\n");
+        $this->assertArrayHasKey($this->path, $state->handles);
+        $this->assertSame("now it opens\n", (string) file_get_contents($this->path));
     }
 }
