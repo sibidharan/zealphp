@@ -6,6 +6,8 @@ name: io_uring
 #   baseline     stock OpenSwoole (epoll, thread-pool file I/O)
 #   file-engine  io_uring build, default reactor: hooked file I/O uses io_uring
 #   reactor      io_uring build + reactor_type=OPENSWOOLE_IO_URING everywhere
+# The throughput job runs all three on ONE runner, alternating, because
+# runner-to-runner variance (~40%) swamps any difference between jobs.
 on:
   workflow_dispatch:
   schedule:
@@ -19,9 +21,10 @@ permissions:
   contents: read
 
 jobs:
-  iouring:
+  correctness:
     name: io_uring (${{ matrix.mode }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -79,55 +82,56 @@ jobs:
           coverage: none
           tools: composer:v2
 
-      - name: Build OpenSwoole v26.2.0
+      - name: Build OpenSwoole v26.2.0, with and without io_uring
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev libc-ares-dev liburing-dev apache2-utils
-          OPENSWOOLE_REF=v26.2.0
-          OPENSWOOLE_SHA=25daa6c02cd183cc576ab99e83a5f3682d1da682
           src="$RUNNER_TEMP/ext-openswoole"
-          git clone --depth 1 --branch "$OPENSWOOLE_REF" https://github.com/openswoole/ext-openswoole.git "$src"
+          git clone --depth 1 --branch v26.2.0 https://github.com/openswoole/ext-openswoole.git "$src"
           cd "$src"
-          test "$(git rev-parse 'HEAD^{commit}')" = "$OPENSWOOLE_SHA" || { echo "::error::openswoole $OPENSWOOLE_REF is not $OPENSWOOLE_SHA"; exit 1; }
-          flags="--enable-openssl --enable-hook-curl --enable-http2 --enable-mysqlnd --enable-sockets"
-          if [ "${{ matrix.mode }}" != baseline ]; then flags="$flags --enable-io-uring"; fi
-          phpize
-          ./configure $flags
-          make -j"$(nproc)"
-          sudo make install
-          ini_dir=$(php -i | awk -F'=> ' '/Scan this dir for additional .ini files/ {print $2}' | head -1 | tr -d ' ')
-          echo "extension=openswoole.so" | sudo tee "${ini_dir}/30-openswoole.ini"
-          echo "INI_DIR=$ini_dir" >> "$GITHUB_ENV"
+          test "$(git rev-parse 'HEAD^{commit}')" = 25daa6c02cd183cc576ab99e83a5f3682d1da682 || { echo "::error::openswoole v26.2.0 moved"; exit 1; }
+          base="--enable-openssl --enable-hook-curl --enable-http2 --enable-mysqlnd --enable-sockets"
+          for v in stock uring; do
+            git clean -fdxq
+            flags="$base"; [ "$v" = uring ] && flags="$flags --enable-io-uring"
+            phpize >/dev/null && ./configure $flags >/dev/null && make -j"$(nproc)" >/dev/null
+            cp modules/openswoole.so "$RUNNER_TEMP/openswoole-$v.so"
+          done
           echo "OPENSWOOLE_SRC=$src" >> "$GITHUB_ENV"
+          php -d extension=$RUNNER_TEMP/openswoole-uring.so --ri openswoole | grep -iE '^version|io_uring'
+
+      - name: Build ext-zealphp
+        run: |
+          git submodule update --init ext/zealphp
+          cd ext/zealphp
+          phpize >/dev/null && ./configure --enable-zealphp >/dev/null && make -j"$(nproc)" >/dev/null
+          cp modules/zealphp.so "$RUNNER_TEMP/zealphp.so"
+          echo "ZEALPHP_SO=$RUNNER_TEMP/zealphp.so" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          # composer runs PHP without OpenSwoole; the platform check needs it declared.
+          composer install --no-interaction --prefer-dist --ignore-platform-req=ext-openswoole
+
+      - name: Load the build for this mode into every PHP process
+        run: |
+          ini_dir=$(php -i | awk -F'=> ' '/Scan this dir for additional .ini files/ {print $2}' | head -1 | tr -d ' ')
+          so=openswoole-uring.so; [ "${{ matrix.mode }}" = baseline ] && so=openswoole-stock.so
+          echo "extension=$RUNNER_TEMP/$so" | sudo tee "$ini_dir/30-openswoole.ini"
+          echo "extension=$ZEALPHP_SO" | sudo tee "$ini_dir/50-zealphp.ini"
+          if [ "${{ matrix.mode }}" = reactor ]; then
+            echo "auto_prepend_file=$GITHUB_WORKSPACE/scripts/iouring/reactor-prepend.php" | sudo tee "$ini_dir/99-iouring-reactor.ini"
+          fi
           php --ri openswoole | grep -iE '^version|io_uring' || true
+          php -r 'OpenSwoole\Coroutine::run(fn() => print("event loop ok\n"));'
 
       - name: OpenSwoole's own io_uring tests
         if: matrix.mode != 'baseline'
         continue-on-error: true
-        working-directory: ${{ env.OPENSWOOLE_SRC }}
-        # Not `make test`: it runs php -n, so the sockets extension OpenSwoole
-        # needs is not loaded first and every test skips.
-        run: php run-tests.php -P -q --show-diff tests/openswoole_io_uring 2>&1 | tail -60
-
-      - name: Build and install ext-zealphp
-        run: |
-          git submodule update --init ext/zealphp
-          cd ext/zealphp
-          phpize
-          ./configure --enable-zealphp
-          make -j"$(nproc)"
-          sudo make install
-          echo "extension=zealphp.so" | sudo tee "${INI_DIR}/50-zealphp.ini"
-          php -m | grep zealphp
-
-      - name: Install dependencies
-        run: composer install --no-interaction --prefer-dist
-
-      - name: Switch every process to the io_uring reactor
-        if: matrix.mode == 'reactor'
-        run: |
-          echo "auto_prepend_file=$GITHUB_WORKSPACE/scripts/iouring/reactor-prepend.php" | sudo tee "${INI_DIR}/99-iouring-reactor.ini"
-          php -r 'OpenSwoole\Coroutine::run(fn() => print("reactor ok\n"));'
+        working-directory: ${{ env.OPENSWOOLE_SRC }}/tests
+        # Their runner, not start.sh (it kills every .php process); PHPT=1 is
+        # the guard their skipif checks.
+        run: PHPT=1 php -d memory_limit=1024m ./run-tests openswoole_io_uring 2>&1 | grep -vE '^(PASS|SKIP) ' | tail -40
 
       - name: Start ZealPHP
         env:
@@ -138,65 +142,96 @@ jobs:
           php app.php >/tmp/zealphp-server.log 2>&1 &
           echo $! > /tmp/zealphp-server.pid
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/ >/dev/null; then exit 0; fi
+            curl -fsS -m 5 http://127.0.0.1:8080/ >/dev/null && exit 0
             sleep 1
           done
           echo "Server failed to start"; cat /tmp/zealphp-server.log; exit 1
 
-      - name: Throughput (ab, informational)
-        continue-on-error: true
-        run: |
-          set +e
-          # Three shapes, so a hang can be pinned to keep-alive or concurrency.
-          # -s 10: a stuck request fails the run in 10 s instead of 30.
-          for path in /demo/inject/url/42 / /docs/guide/routing; do
-            for shape in "-c 1 -k" "-c 64" "-c 64 -k"; do
-              out=$(ab -q -s 10 $shape -n 3000 "http://127.0.0.1:8080$path" 2>&1); rc=$?
-              rps=$(echo "$out" | awk '/Requests per second/ {print $4}')
-              done_n=$(echo "$out" | awk '/Complete requests/ {print $3}')
-              non2xx=$(echo "$out" | awk '/Non-2xx/ {print $3}')
-              err=$(echo "$out" | grep -E '^apr_|timeout|Total of' | head -1)
-              line="${{ matrix.mode }} $path [$shape] rc=$rc rps=${rps:-none} complete=${done_n:-0} non2xx=${non2xx:-0} ${err}"
-              echo "$line"
-              echo "- \`$line\`" >> "$GITHUB_STEP_SUMMARY"
-            done
-          done
-
-      - name: Restart the server if it stopped answering
-        if: always()
-        env:
-          ZEALPHP_SKIP_DOCS_BUILD: '1'
-          ZEALPHP_TEST_ROUTES: '1'
-        run: |
-          if curl -fsS -m 5 http://127.0.0.1:8080/demo/inject/url/1 >/dev/null; then echo "server answering"; exit 0; fi
-          echo "::warning::server stopped answering after the throughput step (${{ matrix.mode }})"
-          sh scripts/iouring/evidence.sh
-          ss -tanp 2>/dev/null | grep -c ':8080' || true
-          tail -40 /tmp/zealphp-server.log
-          kill "$(cat /tmp/zealphp-server.pid)"; sleep 3; pkill -9 -P "$(cat /tmp/zealphp-server.pid)" 2>/dev/null || true
-          kill -9 "$(cat /tmp/zealphp-server.pid)" 2>/dev/null || true
-          export ZEALPHP_APP_KEY="base64:$(php -r 'echo base64_encode(random_bytes(32));')"
-          php app.php >/tmp/zealphp-server.log 2>&1 &
-          echo $! > /tmp/zealphp-server.pid
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/ >/dev/null && exit 0; sleep 1; done
-          echo "restart failed"; exit 1
-
-      - name: io_uring evidence (after warmup)
-        run: sh scripts/iouring/evidence.sh | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Run tests
-        if: always()
+      - name: Run tests (before any load)
         run: ./vendor/bin/phpunit
 
-      - name: Re-run the CLI lifecycle tests (flake check)
+      - name: io_uring evidence
         if: always()
-        run: |
-          for i in 1 2 3 4 5; do
-            ./vendor/bin/phpunit tests/Unit/CliLifecycleHelpersTest.php 2>&1 | grep -E '^(OK|Tests:)' | sed "s/^/run $i: /"
-          done
+        run: sh scripts/iouring/evidence.sh | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: io_uring evidence (after tests)
+      - name: Load probe (where does it stop answering?)
         if: always()
+        continue-on-error: true
+        timeout-minutes: 8
         run: |
-          sh scripts/iouring/evidence.sh
+          bash scripts/iouring/bench.sh "${{ matrix.mode }}" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "--- server log tail"; tail -30 /tmp/zealphp-server.log
+
+  throughput:
+    name: io_uring throughput (one runner, alternating)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check the kernel allows io_uring
+        run: |
+          uname -r
+          echo "kernel.io_uring_disabled=$(cat /proc/sys/kernel/io_uring_disabled 2>/dev/null || echo n/a)"
+          python3 scripts/iouring/probe.py
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.3'
+          extensions: uopz, redis, memcached, mysqli
+          coverage: none
+          tools: composer:v2
+
+      - name: Build OpenSwoole v26.2.0, with and without io_uring
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev libc-ares-dev liburing-dev apache2-utils
+          src="$RUNNER_TEMP/ext-openswoole"
+          git clone --depth 1 --branch v26.2.0 https://github.com/openswoole/ext-openswoole.git "$src"
+          cd "$src"
+          test "$(git rev-parse 'HEAD^{commit}')" = 25daa6c02cd183cc576ab99e83a5f3682d1da682 || { echo "::error::openswoole v26.2.0 moved"; exit 1; }
+          base="--enable-openssl --enable-hook-curl --enable-http2 --enable-mysqlnd --enable-sockets"
+          for v in stock uring; do
+            git clean -fdxq
+            flags="$base"; [ "$v" = uring ] && flags="$flags --enable-io-uring"
+            phpize >/dev/null && ./configure $flags >/dev/null && make -j"$(nproc)" >/dev/null
+            cp modules/openswoole.so "$RUNNER_TEMP/openswoole-$v.so"
+          done
+          echo "OPENSWOOLE_SRC=$src" >> "$GITHUB_ENV"
+          php -d extension=$RUNNER_TEMP/openswoole-uring.so --ri openswoole | grep -iE '^version|io_uring'
+
+      - name: Build ext-zealphp
+        run: |
+          git submodule update --init ext/zealphp
+          cd ext/zealphp
+          phpize >/dev/null && ./configure --enable-zealphp >/dev/null && make -j"$(nproc)" >/dev/null
+          cp modules/zealphp.so "$RUNNER_TEMP/zealphp.so"
+          echo "ZEALPHP_SO=$RUNNER_TEMP/zealphp.so" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          # composer runs PHP without OpenSwoole; the platform check needs it declared.
+          composer install --no-interaction --prefer-dist --ignore-platform-req=ext-openswoole
+
+      - name: Alternate stock / file-engine / reactor, 3 rounds
+        timeout-minutes: 20
+        env:
+          ZEALPHP_SKIP_DOCS_BUILD: '1'
+        run: |
+          for round in 1 2 3; do
+            for v in stock file-engine reactor; do
+              so=$RUNNER_TEMP/openswoole-uring.so; [ $v = stock ] && so=$RUNNER_TEMP/openswoole-stock.so
+              mode=""; [ $v = reactor ] && mode=reactor
+              if bash scripts/iouring/serve.sh start "$so" $mode; then
+                bash scripts/iouring/bench.sh "r$round $v" | tee -a /tmp/bench.txt
+              else
+                echo "r$round $v: server did not start" | tee -a /tmp/bench.txt
+              fi
+              bash scripts/iouring/serve.sh stop
+            done
+          done
+          { echo '```'; cat /tmp/bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
