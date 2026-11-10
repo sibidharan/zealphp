@@ -68,7 +68,7 @@ final class ApiSurface
                 continue;
             }
             $line = '  ' . self::visibility($prop) . ($prop->isStatic() ? ' static' : '') . ($prop->isReadOnly() ? ' readonly' : '')
-                . ($prop->hasType() ? ' ' . $prop->getType() : '') . ' $' . $prop->getName();
+                . ($prop->hasType() ? ' ' . self::type($prop->getType(), $rc->getName()) : '') . ' $' . $prop->getName();
             if ($prop->hasDefaultValue() && !$prop->isPromoted()) {
                 $line .= ' = ' . self::export($prop->getDefaultValue());
             }
@@ -151,7 +151,7 @@ final class ApiSurface
             . ($m->isFinal() ? 'final ' : '') . self::visibility($m) . ($m->isStatic() ? ' static' : ''));
         $params = [];
         foreach ($m->getParameters() as $p) {
-            $s = ($p->hasType() ? $p->getType() . ' ' : '') . ($p->isPassedByReference() ? '&' : '')
+            $s = ($p->hasType() ? self::type($p->getType(), $m->getDeclaringClass()->getName()) . ' ' : '') . ($p->isPassedByReference() ? '&' : '')
                 . ($p->isVariadic() ? '...' : '') . '$' . $p->getName();
             if ($p->isDefaultValueAvailable()) {
                 $s .= ' = ' . ($p->isDefaultValueConstant() ? (string) $p->getDefaultValueConstantName() : self::export($p->getDefaultValue()));
@@ -161,8 +161,18 @@ final class ApiSurface
             }
             $params[] = $s;
         }
-        $return = $m->hasReturnType() ? ': ' . $m->getReturnType() : '';
+        $return = $m->hasReturnType() ? ': ' . self::type($m->getReturnType(), $m->getDeclaringClass()->getName()) : '';
         return "{$mods} function {$m->getName()}(" . implode(', ', $params) . "){$return}";
+    }
+
+    /**
+     * A type as written, with the class's own name shown as `self`: PHP 8.5's
+     * reflection resolves `self` to the class name, 8.3 and 8.4 don't, and
+     * the two mean the same.
+     */
+    private static function type(?\ReflectionType $type, string $class): string
+    {
+        return (string) preg_replace('/(?<![\\\w])' . preg_quote($class, '/') . '(?![\\\w])/', 'self', (string) $type);
     }
 
     private static function visibility(\ReflectionMethod|\ReflectionProperty $r): string
