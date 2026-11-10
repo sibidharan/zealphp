@@ -181,27 +181,46 @@ final class CgiProcHardeningTest extends TestCase
     {
         App::$cgi_timeout = 30;
         $sh = $this->file('huge.sh', "printf 'Content-Type: text/plain\\r\\n\\r\\n'\n"
-            . 'head -c ' . (Dispatcher::outputCap() + 1) . " /dev/zero\n");
+            . 'head -c ' . (Dispatcher::CGI_OUTPUT_CAP_BYTES + 1) . " /dev/zero\n");
         $this->assertSame(500, Dispatcher::cgiSubprocess($sh, '/bin/sh'));
     }
 
-    public function testOutputCapIsAQuarterOfFreeMemoryWhenSmaller(): void
+    public function testOutputFitsHonoursTheCapWithoutAMemoryLimit(): void
     {
         $saved = (string) ini_get('memory_limit');
         try {
             ini_set('memory_limit', '-1');
-            $this->assertSame(Dispatcher::CGI_OUTPUT_CAP_BYTES, Dispatcher::outputCap(), 'no limit: full cap');
+            $cap = Dispatcher::CGI_OUTPUT_CAP_BYTES;
+            $this->assertTrue(Dispatcher::outputFits(0, $cap), 'exactly the cap fits');
+            $this->assertFalse(Dispatcher::outputFits($cap, 1), 'one byte past it does not');
+            $this->assertFalse(Dispatcher::outputFits(0, $cap + 1));
+        } finally {
+            ini_set('memory_limit', $saved);
+        }
+    }
 
-            ini_set('memory_limit', (string) (memory_get_usage(true) + 1024 * 1024 * 1024));
-            $this->assertSame(Dispatcher::CGI_OUTPUT_CAP_BYTES, Dispatcher::outputCap(), '1 GB free: full cap');
+    public function testOutputFitsLeavesRoomUnderAMemoryLimit(): void
+    {
+        $saved = (string) ini_get('memory_limit');
+        try {
+            $this->assertNotFalse(ini_set('memory_limit', (string) (memory_get_usage(true) + 40 * 1024 * 1024)));
+            $this->assertTrue(Dispatcher::outputFits(0, 10 * 1024 * 1024), '10 MB with 40 MB free');
+            $this->assertFalse(Dispatcher::outputFits(0, 38 * 1024 * 1024), '38 MB leaves no margin');
+        } finally {
+            ini_set('memory_limit', $saved);
+        }
+    }
 
-            $limit = memory_get_usage(true) + 40 * 1024 * 1024;
-            $this->assertNotFalse(ini_set('memory_limit', (string) $limit));
-            $before = memory_get_usage();
-            $cap = Dispatcher::outputCap();
-            $after = memory_get_usage();
-            $this->assertGreaterThanOrEqual(intdiv($limit - max($before, $after), 4), $cap, 'a quarter of what is free');
-            $this->assertLessThanOrEqual(intdiv($limit - min($before, $after), 4), $cap, 'a quarter of what is free');
+    /** Another request's buffer in the same worker counts against what is free. */
+    public function testOutputFitsCountsOtherBuffersInTheWorker(): void
+    {
+        $saved = (string) ini_get('memory_limit');
+        try {
+            $this->assertNotFalse(ini_set('memory_limit', (string) (memory_get_usage(true) + 40 * 1024 * 1024)));
+            $this->assertTrue(Dispatcher::outputFits(0, 20 * 1024 * 1024));
+            $other = str_repeat('o', 20 * 1024 * 1024);
+            $this->assertFalse(Dispatcher::outputFits(0, 20 * 1024 * 1024), 'not with 20 MB already buffered');
+            unset($other);
         } finally {
             ini_set('memory_limit', $saved);
         }
