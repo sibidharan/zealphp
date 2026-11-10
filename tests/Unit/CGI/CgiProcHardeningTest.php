@@ -10,6 +10,7 @@ use PHPUnit\Framework\TestCase;
 use ZealPHP\App;
 use ZealPHP\CGI\Dispatcher;
 use ZealPHP\CGI\WorkerPool;
+use ZealPHP\LogSinkRegistry;
 use ZealPHP\RequestContext;
 
 /**
@@ -268,19 +269,32 @@ final class CgiProcHardeningTest extends TestCase
             . 'head -c ' . (30 * $mb) . " /dev/zero\nsleep 1\n");
         $result = null;
         $other = null;
+        $hooks = Runtime::getHookFlags();
         Runtime::enableCoroutine(Runtime::HOOK_ALL);
         try {
             Coroutine::run(static function () use ($sh, $mb, &$result, &$other): void {
-                Coroutine::create(static function () use ($sh, &$result): void {
+                $done = new Coroutine\Channel(2);
+                Coroutine::create(static function () use ($sh, &$result, $done): void {
                     $result = Dispatcher::cgiSubprocess($sh, '/bin/sh');
+                    $done->push(true);
                 });
-                Coroutine::create(static function () use ($mb, &$other): void {
+                Coroutine::create(static function () use ($mb, &$other, $done): void {
                     Coroutine::usleep(500000); // A has buffered its output and waits
                     $other = str_repeat('o', 30 * $mb);
+                    $done->push(true);
                 });
+                $done->pop();
+                $done->pop();
+                // Logging inside this loop started an async writer coroutine
+                // that waits on its channel: close it, or the loop never ends.
+                foreach (LogSinkRegistry::$sinks as $sink) {
+                    $sink->close();
+                }
+                LogSinkRegistry::$sinks = [];
+                LogSinkRegistry::$started = [];
             });
         } finally {
-            Runtime::enableCoroutine(0);
+            Runtime::enableCoroutine($hooks);
             $other = null;
             ini_set('memory_limit', $saved);
         }

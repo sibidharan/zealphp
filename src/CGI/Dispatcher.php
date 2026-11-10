@@ -32,6 +32,16 @@ class Dispatcher
      */
     public const CGI_OUTPUT_CAP_BYTES = IPC::MAX_FRAME_BYTES;
 
+    /** Longest CGI header block accepted; the blank line must come within it. */
+    private const CGI_HEADER_CAP_BYTES = 64 * 1024;
+
+    /**
+     * Free memory needed to decode a metadata line, per byte of it. A .php
+     * file's return value arrives JSON-encoded in that line, and an array
+     * decodes to several times its JSON size; a heuristic, not a bound.
+     */
+    private const META_DECODE_FACTOR = 8;
+
     /** Memory kept free past a CGI buffer for everything else the worker does. */
     private const OUTPUT_MEMORY_MARGIN_BYTES = 4 * 1024 * 1024;
 
@@ -49,11 +59,17 @@ class Dispatcher
     public static function outputFits(int $have, int $add): bool
     {
         $size = $have + $add;
-        if ($size > self::CGI_OUTPUT_CAP_BYTES) {
-            return false;
-        }
+        return $size <= self::CGI_OUTPUT_CAP_BYTES && self::memoryAllows($size);
+    }
+
+    /**
+     * Whether $bytes more fit under memory_limit with the margin to spare,
+     * against memory_get_usage(true) (what the limit is enforced on).
+     */
+    private static function memoryAllows(int $bytes): bool
+    {
         $limit = ini_parse_quantity((string) ini_get('memory_limit'));
-        return $limit <= 0 || $limit - memory_get_usage(true) >= $size + self::OUTPUT_MEMORY_MARGIN_BYTES;
+        return $limit <= 0 || $limit - memory_get_usage(true) >= $bytes + self::OUTPUT_MEMORY_MARGIN_BYTES;
     }
 
     /**
@@ -721,7 +737,20 @@ class Dispatcher
         $streaming   = false;
         $returnValue = null;
         $hasReturn   = false;
-        $meta = json_decode(trim($metaLine), true);
+        // Decoding builds the file's return value, which can be large: check
+        // the room first. (No trim(): JSON allows the trailing newline.)
+        if (!self::memoryAllows(self::META_DECODE_FACTOR * strlen($metaLine))) {
+            self::stopScript($process);
+            foreach ([1, 2] as $fd) {
+                if (is_resource($pipes[$fd])) {
+                    fclose($pipes[$fd]);
+                }
+            }
+            proc_close($process);
+            elog("cgiSubprocess: no memory left to decode the response metadata for $path", 'error');
+            return 500;
+        }
+        $meta = json_decode($metaLine, true);
         if (is_array($meta)) {
             $statusCode = $meta['status_code'] ?? 200;
             response_set_status(is_numeric($statusCode) ? (int)$statusCode : 200);
@@ -997,7 +1026,8 @@ class Dispatcher
         while (true) {
             $nl = strpos($buf[3], "\n");
             if ($nl !== false) {
-                $meta = substr($buf[3], 0, $nl + 1);
+                // Usually the line is all there is: take it without a copy.
+                $meta = $nl + 1 === strlen($buf[3]) ? $buf[3] : substr($buf[3], 0, $nl + 1);
                 break;
             }
             if (!isset($open[3]) || microtime(true) >= $deadline) {
@@ -1264,9 +1294,11 @@ class Dispatcher
             return 500;
         }
 
-        // No header block at all. If the script produced nothing and exited
-        // non-zero, surface a 500 (mod_cgi: "malformed header from script").
-        if (FastCgiClient::splitHeaderBlock($raw) === null) {
+        // No header block within the first 64 KB. If the script produced
+        // nothing and exited non-zero, surface a 500 (mod_cgi: "malformed
+        // header from script"). Only the start is searched, so this doesn't
+        // copy the body.
+        if (FastCgiClient::splitHeaderBlock(substr($raw, 0, self::CGI_HEADER_CAP_BYTES)) === null) {
             if ($raw === '') {
                 if ($exit !== 0) {
                     elog("cgiInterpreterResponse: empty output, exit code $exit for $path", "error");
@@ -1274,7 +1306,7 @@ class Dispatcher
                 }
                 return null;
             }
-            elog("cgiInterpreterResponse: malformed CGI header (no blank line) for $path", "error");
+            elog("cgiInterpreterResponse: malformed CGI header (no blank line in the first 64 KB) for $path", "error");
             return 500;
         }
 
