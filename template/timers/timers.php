@@ -131,6 +131,6 @@ es.addEventListener('done', () => es.close());</code></pre>
   <code>App::tick()</code> works inside <code>onWorkerStart</code> callbacks and route handlers, but not at the global PHP scope (before the server starts).
 </div>
 
-<p>When a worker stops (server stop, reload, or <code>max_request</code> recycle), the framework cancels its recurring timers so it can exit at once. Pending <code>App::after()</code> timers still fire. Don't rely on a <code>tick()</code> to run during shutdown; flush per-worker state in <code>App::onWorkerStop()</code>.</p>
+<p>When a worker stops (server stop, reload, or <code>max_request</code> recycle), the framework cancels its recurring timers so it can exit at once. Pending <code>App::after()</code> timers still fire. A tick doesn't run again once its worker is stopping, so a request waiting for its next run won't see it; don't rely on a <code>tick()</code> during shutdown, and flush per-worker state in <code>App::onWorkerStop()</code>.</p>
 </div>
 </section>
