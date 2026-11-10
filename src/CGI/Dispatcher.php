@@ -32,26 +32,47 @@ class Dispatcher
      */
     public const CGI_OUTPUT_CAP_BYTES = IPC::MAX_FRAME_BYTES;
 
-    /** Floor for outputCap(), so a nearly full worker still serves small responses. */
-    private const MIN_OUTPUT_CAP_BYTES = 1024 * 1024;
+    /** Memory kept free past a CGI buffer for everything else the worker does. */
+    private const OUTPUT_MEMORY_MARGIN_BYTES = 4 * 1024 * 1024;
 
     /**
-     * The output cap in effect for the next CGI response: CGI_OUTPUT_CAP_BYTES,
-     * lowered to a quarter of the memory still free under memory_limit when
-     * that is smaller (never below 1 MB). Buffering a response briefly needs
-     * about three times its size (the buffer, its regrowth, the header/body
-     * split), so a fixed 64 MB cap under the default 128 MB limit let a large
-     * CGI response kill the worker with a fatal error instead of failing with
-     * 500. No memory_limit (-1) keeps the full cap.
+     * Whether a CGI response buffer of $have bytes may take $add more: it must
+     * stay within CGI_OUTPUT_CAP_BYTES and, under a memory_limit, leave room
+     * to copy it (growing a string, then splitting headers from the body)
+     * plus a margin. Checked before every append against the memory actually
+     * in use (memory_get_usage(true), what memory_limit is enforced on), so
+     * other requests' buffers in the same worker count too. Past this, the
+     * request fails with 500 instead of the worker dying with a fatal error.
+     *
+     * @internal
      */
-    public static function outputCap(): int
+    public static function outputFits(int $have, int $add): bool
     {
-        $limit = ini_parse_quantity((string) ini_get('memory_limit'));
-        if ($limit <= 0) {
-            return self::CGI_OUTPUT_CAP_BYTES;
+        $size = $have + $add;
+        if ($size > self::CGI_OUTPUT_CAP_BYTES) {
+            return false;
         }
-        $quarterOfFree = intdiv($limit - memory_get_usage(), 4);
-        return max(self::MIN_OUTPUT_CAP_BYTES, min(self::CGI_OUTPUT_CAP_BYTES, $quarterOfFree));
+        $limit = ini_parse_quantity((string) ini_get('memory_limit'));
+        return $limit <= 0 || $limit - memory_get_usage(true) >= $size + self::OUTPUT_MEMORY_MARGIN_BYTES;
+    }
+
+    /**
+     * Stop a CGI child: SIGTERM, up to 5 s to exit, then SIGKILL. Call before
+     * proc_close(), which otherwise waits for the child to exit on its own.
+     *
+     * @param resource $process
+     */
+    private static function stopScript($process): void
+    {
+        proc_terminate($process, 15);
+        $killDeadline = microtime(true) + 5.0;
+        while (microtime(true) < $killDeadline) {
+            if (!proc_get_status($process)['running']) {
+                return;
+            }
+            usleep(50000);
+        }
+        proc_terminate($process, 9);
     }
 
     /** Most stderr kept per CGI request for the log; the rest is read and dropped. */
@@ -648,6 +669,20 @@ class Dispatcher
         $metaLine = $early['meta'];
         $stderrRemainder = $early['stderr'];
         $bodyHead = $early['stdout'];
+        if ($early['overflow']) {
+            self::stopScript($process);
+            foreach ([1, 2, 3] as $fd) {
+                if (is_resource($pipes[$fd])) {
+                    fclose($pipes[$fd]);
+                }
+            }
+            proc_close($process);
+            if ($stderrRemainder !== '') {
+                elog("[cgi_worker] stderr: " . rtrim($stderrRemainder), "cgi_worker");
+            }
+            elog("cgiSubprocess: output before the response metadata is too large for $path", 'error');
+            return 500;
+        }
         if ($metaLine === '') {
             // Subprocess timed out or died without metadata — kill it.
             proc_terminate($process, 15); // SIGTERM
@@ -756,7 +791,10 @@ class Dispatcher
                 foreach ($read as $stream) {
                     $chunk = fread($stream, 65536);
                     if ($chunk === false || $chunk === '') { continue; }
-                    if ($stream === $pipes[2]) { $stderrRemainder .= $chunk; continue; }
+                    if ($stream === $pipes[2]) {
+                        if (strlen($stderrRemainder) < self::DIAG_CAP_BYTES) { $stderrRemainder .= $chunk; }
+                        continue;
+                    }
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     if (!$g->openswoole_response->isWritable()) { break 2; }
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
@@ -765,7 +803,7 @@ class Dispatcher
             }
             // Grab any stderr tail the child flushed as it exited (non-blocking).
             while (($chunk = fread($pipes[2], 65536)) !== false && $chunk !== '') {
-                $stderrRemainder .= $chunk;
+                if (strlen($stderrRemainder) < self::DIAG_CAP_BYTES) { $stderrRemainder .= $chunk; }
             }
             fclose($pipes[1]);
             fclose($pipes[2]);
@@ -794,11 +832,11 @@ class Dispatcher
         $body = $bodyHead;
         $open = [1 => $pipes[1], 2 => $pipes[2]];
         $drainDeadline = microtime(true) + App::$cgi_timeout;
-        $cap = self::outputCap();
         $overCap = false;
+        $drainTimedOut = false;
         while ($open !== []) {
             if (microtime(true) >= $drainDeadline) {
-                elog("cgiSubprocess: stdout/stderr drain timeout after " . App::$cgi_timeout . "s for $path", "error");
+                $drainTimedOut = true;
                 break;
             }
             $read = array_values($open);
@@ -816,7 +854,7 @@ class Dispatcher
                     continue;
                 }
                 if ($fd === 1) {
-                    if (strlen($body) + strlen($chunk) > $cap) {
+                    if (!self::outputFits(strlen($body), strlen($chunk))) {
                         $overCap = true;
                         break 2;
                     }
@@ -826,18 +864,20 @@ class Dispatcher
                 }
             }
         }
-        if ($overCap) {
-            // Stop the script first: it may be blocked writing to the pipe,
-            // and proc_close() would wait for it.
-            proc_terminate($process, 9);
+        if ($overCap || $drainTimedOut) {
+            // Stop the script first: proc_close() would wait for it to exit,
+            // and an over-cap script may be blocked writing to the pipe.
+            self::stopScript($process);
         }
         foreach ($open as $stream) { @fclose($stream); }
         proc_close($process);
         if ($stderrRemainder !== '') {
             elog("[cgi_worker] stderr: " . rtrim($stderrRemainder), "cgi_worker");
         }
-        if ($overCap) {
-            elog("cgiSubprocess: output exceeds $cap bytes for $path", 'error');
+        if ($overCap || $drainTimedOut) {
+            elog($overCap
+                ? "cgiSubprocess: output too large for $path"
+                : "cgiSubprocess: stdout/stderr drain timeout after " . App::$cgi_timeout . "s for $path", 'error');
             return 500;
         }
 
@@ -932,11 +972,12 @@ class Dispatcher
     /**
      * Wait for cgi_worker.php's metadata line on fd 3, draining stdout and
      * stderr meanwhile (C7). Returns the line ('' on timeout or when fd 3
-     * closed without one), the stdout read so far (the start of the body), and
-     * the stderr read so far.
+     * closed without one), the stdout read so far (the start of the body), the
+     * stderr read so far, and whether stdout or fd 3 outgrew outputFits() (the
+     * caller then stops the script and fails the request).
      *
      * @param array<int,resource> $pipes
-     * @return array{meta:string, stdout:string, stderr:string}
+     * @return array{meta:string, stdout:string, stderr:string, overflow:bool}
      */
     private static function readCgiMetaLine(array $pipes, float $deadline): array
     {
@@ -947,8 +988,7 @@ class Dispatcher
         }
         $buf = [1 => '', 2 => '', 3 => ''];
         $meta = '';
-        $outCap = self::outputCap();
-        $full = [];
+        $overflow = false;
         while (true) {
             $nl = strpos($buf[3], "\n");
             if ($nl !== false) {
@@ -976,18 +1016,22 @@ class Dispatcher
                     }
                     continue;
                 }
-                // Past the cap the stream is still drained but nothing more is
-                // kept, so the kept bytes are always a prefix (no gaps).
-                $cap = $fd === 2 ? self::DIAG_CAP_BYTES : $outCap;
-                if (isset($full[$fd]) || strlen($buf[$fd]) + strlen($data) > $cap) {
-                    $full[$fd] = true;
+                if ($fd === 2) {
+                    // stderr is for the log: keep a prefix, drain the rest.
+                    if (strlen($buf[2]) < self::DIAG_CAP_BYTES) {
+                        $buf[2] .= $data;
+                    }
                     continue;
+                }
+                if (!self::outputFits(strlen($buf[$fd]), strlen($data))) {
+                    $overflow = true;
+                    break 2;
                 }
                 $buf[$fd] .= $data;
             }
         }
         @fclose($pipes[3]);
-        return ['meta' => $meta, 'stdout' => $buf[1], 'stderr' => $buf[2]];
+        return ['meta' => $meta, 'stdout' => $buf[1], 'stderr' => $buf[2], 'overflow' => $overflow];
     }
 
     /**
@@ -1127,9 +1171,9 @@ class Dispatcher
         // C10 — stderr used to be read only after stdout hit EOF, so a script
         // that wrote more than a pipe's worth (~64 KB) of warnings blocked on
         // it and the request waited out the CGI timeout. The buffered output
-        // is capped too (it was unbounded): past outputCap() the script is
-        // stopped and the request fails. The check runs before appending, so
-        // the buffer never grows past the cap.
+        // is capped too (it was unbounded): once outputFits() says no, the
+        // script is stopped and the request fails. The check runs before
+        // appending, so the buffer never grows past what memory allows.
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
         $deadline = microtime(true) + App::$cgi_timeout;
@@ -1137,7 +1181,6 @@ class Dispatcher
         $stderr = '';
         $timedOut = false;
         $overCap = false;
-        $cap = self::outputCap();
         $open = [1 => $pipes[1], 2 => $pipes[2]];
         while ($open !== []) {
             if (microtime(true) >= $deadline) {
@@ -1166,7 +1209,7 @@ class Dispatcher
                     }
                     continue;
                 }
-                if (strlen($raw) + strlen($chunk) > $cap) {
+                if (!self::outputFits(strlen($raw), strlen($chunk))) {
                     $overCap = true;
                     break 2;
                 }
@@ -1196,7 +1239,7 @@ class Dispatcher
                 elog("[cgi] (timeout) stderr: " . rtrim($stderr), "cgi");
             }
             elog($overCap
-                ? 'cgiInterpreterResponse: output exceeds ' . $cap . " bytes for $path"
+                ? "cgiInterpreterResponse: output too large for $path"
                 : 'cgiInterpreterResponse: timeout after ' . App::$cgi_timeout . "s for $path", 'error');
             return 500;
         }

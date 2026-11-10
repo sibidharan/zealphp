@@ -162,6 +162,37 @@ class CgiSubprocessTest extends TestCase
         }
     }
 
+    /** Output written before the metadata line is capped too, not cut short. */
+    public function testPhpOutputBeforeMetadataOverTheCapFails(): void
+    {
+        $saved = (string) ini_get('memory_limit');
+        $limit = memory_get_usage(true) + 48 * 1024 * 1024;
+        if (ini_set('memory_limit', (string) $limit) === false) {
+            $this->markTestSkipped('could not set memory_limit');
+        }
+        try {
+            $f = $this->fixture('early.php', "<?php\nfwrite(STDOUT, str_repeat('B', 46 * 1024 * 1024));\n");
+            $this->assertSame(500, Dispatcher::cgiSubprocess($f));
+        } finally {
+            ini_set('memory_limit', $saved);
+        }
+    }
+
+    /** A script still running when the body drain times out is stopped. */
+    public function testDrainTimeoutStopsTheScript(): void
+    {
+        $saved = App::$cgi_timeout;
+        App::$cgi_timeout = 1;
+        try {
+            $f = $this->fixture('slow.php', "<?php\necho 'x';\nflush();\nsleep(6);\n");
+            $t0 = microtime(true);
+            $this->assertSame(500, Dispatcher::cgiSubprocess($f));
+            $this->assertLessThan(5.0, microtime(true) - $t0, 'the timeout is not waited out');
+        } finally {
+            App::$cgi_timeout = $saved;
+        }
+    }
+
     public function testStderrWarningsDoNotWedgeTheResponse(): void
     {
         // error_log() writes to the child's stderr; the concurrent drain must
