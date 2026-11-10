@@ -68,10 +68,10 @@ jobs:
           php -d extension="$SO_iouring" server-set.php 2>&1 | tail -3 || true
 
       - name: "Finding 4: two event loops on the io_uring reactor"
-        shell: bash
         if: always()
         timeout-minutes: 3
         run: |
+          set +e
           for how in setAio coroutineSet; do
             echo "======== $how, 2 loops"
             strace -f -e trace=io_uring_setup -o /tmp/f4.strace php -d extension="$SO_iouring" reactor-run.php 2 "$how" 2>&1 | tail -5; echo "exit=${PIPESTATUS[0]}"
