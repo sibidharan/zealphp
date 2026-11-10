@@ -181,8 +181,46 @@ final class CgiProcHardeningTest extends TestCase
     {
         App::$cgi_timeout = 30;
         $sh = $this->file('huge.sh', "printf 'Content-Type: text/plain\\r\\n\\r\\n'\n"
-            . 'head -c ' . (Dispatcher::CGI_OUTPUT_CAP_BYTES + 1) . " /dev/zero\n");
+            . 'head -c ' . (Dispatcher::outputCap() + 1) . " /dev/zero\n");
         $this->assertSame(500, Dispatcher::cgiSubprocess($sh, '/bin/sh'));
+    }
+
+    public function testOutputCapIsAQuarterOfMemoryLimitWhenSmaller(): void
+    {
+        $saved = (string) ini_get('memory_limit');
+        try {
+            ini_set('memory_limit', '-1');
+            $this->assertSame(Dispatcher::CGI_OUTPUT_CAP_BYTES, Dispatcher::outputCap(), 'no limit: full cap');
+            ini_set('memory_limit', '4G');
+            $this->assertSame(Dispatcher::CGI_OUTPUT_CAP_BYTES, Dispatcher::outputCap(), 'large limit: full cap');
+            $limit = memory_get_usage(true) + 200 * 1024 * 1024;
+            ini_set('memory_limit', (string) $limit);
+            $this->assertSame(intdiv($limit, 4), Dispatcher::outputCap(), 'smaller limit: a quarter of it');
+        } finally {
+            ini_set('memory_limit', $saved);
+        }
+    }
+
+    /**
+     * Regression: with a 64 MB cap checked after appending, growing the buffer
+     * near the cap needs two 60+ MB blocks at once, so a parent with less than
+     * 128 MB of headroom died with a fatal error instead of returning 500.
+     */
+    public function testOverCapOutputUnderAMemoryLimitFailsWithoutAFatal(): void
+    {
+        App::$cgi_timeout = 30;
+        $saved = (string) ini_get('memory_limit');
+        $limit = memory_get_usage(true) + 96 * 1024 * 1024;
+        if (ini_set('memory_limit', (string) $limit) === false) {
+            $this->markTestSkipped('could not set memory_limit');
+        }
+        try {
+            $sh = $this->file('huge-limited.sh', "printf 'Content-Type: text/plain\\r\\n\\r\\n'\n"
+                . 'head -c ' . (Dispatcher::CGI_OUTPUT_CAP_BYTES + 1) . " /dev/zero\n");
+            $this->assertSame(500, Dispatcher::cgiSubprocess($sh, '/bin/sh'));
+        } finally {
+            ini_set('memory_limit', $saved);
+        }
     }
 
     // ── C11 ───────────────────────────────────────────────────────────────
