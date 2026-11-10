@@ -1,6 +1,6 @@
 # The components public API. Generated; see tests/Unit/Component/PublicApiLockTest.php.
 
-#[Attribute(4)] final class ZealPHP\Component\Action
+#[Attribute(TARGET_METHOD)] final class ZealPHP\Component\Action
 
 abstract class ZealPHP\Component\Component
   const ENDPOINT = '/_zeal/c'
@@ -72,14 +72,14 @@ class ZealPHP\Component\HtmxBinder extends ZealPHP\Component\FormBinder
   public function rootAttributes(ZealPHP\Component\Component $component, ?string $submitUrl): array
   public function triggerField(array $server): ?string
 
-#[Attribute(8)] final class ZealPHP\Component\Model
+#[Attribute(TARGET_PROPERTY)] final class ZealPHP\Component\Model
   public readonly string $rules
   public readonly bool $live
   public readonly bool $blur
   public readonly int $debounce
   public function __construct(promoted string $rules = '', promoted bool $live = false, promoted bool $blur = false, promoted int $debounce = 300)
 
-#[Attribute(68)] final class ZealPHP\Component\On
+#[Attribute(TARGET_METHOD|IS_REPEATABLE)] final class ZealPHP\Component\On
   public readonly array $events
   public function __construct(string ...$events)
 
@@ -88,7 +88,7 @@ enum ZealPHP\Component\Outcome
   case Invalid = 'invalid'
   case Stale = 'stale'
 
-#[Attribute(8)] final class ZealPHP\Component\Reactive
+#[Attribute(TARGET_PROPERTY)] final class ZealPHP\Component\Reactive
 
 final class ZealPHP\Component\Tester
   public function assertDispatched(string $event): self
