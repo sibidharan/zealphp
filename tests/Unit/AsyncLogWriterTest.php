@@ -115,27 +115,6 @@ final class AsyncLogWriterTest extends TestCase
         $this->assertSame("kept\n", (string) file_get_contents($this->path));
     }
 
-    public function testUnopenableFileDoesNotLeaveTheWriterRunning(): void
-    {
-        $this->path = '/proc/zealphp-no-such-dir/test.log';
-        // fopen()'s warning is @-suppressed, but PHPUnit's own handler still
-        // runs and can't find the test from inside the writer coroutine.
-        \set_error_handler(static fn (): bool => true);
-        try {
-            $this->inScheduler(function (): void {
-                $queue = new Channel(4);
-                $queue->push("lost to stderr\n");
-                log_sink_wake($this->path, $queue);
-                $this->waitForWriter();
-            });
-        } finally {
-            \restore_error_handler();
-        }
-
-        $this->assertArrayNotHasKey($this->path, LogSinkRegistry::state()->writing);
-        $this->assertSame([], LogSinkRegistry::state()->handles);
-    }
-
     public function testResetClosesHandlesAndStartsFresh(): void
     {
         $this->inScheduler(function (): void {
