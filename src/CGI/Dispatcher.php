@@ -32,6 +32,19 @@ class Dispatcher
      */
     public const CGI_OUTPUT_CAP_BYTES = IPC::MAX_FRAME_BYTES;
 
+    /**
+     * The output cap in effect: CGI_OUTPUT_CAP_BYTES, lowered to a quarter of
+     * memory_limit when that is smaller. Buffering a response briefly needs
+     * about three times its size (the buffer, its regrowth, the header/body
+     * split), so a 64 MB cap under the default 128 MB limit let a large CGI
+     * response kill the worker with a fatal error instead of failing with 500.
+     */
+    public static function outputCap(): int
+    {
+        $limit = ini_parse_quantity((string) ini_get('memory_limit'));
+        return $limit > 0 ? min(self::CGI_OUTPUT_CAP_BYTES, intdiv($limit, 4)) : self::CGI_OUTPUT_CAP_BYTES;
+    }
+
     /** Most stderr kept per CGI request for the log; the rest is read and dropped. */
     private const DIAG_CAP_BYTES = 1024 * 1024;
 
@@ -906,6 +919,7 @@ class Dispatcher
         }
         $buf = [1 => '', 2 => '', 3 => ''];
         $meta = '';
+        $outCap = self::outputCap();
         while (true) {
             $nl = strpos($buf[3], "\n");
             if ($nl !== false) {
@@ -933,8 +947,8 @@ class Dispatcher
                     }
                     continue;
                 }
-                $cap = $fd === 2 ? self::DIAG_CAP_BYTES : self::CGI_OUTPUT_CAP_BYTES;
-                if (strlen($buf[$fd]) < $cap) {
+                $cap = $fd === 2 ? self::DIAG_CAP_BYTES : $outCap;
+                if (strlen($buf[$fd]) + strlen($data) <= $cap) {
                     $buf[$fd] .= $data;
                 }
             }
@@ -1080,8 +1094,9 @@ class Dispatcher
         // C10 — stderr used to be read only after stdout hit EOF, so a script
         // that wrote more than a pipe's worth (~64 KB) of warnings blocked on
         // it and the request waited out the CGI timeout. The buffered output
-        // is capped too (it was unbounded): past CGI_OUTPUT_CAP_BYTES the
-        // script is stopped and the request fails.
+        // is capped too (it was unbounded): past outputCap() the script is
+        // stopped and the request fails. The check runs before appending, so
+        // the buffer never grows past the cap.
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
         $deadline = microtime(true) + App::$cgi_timeout;
@@ -1089,6 +1104,7 @@ class Dispatcher
         $stderr = '';
         $timedOut = false;
         $overCap = false;
+        $cap = self::outputCap();
         $open = [1 => $pipes[1], 2 => $pipes[2]];
         while ($open !== []) {
             if (microtime(true) >= $deadline) {
@@ -1117,11 +1133,11 @@ class Dispatcher
                     }
                     continue;
                 }
-                $raw .= $chunk;
-                if (strlen($raw) > self::CGI_OUTPUT_CAP_BYTES) {
+                if (strlen($raw) + strlen($chunk) > $cap) {
                     $overCap = true;
                     break 2;
                 }
+                $raw .= $chunk;
             }
         }
         fclose($pipes[2]);
@@ -1147,7 +1163,7 @@ class Dispatcher
                 elog("[cgi] (timeout) stderr: " . rtrim($stderr), "cgi");
             }
             elog($overCap
-                ? 'cgiInterpreterResponse: output exceeds ' . self::CGI_OUTPUT_CAP_BYTES . " bytes for $path"
+                ? 'cgiInterpreterResponse: output exceeds ' . $cap . " bytes for $path"
                 : 'cgiInterpreterResponse: timeout after ' . App::$cgi_timeout . "s for $path", 'error');
             return 500;
         }
