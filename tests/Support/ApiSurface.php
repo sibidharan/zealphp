@@ -44,7 +44,7 @@ final class ApiSurface
             $head .= ($rc->isInterface() ? ' extends ' : ' implements ') . implode(', ', $own);
         }
         foreach ($rc->getAttributes(\Attribute::class) as $attr) {
-            $head = '#[Attribute(' . (int) ($attr->getArguments()[0] ?? \Attribute::TARGET_ALL) . ')] ' . $head;
+            $head = '#[Attribute(' . self::attributeFlags((int) ($attr->getArguments()[0] ?? \Attribute::TARGET_ALL)) . ')] ' . $head;
         }
         $lines = [$head];
 
@@ -119,6 +119,29 @@ final class ApiSurface
             }
         }
         return $bad;
+    }
+
+    /**
+     * Attribute flags by name: their values move between PHP versions
+     * (8.5 added TARGET_CONSTANT, which shifted IS_REPEATABLE).
+     */
+    private static function attributeFlags(int $flags): string
+    {
+        $targetAll = \Attribute::TARGET_ALL;
+        $names = [];
+        if (($flags & $targetAll) === $targetAll) {
+            $names[] = 'TARGET_ALL';
+        }
+        foreach ((new \ReflectionClass(\Attribute::class))->getConstants() as $name => $value) {
+            if ($name === 'TARGET_ALL' || !is_int($value) || ($flags & $value) !== $value) {
+                continue;
+            }
+            if (str_starts_with($name, 'TARGET_') && ($flags & $targetAll) === $targetAll) {
+                continue; // covered by TARGET_ALL
+            }
+            $names[] = $name;
+        }
+        return implode('|', $names);
     }
 
     private static function signature(\ReflectionMethod $m): string
