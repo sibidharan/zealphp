@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ZealPHP\Tests\Unit\CGI;
 
+use OpenSwoole\Coroutine;
+use OpenSwoole\Runtime;
 use PHPUnit\Framework\TestCase;
 use ZealPHP\App;
 use ZealPHP\CGI\Dispatcher;
@@ -246,6 +248,43 @@ final class CgiProcHardeningTest extends TestCase
         } finally {
             ini_set('memory_limit', $saved);
         }
+    }
+
+    /**
+     * Regression: two requests buffering in one worker. Every append of A
+     * fits, but while A waits for its script to exit another coroutine takes
+     * the room A's header/body split (a copy) needs. A must fail with 500, not
+     * kill the worker.
+     */
+    public function testSplitIsRecheckedAgainstOtherBuffersInTheWorker(): void
+    {
+        App::$cgi_timeout = 30;
+        $mb = 1024 * 1024;
+        $saved = (string) ini_get('memory_limit');
+        if (ini_set('memory_limit', (string) (memory_get_usage(true) + 80 * $mb)) === false) {
+            $this->markTestSkipped('could not set memory_limit');
+        }
+        $sh = $this->file('big-then-wait.sh', "printf 'Content-Type: text/plain\\r\\n\\r\\n'\n"
+            . 'head -c ' . (30 * $mb) . " /dev/zero\nsleep 1\n");
+        $result = null;
+        $other = null;
+        Runtime::enableCoroutine(Runtime::HOOK_ALL);
+        try {
+            Coroutine::run(static function () use ($sh, $mb, &$result, &$other): void {
+                Coroutine::create(static function () use ($sh, &$result): void {
+                    $result = Dispatcher::cgiSubprocess($sh, '/bin/sh');
+                });
+                Coroutine::create(static function () use ($mb, &$other): void {
+                    Coroutine::usleep(500000); // A has buffered its output and waits
+                    $other = str_repeat('o', 30 * $mb);
+                });
+            });
+        } finally {
+            Runtime::enableCoroutine(0);
+            $other = null;
+            ini_set('memory_limit', $saved);
+        }
+        $this->assertSame(500, $result);
     }
 
     // ── C11 ───────────────────────────────────────────────────────────────
