@@ -747,6 +747,9 @@ class Dispatcher
                 }
             }
             proc_close($process);
+            if ($stderrRemainder !== '') {
+                elog("[cgi_worker] stderr: " . rtrim($stderrRemainder), "cgi_worker");
+            }
             elog("cgiSubprocess: no memory left to decode the response metadata for $path", 'error');
             return 500;
         }
