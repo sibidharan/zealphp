@@ -171,7 +171,9 @@ final class AsyncLogWriterTest extends TestCase
                 $result['left'] = $queue->length();
             });
         } finally {
-            Coroutine::set(['max_coroutine' => \OPENSWOOLE_DEFAULT_MAX_CORO_NUM]);
+            // OpenSwoole's default; the OPENSWOOLE_DEFAULT_MAX_CORO_NUM constant
+            // isn't defined in every build.
+            Coroutine::set(['max_coroutine' => 100000]);
             \restore_error_handler();
         }
 
