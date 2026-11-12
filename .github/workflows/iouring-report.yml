@@ -1,0 +1,208 @@
+name: io_uring report
+
+# Re-checks each finding of the OpenSwoole io_uring bug report on a GitHub VM,
+# with no ZealPHP code: first with io_uring allowed, then with it refused
+# (kernel.io_uring_disabled=2, which makes io_uring_setup return EPERM, as in
+# a container on Docker's default seccomp profile). strace shows the real
+# syscall results. Scripts: scripts/iouring/report/.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/iouring-report.yml'
+      - 'scripts/iouring/report/**'
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: report (PHP ${{ matrix.php }}, OpenSwoole ${{ matrix.ref }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.5']
+        ref: ['v26.2.0', 'master']
+    defaults:
+      run:
+        working-directory: scripts/iouring/report
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Build OpenSwoole twice (stock, --enable-io-uring)
+        working-directory: ${{ runner.temp }}
+        env:
+          REF: ${{ matrix.ref }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev libc-ares-dev liburing-dev strace
+          case "$REF" in
+            v26.2.0) sha=25daa6c02cd183cc576ab99e83a5f3682d1da682 ;;
+            master)  sha=748bdcbf2ccb960ad06bd94d099d9ab353a165ec ;;
+          esac
+          for v in stock iouring; do
+            git clone -q https://github.com/openswoole/ext-openswoole.git "src-$v"
+            git -C "src-$v" checkout -q "$sha"
+            flags="--enable-openssl --enable-sockets --enable-http2"
+            [ "$v" = iouring ] && flags="$flags --enable-io-uring"
+            (cd "src-$v" && phpize >/dev/null && ./configure $flags >/dev/null && make -j"$(nproc)" >/dev/null)
+            echo "SO_${v}=$PWD/src-$v/modules/openswoole.so" >> "$GITHUB_ENV"
+          done
+          echo "php $(php -r 'echo PHP_VERSION;'), OpenSwoole $REF ($sha), liburing $(dpkg-query -W -f='${Version}' liburing-dev), kernel $(uname -r)"
+          echo "io_uring_disabled=$(cat /proc/sys/kernel/io_uring_disabled), ulimit -l $(ulimit -l)"
+
+      - name: "Finding 3: Server::set(['reactor_type' => ...])"
+        if: always()
+        run: |
+          php -d extension="$SO_iouring" server-set.php 2>&1 | tail -3 || true
+
+      - name: "Finding 4: two event loops on the io_uring reactor"
+        if: always()
+        timeout-minutes: 3
+        run: |
+          set +e
+          for how in setAio coroutineSet; do
+            echo "======== $how, 2 loops"
+            strace -f -e trace=io_uring_setup -o /tmp/f4.strace php -d extension="$SO_iouring" reactor-run.php 2 "$how" 2>&1 | tail -5; echo "exit=${PIPESTATUS[0]}"
+            echo "--- strace"; cut -c1-200 /tmp/f4.strace
+          done
+          echo "======== C: liburing ring init/exit x3 at 4096 entries"
+          gcc -O1 -o /tmp/ring ../ring-reinit.c -luring && /tmp/ring | head -3
+
+      - name: "Finding 5: HTTP server on the io_uring reactor"
+        if: always()
+        timeout-minutes: 6
+        run: |
+          set +e
+          for how in none setAio coroutineSet; do
+            for mode in process base; do
+              php -d extension="$SO_iouring" server.php "$mode" "$how" >/tmp/f5.log 2>&1 &
+              pid=$!
+              for i in $(seq 1 20); do ss -ltn | grep -q ':19501 ' && break; sleep 0.25; done
+              code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:19501/); rc=$?
+              rings=0; for p in $pid $(pgrep -P $pid) $(for c in $(pgrep -P $pid); do pgrep -P $c; done); do
+                rings=$((rings + $(ls -l /proc/$p/fd 2>/dev/null | grep -c io_uring))); done
+              echo "reactor=$how mode=$mode: curl rc=$rc http=$code, io_uring fds in server tree=$rings"
+              if [ "$how" = setAio ] && [ "$mode" = process ]; then
+                echo "--- strace of the server tree during one more request"
+                tids=""; for p in $pid $(pgrep -P $pid) $(for c in $(pgrep -P $pid); do pgrep -P $c; done); do tids="$tids -p $p"; done
+                timeout 4 sudo strace -f $tids -e trace=io_uring_enter,accept4,epoll_wait,read,recvfrom -o /tmp/f5.strace 2>/dev/null &
+                sleep 1; curl -s -m 2 -o /dev/null http://127.0.0.1:19501/; sleep 3
+                echo "syscall counts:"; grep -oE '^[0-9]+ +[a-z_0-9]+\(' /tmp/f5.strace | sed -E 's/^[0-9]+ +//' | sort | uniq -c
+                echo "io_uring_enter results:"; grep io_uring_enter /tmp/f5.strace | grep -oE '= -?[0-9]+( [A-Z]+)?' | sort | uniq -c
+                echo "accept4:"; grep -m3 accept4 /tmp/f5.strace | cut -c1-160
+              fi
+              kill -9 $pid $(pgrep -P $pid) $(for c in $(pgrep -P $pid); do pgrep -P $c; done) 2>/dev/null; wait $pid 2>/dev/null
+              grep -v '^\s*$' /tmp/f5.log | head -3
+              sleep 0.5
+            done
+          done
+
+      - name: Refuse io_uring (kernel.io_uring_disabled=2)
+        if: always()
+        working-directory: ${{ runner.temp }}
+        run: |
+          sudo sysctl -w kernel.io_uring_disabled=2
+          python3 -c "import ctypes,os; l=ctypes.CDLL(None,use_errno=True); p=ctypes.create_string_buffer(120); r=l.syscall(425,8,p); print('io_uring_setup:', r, os.strerror(ctypes.get_errno()) if r<0 else 'ok')"
+
+      - name: "Finding 1: file I/O engine with io_uring refused"
+        if: always()
+        run: |
+          for v in stock iouring; do
+            so=$(eval echo "\$SO_$v")
+            for round in 1 2 3; do
+              php -d extension="$so" fileops.php 2000 >/tmp/f1.out 2>/tmp/f1.err
+              echo "$v round $round: $(grep RESULT /tmp/f1.err) stdout-warnings=$(grep -c WARNING /tmp/f1.out) stderr-warnings=$(grep -c WARNING /tmp/f1.err)"
+            done
+          done
+          echo "--- distinct warnings (io_uring build)"; sort /tmp/f1.out | uniq -c | sort -rn | head -4 | cut -c1-200
+          echo "--- io_uring_setup calls in one io_uring-build run"
+          strace -f -c -e trace=io_uring_setup php -d extension="$SO_iouring" fileops.php 200 >/dev/null 2>/tmp/f1.strace; grep -E 'io_uring_setup|calls' /tmp/f1.strace
+
+      - name: "Finding 2: io_uring reactor with io_uring refused"
+        if: always()
+        timeout-minutes: 3
+        run: |
+          set +e
+          echo "======== io_uring build, Coroutine::run"
+          strace -f -e trace=io_uring_setup -o /tmp/f2.strace php -d extension="$SO_iouring" reactor-run.php 1 2>&1 | tail -4; echo "exit=${PIPESTATUS[0]}"
+          echo "--- strace"; cut -c1-200 /tmp/f2.strace
+          echo "======== stock build, same script"
+          php -d extension="$SO_stock" -r 'echo "OPENSWOOLE_IO_URING defined: ", var_export(defined("OPENSWOOLE_IO_URING"), true), "\n";'
+          php -d extension="$SO_stock" -r 'OpenSwoole\Util::setAio(["reactor_type" => 1]); OpenSwoole\Coroutine::run(fn() => OpenSwoole\Coroutine::usleep(100)); echo "RESULT loop ran\n";' 2>&1 | tail -3
+          echo "======== io_uring build, HTTP server"
+          timeout 10 php -d extension="$SO_iouring" server.php process setAio > /tmp/f2s.log 2>&1; echo "exit=$?"
+          grep -v '^\s*$' /tmp/f2s.log | cut -c1-200 | sort | uniq -c | head -8
+
+      - name: Restore io_uring
+        if: always()
+        run: sudo sysctl -w kernel.io_uring_disabled=0
+
+  finding4:
+    name: finding 4 (what makes the second reactor fail)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: scripts/iouring
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Build OpenSwoole v26.2.0 with io_uring, two flag sets
+        working-directory: ${{ runner.temp }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev libc-ares-dev liburing-dev strace
+          for v in min full; do
+            git clone -q --depth 1 --branch v26.2.0 https://github.com/openswoole/ext-openswoole.git "src-$v"
+            flags="--enable-openssl --enable-sockets --enable-http2 --enable-io-uring"
+            [ "$v" = full ] && flags="$flags --enable-hook-curl --enable-mysqlnd"
+            (cd "src-$v" && phpize >/dev/null && ./configure $flags >/dev/null && make -j"$(nproc)" >/dev/null)
+            echo "SO_${v}=$PWD/src-$v/modules/openswoole.so" >> "$GITHUB_ENV"
+          done
+
+      - name: Old script vs new script, both builds
+        if: always()
+        timeout-minutes: 5
+        run: |
+          set +e
+          for v in min full; do
+            so=$(eval echo "\$SO_$v")
+            echo "######## build=$v repro-loop.php 3"
+            strace -f -e trace=io_uring_setup,io_uring_register -o /tmp/a.st php -d extension="$so" repro-loop.php 3 2>&1 | tail -4; echo "exit=${PIPESTATUS[0]}"
+            cut -c1-170 /tmp/a.st | grep -v '+++'
+            echo "######## build=$v report/reactor-run.php 3"
+            strace -f -e trace=io_uring_setup,io_uring_register -o /tmp/b.st php -d extension="$so" report/reactor-run.php 3 2>&1 | tail -4; echo "exit=${PIPESTATUS[0]}"
+            cut -c1-170 /tmp/b.st | grep -v '+++'
+          done
+
+      - name: Minimal variants (build=full)
+        if: always()
+        timeout-minutes: 5
+        run: |
+          set +e
+          run() { echo "######## $1"; strace -f -e trace=io_uring_setup -o /tmp/c.st php -d extension="$SO_full" -r "$2" 2>&1 | tail -3; echo "exit=${PIPESTATUS[0]}"; grep -c io_uring_setup /tmp/c.st; grep -- '= -1' /tmp/c.st | cut -c1-170; }
+          base='OpenSwoole\Util::setAio(["reactor_type" => OPENSWOOLE_IO_URING]);'
+          run "two runs" "$base OpenSwoole\Coroutine::run(fn() => OpenSwoole\Coroutine::usleep(100)); OpenSwoole\Coroutine::run(fn() => OpenSwoole\Coroutine::usleep(100)); echo \"ok\\n\";"
+          run "glob /proc/self/fd between" "$base OpenSwoole\Coroutine::run(fn() => OpenSwoole\Coroutine::usleep(100)); glob('/proc/self/fd/*'); OpenSwoole\Coroutine::run(fn() => OpenSwoole\Coroutine::usleep(100)); echo \"ok\\n\";"
+          run "try/catch closure" "$base for (\$i = 0; \$i < 2; \$i++) { try { OpenSwoole\Coroutine::run(static function (): void { OpenSwoole\Coroutine::usleep(100); }); } catch (Throwable \$e) { echo \$e->getMessage(); } } echo \"ok\\n\";"

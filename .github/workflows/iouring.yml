@@ -1,0 +1,317 @@
+name: io_uring
+
+# Runs ZealPHP on OpenSwoole built with --enable-io-uring, on a GitHub VM
+# (Docker containers on the default seccomp profile refuse io_uring, so this
+# can't run in a container). Informational: not a required check.
+#   baseline     stock OpenSwoole (epoll, thread-pool file I/O)
+#   file-engine  io_uring build, default reactor: hooked file I/O uses io_uring
+#   reactor      io_uring build + reactor_type=OPENSWOOLE_IO_URING everywhere
+# The throughput job runs all three on ONE runner, alternating, because
+# runner-to-runner variance (~40%) swamps any difference between jobs.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * 1'
+  pull_request:
+    paths:
+      - '.github/workflows/iouring.yml'
+      - 'scripts/iouring/**'
+
+permissions:
+  contents: read
+
+jobs:
+  correctness:
+    name: io_uring (${{ matrix.mode }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [baseline, file-engine, reactor]
+
+    services:
+      valkey:
+        image: valkey/valkey:7-alpine
+        ports:
+          - 16379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      memcached:
+        image: memcached:1.6-alpine
+        ports:
+          - 11211:11211
+        options: >-
+          --health-cmd "nc -z localhost 11211 || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+          MARIADB_DATABASE: zealtest
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check the kernel allows io_uring
+        run: |
+          uname -r
+          echo "kernel.io_uring_disabled=$(cat /proc/sys/kernel/io_uring_disabled 2>/dev/null || echo n/a)"
+          python3 scripts/iouring/probe.py
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.3'
+          extensions: uopz, redis, memcached, mysqli
+          coverage: none
+          tools: composer:v2
+
+      - name: Build OpenSwoole v26.2.0, with and without io_uring
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev libc-ares-dev liburing-dev apache2-utils
+          src="$RUNNER_TEMP/ext-openswoole"
+          git clone --depth 1 --branch v26.2.0 https://github.com/openswoole/ext-openswoole.git "$src"
+          cd "$src"
+          test "$(git rev-parse 'HEAD^{commit}')" = 25daa6c02cd183cc576ab99e83a5f3682d1da682 || { echo "::error::openswoole v26.2.0 moved"; exit 1; }
+          base="--enable-openssl --enable-hook-curl --enable-http2 --enable-mysqlnd --enable-sockets"
+          for v in stock uring; do
+            git clean -fdxq
+            flags="$base"; [ "$v" = uring ] && flags="$flags --enable-io-uring"
+            phpize >/dev/null && ./configure $flags >/dev/null && make -j"$(nproc)" >/dev/null
+            cp modules/openswoole.so "$RUNNER_TEMP/openswoole-$v.so"
+          done
+          echo "OPENSWOOLE_SRC=$src" >> "$GITHUB_ENV"
+          php -d extension=$RUNNER_TEMP/openswoole-uring.so --ri openswoole | grep -iE '^version|io_uring'
+
+      - name: Build ext-zealphp
+        run: |
+          git submodule update --init ext/zealphp
+          cd ext/zealphp
+          phpize >/dev/null && ./configure --enable-zealphp >/dev/null && make -j"$(nproc)" >/dev/null
+          cp modules/zealphp.so "$RUNNER_TEMP/zealphp.so"
+          echo "ZEALPHP_SO=$RUNNER_TEMP/zealphp.so" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          # composer runs PHP without OpenSwoole; the platform check needs it declared.
+          composer install --no-interaction --prefer-dist --ignore-platform-req=ext-openswoole
+
+      - name: Load the build for this mode into every PHP process
+        run: |
+          ini_dir=$(php -i | awk -F'=> ' '/Scan this dir for additional .ini files/ {print $2}' | head -1 | tr -d ' ')
+          so=openswoole-uring.so; [ "${{ matrix.mode }}" = baseline ] && so=openswoole-stock.so
+          echo "extension=$RUNNER_TEMP/$so" | sudo tee "$ini_dir/30-openswoole.ini"
+          echo "extension=$ZEALPHP_SO" | sudo tee "$ini_dir/50-zealphp.ini"
+          if [ "${{ matrix.mode }}" = reactor ]; then
+            echo "auto_prepend_file=$GITHUB_WORKSPACE/scripts/iouring/reactor-prepend.php" | sudo tee "$ini_dir/99-iouring-reactor.ini"
+          fi
+          php --ri openswoole | grep -iE '^version|io_uring' || true
+          php -r 'OpenSwoole\Coroutine::run(fn() => print("event loop ok\n"));'
+
+      - name: OpenSwoole's own io_uring tests
+        if: matrix.mode != 'baseline'
+        continue-on-error: true
+        working-directory: ${{ env.OPENSWOOLE_SRC }}/tests
+        # Their runner, not start.sh (it kills every .php process); PHPT=1 is
+        # the guard their skipif checks.
+        run: PHPT=1 php -d memory_limit=1024m ./run-tests openswoole_io_uring 2>&1 | grep -vE '^(PASS|SKIP) ' | tail -40
+
+      - name: Start ZealPHP
+        env:
+          ZEALPHP_SKIP_DOCS_BUILD: '1'
+          ZEALPHP_TEST_ROUTES: '1'
+        run: |
+          export ZEALPHP_APP_KEY="base64:$(php -r 'echo base64_encode(random_bytes(32));')"
+          php app.php >/tmp/zealphp-server.log 2>&1 &
+          echo $! > /tmp/zealphp-server.pid
+          for i in $(seq 1 30); do
+            curl -fsS -m 5 http://127.0.0.1:8080/ >/dev/null && exit 0
+            sleep 1
+          done
+          echo "Server failed to start"; cat /tmp/zealphp-server.log; exit 1
+
+      - name: Run tests (before any load)
+        run: ./vendor/bin/phpunit
+
+      - name: io_uring evidence
+        if: always()
+        run: sh scripts/iouring/evidence.sh | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Load probe (where does it stop answering?)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          bash scripts/iouring/bench.sh "${{ matrix.mode }}" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "--- server log tail"; tail -30 /tmp/zealphp-server.log
+
+  repro:
+    name: io_uring reactor repro (no ZealPHP)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check the kernel allows io_uring
+        run: python3 scripts/iouring/probe.py
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Build OpenSwoole v26.2.0 with io_uring
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev libc-ares-dev liburing-dev apache2-utils
+          src="$RUNNER_TEMP/ext-openswoole"
+          git clone --depth 1 --branch v26.2.0 https://github.com/openswoole/ext-openswoole.git "$src"
+          cd "$src"
+          test "$(git rev-parse 'HEAD^{commit}')" = 25daa6c02cd183cc576ab99e83a5f3682d1da682 || exit 1
+          phpize >/dev/null && ./configure --enable-openssl --enable-hook-curl --enable-http2 --enable-mysqlnd --enable-sockets --enable-io-uring >/dev/null && make -j"$(nproc)" >/dev/null
+          ini_dir=$(php -i | awk -F'=> ' '/Scan this dir for additional .ini files/ {print $2}' | head -1 | tr -d ' ')
+          echo "extension=$src/modules/openswoole.so" | sudo tee "$ini_dir/30-openswoole.ini"
+          echo "OPENSWOOLE_SRC=$src" >> "$GITHUB_ENV"
+
+      - name: Ring re-init in C (liburing's real error)
+        if: always()
+        run: |
+          echo "ulimit -l: $(ulimit -l)"; uname -r
+          gcc -O1 -o /tmp/ring-reinit scripts/iouring/ring-reinit.c -luring
+          /tmp/ring-reinit; /tmp/ring-reinit 200000
+
+      - name: Sequential event loops (second reactor?)
+        if: always()
+        timeout-minutes: 5
+        run: |
+          echo "--- back to back"; php scripts/iouring/repro-loop.php 300 2>&1 | tail -8 || true
+          echo "--- 200 ms between loops"; php scripts/iouring/repro-loop.php 20 200000 2>&1 | tail -8 || true
+
+      - name: Plain OpenSwoole server under ab -c 64 (wedge?)
+        if: always()
+        timeout-minutes: 5
+        run: |
+          set +e
+          php scripts/iouring/repro-server.php >/tmp/raw.log 2>&1 &
+          echo $! > /tmp/raw.pid
+          for i in $(seq 1 20); do curl -fsS -m 2 http://127.0.0.1:19501/ >/dev/null 2>&1 && break; sleep 0.5; done
+          for shape in "-c 1 -k" "-c 64" "-c 64 -k" "-c 64"; do
+            out=$(ab -q -s 10 $shape -n 3000 http://127.0.0.1:19501/ 2>&1); rc=$?
+            alive=$(curl -fsS -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:19501/ 2>/dev/null || echo dead)
+            echo "raw [$shape] rc=$rc rps=$(echo "$out" | awk '/Requests per second/ {print $4}') $(echo "$out" | grep -E 'Total of' | head -1) after=$alive"
+          done
+          echo "--- server processes and their rings"
+          for p in $(cat /tmp/raw.pid) $(pgrep -P "$(cat /tmp/raw.pid)"); do echo "pid $p rings=$(ls -l /proc/$p/fd 2>/dev/null | grep -c io_uring)"; done
+          echo "--- listen sockets"; ss -ltnp 2>/dev/null | grep 19501
+          echo "--- server log"; tail -20 /tmp/raw.log
+          kill -9 $(cat /tmp/raw.pid) $(pgrep -P "$(cat /tmp/raw.pid)") 2>/dev/null || true
+
+      - name: OpenSwoole's own io_uring tests (show why they fail)
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ env.OPENSWOOLE_SRC }}/tests
+        run: |
+          # Their bootstrap needs the test library's composer deps.
+          (cd include/lib && composer install -q --no-interaction --ignore-platform-reqs) || true
+          PHPT=1 php -d memory_limit=1024m ./run-tests openswoole_io_uring > /tmp/phpt.txt 2>&1 || true
+          grep -E '^(FAIL|PASS|SKIP)' /tmp/phpt.txt | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-140
+          grep -E '^Tests (passed|failed|skipped)' /tmp/phpt.txt
+          for t in coroutine file_put_get http_server; do
+            echo "======== $t.out"; head -c 1500 openswoole_io_uring/$t.out 2>/dev/null
+            echo; echo "======== $t.diff"; head -c 1500 openswoole_io_uring/$t.diff 2>/dev/null; echo
+          done
+
+  throughput:
+    name: io_uring throughput (one runner, alternating)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check the kernel allows io_uring
+        run: |
+          uname -r
+          echo "kernel.io_uring_disabled=$(cat /proc/sys/kernel/io_uring_disabled 2>/dev/null || echo n/a)"
+          python3 scripts/iouring/probe.py
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.3'
+          extensions: uopz, redis, memcached, mysqli
+          coverage: none
+          tools: composer:v2
+
+      - name: Build OpenSwoole v26.2.0, with and without io_uring
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev libc-ares-dev liburing-dev apache2-utils
+          src="$RUNNER_TEMP/ext-openswoole"
+          git clone --depth 1 --branch v26.2.0 https://github.com/openswoole/ext-openswoole.git "$src"
+          cd "$src"
+          test "$(git rev-parse 'HEAD^{commit}')" = 25daa6c02cd183cc576ab99e83a5f3682d1da682 || { echo "::error::openswoole v26.2.0 moved"; exit 1; }
+          base="--enable-openssl --enable-hook-curl --enable-http2 --enable-mysqlnd --enable-sockets"
+          for v in stock uring; do
+            git clean -fdxq
+            flags="$base"; [ "$v" = uring ] && flags="$flags --enable-io-uring"
+            phpize >/dev/null && ./configure $flags >/dev/null && make -j"$(nproc)" >/dev/null
+            cp modules/openswoole.so "$RUNNER_TEMP/openswoole-$v.so"
+          done
+          echo "OPENSWOOLE_SRC=$src" >> "$GITHUB_ENV"
+          php -d extension=$RUNNER_TEMP/openswoole-uring.so --ri openswoole | grep -iE '^version|io_uring'
+
+      - name: Build ext-zealphp
+        run: |
+          git submodule update --init ext/zealphp
+          cd ext/zealphp
+          phpize >/dev/null && ./configure --enable-zealphp >/dev/null && make -j"$(nproc)" >/dev/null
+          cp modules/zealphp.so "$RUNNER_TEMP/zealphp.so"
+          echo "ZEALPHP_SO=$RUNNER_TEMP/zealphp.so" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          # composer runs PHP without OpenSwoole; the platform check needs it declared.
+          composer install --no-interaction --prefer-dist --ignore-platform-req=ext-openswoole
+
+      - name: Alternate stock / file-engine / reactor, 3 rounds
+        timeout-minutes: 20
+        env:
+          ZEALPHP_SKIP_DOCS_BUILD: '1'
+        run: |
+          for round in 1 2 3; do
+            for v in stock file-engine reactor; do
+              so=$RUNNER_TEMP/openswoole-uring.so; [ $v = stock ] && so=$RUNNER_TEMP/openswoole-stock.so
+              mode=""; [ $v = reactor ] && mode=reactor
+              if bash scripts/iouring/serve.sh start "$so" $mode; then
+                bash scripts/iouring/bench.sh "r$round $v" | tee -a /tmp/bench.txt
+              else
+                echo "r$round $v: server did not start" | tee -a /tmp/bench.txt
+              fi
+              bash scripts/iouring/serve.sh stop
+            done
+          done
+          { echo '```'; cat /tmp/bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
