@@ -11595,8 +11595,35 @@ class App
                                 || strcasecmp($hName, 'Content-Type') === 0)) {
                             continue;
                         }
-                        foreach ($hValues as $hValue) {
-                            $response->parent->header($hName, $hValue);
+                        $hValues = array_values($hValues);
+                        if (strcasecmp($hName, 'Set-Cookie') === 0) {
+                            // flush() above already emitted the cookies set
+                            // with setcookie() / header(): keep them and add
+                            // the response's own after them. A line the
+                            // response also carries (HeaderMiddleware `add`
+                            // writes to both) is sent once.
+                            $kept = [];
+                            $nativeHeaders = is_array($response->parent->header) ? $response->parent->header : [];
+                            foreach ($nativeHeaders as $nName => $nValues) {
+                                if (strcasecmp((string)$nName, 'Set-Cookie') !== 0) {
+                                    continue;
+                                }
+                                foreach (is_array($nValues) ? $nValues : [$nValues] as $nv) {
+                                    if (is_string($nv) && !in_array($nv, $hValues, true)) {
+                                        $kept[] = $nv;
+                                    }
+                                }
+                            }
+                            $hValues = array_merge($kept, $hValues);
+                        }
+                        // One call per name: OpenSwoole's scalar header()
+                        // overwrites by name, so repeated values (Link, Vary,
+                        // several Set-Cookie) go as an array, one wire line
+                        // each — the same mechanism as emitMultiHeader() (#260).
+                        if (count($hValues) === 1) {
+                            $response->parent->header($hName, $hValues[0]);
+                        } elseif ($hValues !== []) {
+                            $response->parent->header($hName, $hValues);
                         }
                     }
                     if ($forbidsBody) {
