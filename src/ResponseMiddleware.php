@@ -659,7 +659,7 @@ class ResponseMiddleware implements MiddlewareInterface
             // Apache (non-extended TraceEnable On) refuses a request body with
             // 413 — only AP_TRACE_EXTENDED echoes it, and ZealPHP's boolean knob
             // maps to the non-extended mode (http_filters.c:1082).
-            $bodyRaw = $req instanceof \ZealPHP\HTTP\Request ? $req->rawContent() : null;
+            $bodyRaw = $req instanceof \ZealPHP\HTTP\Request ? $req->parent->rawContent() : null;
             if (is_string($bodyRaw) && $bodyRaw !== '') {
                 return $app->renderError(413);
             }

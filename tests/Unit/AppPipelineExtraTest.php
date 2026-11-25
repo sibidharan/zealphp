@@ -518,6 +518,27 @@ class AppPipelineExtraTest extends TestCase
         App::traceEnabled(false);
     }
 
+    public function testTraceWithBodyRefused413(): void
+    {
+        // Apache refuses a TRACE body with 413. Uses a real parsed request:
+        // the wrapper's own rawContent() returned false, so this never fired.
+        $body = 'a=1';
+        $native = \OpenSwoole\Http\Request::create();
+        $this->assertInstanceOf(\OpenSwoole\Http\Request::class, $native);
+        $native->parse(
+            "TRACE /xtra/str HTTP/1.1\r\nHost: localhost\r\n"
+            . 'Content-Length: ' . strlen($body) . "\r\n\r\n" . $body
+        );
+        App::traceEnabled(true);
+        RequestContext::instance()->zealphp_request = new \ZealPHP\HTTP\Request($native);
+        try {
+            $this->assertSame(413, $this->dispatch('/xtra/str', 'TRACE')->getStatusCode());
+        } finally {
+            RequestContext::instance()->zealphp_request = null;
+            App::traceEnabled(false);
+        }
+    }
+
     // ── strip_trailing_slash redirect ─────────────────────────────────
 
     public function testStripTrailingSlashRedirects301(): void

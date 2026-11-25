@@ -3026,7 +3026,10 @@ class App
         if (\stripos($ct, 'application/x-www-form-urlencoded') === false) {
             return $post;
         }
-        $raw = $request->rawContent();
+        // Read the body from ->parent: the wrapper extends the native request
+        // class, so its own rawContent() is the inherited native method (not
+        // __call), runs unbound and returns false with a warning.
+        $raw = $request->parent->rawContent();
         if (!\is_string($raw) || $raw === '') {
             return $post;
         }
