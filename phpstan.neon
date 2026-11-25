@@ -55,11 +55,14 @@ parameters:
         # documented mechanism for multiple same-name headers (the same path
         # multiple Set-Cookie uses). Response::emitMultiHeader() relies on that
         # array form to keep multiple Link / WWW-Authenticate / CSP appends on
-        # the wire (#260). Same ext-vs-stub category as the OpenSwoole entries
-        # above; scoped to the single call site.
+        # the wire (#260); App.php's PSR-7 response emit uses it for the same
+        # reason. Same ext-vs-stub category as the OpenSwoole entries above;
+        # scoped to those two call sites.
         -
             message: '#^Parameter \#2 \$value of method OpenSwoole\\Http\\Response::header\(\) expects string, list<string> given\.$#'
-            path: src/HTTP/Response.php
+            paths:
+                - src/HTTP/Response.php
+                - src/App.php
         # (#474) The 4 `$g->status` always-false/true ignores that used to live here
         # were removed: the request-begin reset now calls
         # App::clearRawStatusOverride($g), and PHPStan (2.2.x) no longer narrows
