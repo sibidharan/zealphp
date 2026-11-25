@@ -26,6 +26,8 @@ class ResponseMiddlewarePipelineTest extends TestCase
 {
     private static bool $routesRegistered = false;
 
+    private static int $rawGenPulled = 0;
+
     public static function setUpBeforeClass(): void
     {
         App::$cwd = ZEALPHP_ROOT;
@@ -56,6 +58,12 @@ class ResponseMiddlewarePipelineTest extends TestCase
             $app->route('/raw/inject', ['raw' => true], fn($app, $req, $res) => 'raw:' . (is_object($app) ? 'a' : '-') . (is_object($res) ? 'r' : '-'));
             $app->route('/raw/url/{id}', ['raw' => true], fn($id) => "rawurl:$id");
             $app->route('/raw/default', ['raw' => true], fn($missing = 'def') => "rawdef:$missing");
+            $app->route('/raw/gen', ['raw' => true], fn() => (function () {
+                while (self::$rawGenPulled < 1000) {
+                    self::$rawGenPulled++;
+                    yield 'r' . self::$rawGenPulled;
+                }
+            })());
 
             // run() builds the method-indexed dispatch table from $this->routes
             // (App.php ~3996). We don't boot the server, so replicate that build
@@ -317,5 +325,26 @@ class ResponseMiddlewarePipelineTest extends TestCase
         });
         $this->assertContains('g1', $captured);
         $this->assertContains('g2', $captured);
+    }
+
+    public function testRawGeneratorStopsWhenWriteFails(): void
+    {
+        // A disconnected client: write() returns false while isWritable()
+        // stays true. The raw Generator path must stop pulling the generator.
+        $fake = new class extends FakeOpenSwooleResponse {
+            public function write(string $data): bool
+            {
+                parent::write($data);
+                return false;
+            }
+        };
+        $g = RequestContext::instance();
+        $g->openswoole_response = $fake;
+        $g->zealphp_response    = new \ZealPHP\HTTP\Response($fake);
+        self::$rawGenPulled = 0;
+
+        $this->dispatch('/raw/gen');
+
+        $this->assertSame(1, self::$rawGenPulled, 'the generator must not be pulled after the failed write');
     }
 }

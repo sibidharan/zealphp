@@ -60,13 +60,101 @@ final class EmitGeneratorStreamTest extends TestCase
         $ends = array_filter($this->fake->log, fn ($e) => $e[0] === 'end');
         $this->assertCount(1, $ends, 'stream must be terminated with a clean end()');
     }
+
+    /**
+     * A client that disconnects mid-stream: write() returns false but
+     * isWritable() stays true (OpenSwoole does this). The stream must stop
+     * pulling the generator instead of running it to the end — or forever,
+     * for an endless feed — so the generator's finally block can run.
+     */
+    public function testStopsPullingGeneratorWhenWriteFails(): void
+    {
+        $this->fake->writesBeforeDisconnect = 1;
+        $pulled = 0;
+        $finallyRan = false;
+        $gen = (function () use (&$pulled, &$finallyRan) {
+            try {
+                while ($pulled < 1000) {
+                    $pulled++;
+                    yield "chunk-$pulled";
+                }
+            } finally {
+                $finallyRan = true;
+            }
+        })();
+
+        App::emitGeneratorStream($gen, 'GET');
+
+        $this->assertSame(2, $pulled, 'the generator must not be pulled after the failed write');
+        unset($gen);
+        $this->assertTrue($finallyRan, "the generator's finally must run once it is released");
+    }
+
+    /**
+     * The same when the failed write is echo output buffered between yields.
+     */
+    public function testStopsWhenBufferedEchoWriteFails(): void
+    {
+        $this->fake->writesBeforeDisconnect = 1;
+        $pulled = 0;
+        $gen = (function () use (&$pulled) {
+            while ($pulled < 1000) {
+                $pulled++;
+                echo "echo-$pulled";
+                yield '';
+            }
+        })();
+
+        App::emitGeneratorStream($gen, 'GET');
+
+        $this->assertSame(2, $pulled, 'the generator must not be pulled after the failed write');
+    }
+
+    /**
+     * An empty yield is not a disconnect: write('') returns false on a live
+     * OpenSwoole connection too, so empty chunks must be skipped rather than
+     * end the stream.
+     */
+    public function testEmptyChunksDoNotEndTheStream(): void
+    {
+        $gen = (function () {
+            yield 'a';
+            yield '';
+            yield null;
+            echo 'b';
+            yield '';
+            yield 'c';
+        })();
+
+        App::emitGeneratorStream($gen, 'GET');
+
+        $writes = array_values(array_map(
+            fn ($e) => $e[1],
+            array_filter($this->fake->log, fn ($e) => $e[0] === 'write')
+        ));
+        $this->assertSame(['a', 'b', 'c'], $writes);
+    }
 }
 
 /**
  * FakeOpenSwooleResponse plus a no-op flush() (the real one needs a socket).
+ * write() behaves like OpenSwoole's: false for an empty string, and false once
+ * the client has gone ($writesBeforeDisconnect writes) while isWritable()
+ * stays true.
  */
 final class FakeStreamResponse extends FakeOpenSwooleResponse
 {
+    public int $writesBeforeDisconnect = PHP_INT_MAX;
+
+    public function write(string $data): bool
+    {
+        if ($data === '' || $this->writesBeforeDisconnect <= 0) {
+            return false;
+        }
+        $this->writesBeforeDisconnect--;
+        return parent::write($data);
+    }
+
     public function flush(): bool
     {
         $this->log[] = ['flush'];

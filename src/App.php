@@ -1616,14 +1616,20 @@ class App
                 if (!$g->openswoole_response->isWritable()) break;
                 // Flush any echo/print buffered BEFORE this yield first, so output
                 // emitted earlier in the generator body precedes the yielded chunk.
+                // Either write() failing stops the stream: the client left, and
+                // isWritable() can stay true after a disconnect, so the check
+                // above alone would keep pulling the generator forever. Empty
+                // output is skipped — write('') returns false on a live
+                // connection too.
                 $buffered = \ob_get_contents();
                 if ($buffered !== false && $buffered !== '') {
                     \ob_clean();
+                    $out = Component\Push::spliceStream($buffered);
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->write(Component\Push::spliceStream($buffered));
+                    if ($out !== '' && $g->openswoole_response->write($out) === false) break;
                 }
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                $g->openswoole_response->write(Component\Push::spliceStream((string)$chunk));
+                if (($out = Component\Push::spliceStream((string)$chunk)) !== '' && $g->openswoole_response->write($out) === false) break;
                 // #354 — yield to the scheduler ONLY when inside a coroutine.
                 // In mixed mode (enable_coroutine=false) the handler runs outside
                 // any coroutine, so Coroutine::sleep(0) throws "API must be called

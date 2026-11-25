@@ -128,8 +128,11 @@ class ResponseMiddleware implements MiddlewareInterface
                 foreach ($object as $chunk) {
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     if (!$g->openswoole_response->isWritable()) break;
+                    // Stop once a write() fails: the client left, and isWritable()
+                    // can stay true after a disconnect. An empty chunk is skipped —
+                    // write('') returns false on a live connection too.
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->write(\ZealPHP\Component\Push::spliceStream((string)$chunk));
+                    if (($out = \ZealPHP\Component\Push::spliceStream((string)$chunk)) !== '' && $g->openswoole_response->write($out) === false) break;
                     // #354 — yield only inside a coroutine; in mixed mode
                     // (enable_coroutine=false) Coroutine::sleep(0) throws and
                     // crashes the worker (status=255) with a truncated stream.
