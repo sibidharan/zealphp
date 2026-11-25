@@ -53,6 +53,12 @@ class Client implements ClientInterface
             CURLOPT_SSL_VERIFYHOST => $this->verifySsl ? 2 : 0,
         ]);
 
+        // A HEAD response carries Content-Length but no body (RFC 9110 §9.3.2);
+        // without CURLOPT_NOBODY libcurl waits for those bytes until timeout.
+        if ($method === 'HEAD') {
+            curl_setopt($ch, CURLOPT_NOBODY, true);
+        }
+
         $headers = [];
         foreach ($request->getHeaders() as $name => $values) {
             foreach ($values as $value) {
