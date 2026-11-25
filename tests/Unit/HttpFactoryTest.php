@@ -56,6 +56,61 @@ class HttpFactoryTest extends TestCase
         @unlink($tmp);
     }
 
+    /**
+     * PSR-17: a file that can't be opened throws \RuntimeException. openswoole/core's
+     * Stream::createStreamFromFile() throws an unqualified RuntimeException inside its
+     * namespace, so delegating to it gave Error: Class "OpenSwoole\Core\Psr\RuntimeException"
+     * not found.
+     */
+    public function testStreamFromFileThrowsRuntimeExceptionWhenFileCannotBeOpened(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Unable to open file at "/nonexistent/zealphp_test_missing"');
+        (new StreamFactory())->createStreamFromFile('/nonexistent/zealphp_test_missing');
+    }
+
+    /**
+     * PSR-17: an invalid mode throws \InvalidArgumentException (same openswoole/core
+     * namespace bug as above), and the file is not opened.
+     */
+    public function testStreamFromFileThrowsInvalidArgumentExceptionForInvalidMode(): void
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'zealphp_test_');
+        try {
+            (new StreamFactory())->createStreamFromFile($tmp, 'z');
+            $this->fail('Expected \InvalidArgumentException');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertSame('Invalid file opening mode "z"', $e->getMessage());
+        } finally {
+            @unlink($tmp);
+        }
+    }
+
+    /**
+     * An empty mode is invalid too.
+     */
+    public function testStreamFromFileThrowsInvalidArgumentExceptionForEmptyMode(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid file opening mode ""');
+        (new StreamFactory())->createStreamFromFile(__FILE__, '');
+    }
+
+    public function testStreamFromFileWithWriteMode(): void
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'zealphp_test_');
+        try {
+            $stream = (new StreamFactory())->createStreamFromFile($tmp, 'w+');
+            $this->assertTrue($stream->isWritable());
+            $stream->write('written');
+            $stream->rewind();
+            $this->assertSame('written', $stream->getContents());
+            $stream->close();
+        } finally {
+            @unlink($tmp);
+        }
+    }
+
     public function testStreamFromResource(): void
     {
         $resource = fopen('php://memory', 'r+');
