@@ -55,6 +55,16 @@ class ValidatorTest extends TestCase
         yield 'alpha_num anchored end' => ['alpha_num', 'a1-', false];
         yield 'alpha_num unicode' => ['alpha_num', 'café٣', true];
         yield 'alpha_dash unicode' => ['alpha_dash', 'é-1_', true];
+        // Vowel signs, viramas and combining accents are marks (\p{M}), not letters.
+        yield 'alpha tamil' => ['alpha', 'தமிழ்', true];
+        yield 'alpha devanagari' => ['alpha', 'अनिल', true];
+        yield 'alpha decomposed accent' => ['alpha', "Jose\u{301}", true];
+        yield 'alpha_num tamil' => ['alpha_num', 'தமிழ்2', true];
+        yield 'alpha_num decomposed accent' => ['alpha_num', "e\u{301}1", true];
+        yield 'alpha_dash tamil' => ['alpha_dash', 'தமிழ்_1-a', true];
+        yield 'alpha_dash decomposed accent' => ['alpha_dash', "e\u{301}-1", true];
+        yield 'alpha mark with digit' => ['alpha', "த\u{BCD}1", false];
+        yield 'alpha mark with space' => ['alpha', "த\u{BCD} ம", false];
         yield 'alpha_num not string' => ['alpha_num', 5, false];
         yield 'url must start with scheme' => ['url', 'ftp://x.test/?u=https://y', false];
         yield 'url upper scheme' => ['url', 'HTTPS://x.test', true];
