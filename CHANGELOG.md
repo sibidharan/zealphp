@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 - **Stopping a server is quick and quiet.** Every worker with a recurring timer (worker 0 has one for session GC by default; also the dev route watcher, Cache and WSRouter sweeps, and any app `App::tick()`) waited out OpenSwoole's `max_wait_time`, 3 s, and was then killed with "worker exit timeout, forced termination". A worker that had logged printed "all coroutines (count: 1) are asleep - deadlock!": its async log writer waited on an empty queue for the worker's whole life. Now a stopping worker cancels its recurring timers (`workerExit` → `App::clearRecurringTimers()`); one-shot `App::after()` timers still fire. The log writer drains its queue and exits, and the next line queued starts a new one, so no coroutine is left waiting. If a writer can't be started (the worker is at `max_coroutine`), the line's caller writes the queue itself. Stopping the scaffold went from 3.1 s to 0.1 s. `GracefulShutdownTest` pins the stop time, both warnings, and that no request's log line is lost.
+- **Validator rules `alpha`, `alpha_num` and `alpha_dash` accept words with combining marks.** They allowed only Unicode letters (`\p{L}`), so vowel signs and viramas (Tamil `தமிழ்`, Hindi `अनिल`) and decomposed accents (`José` typed as `e` + U+0301, which macOS and iOS browsers often send) failed with "may only contain letters". Marks (`\p{M}`) are now allowed too, as in Laravel's rules (#560).
 
 ## [0.4.21] - 2026-11-10
 
